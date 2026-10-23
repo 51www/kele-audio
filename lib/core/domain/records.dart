@@ -10,6 +10,7 @@ class ShelfItem {
     this.lastPositionSec = 0,
     this.lastPlayedAt = 0,
     this.finishedChapters = 0,
+    this.totalChapters = 0,
   });
 
   final String albumId;
@@ -21,6 +22,9 @@ class ShelfItem {
   final int lastPlayedAt;
   final int finishedChapters;
 
+  /// 专辑总章节数（书架卡片「已听 12/86」的分母）
+  final int totalChapters;
+
   Map<String, dynamic> toJson() => {
         'album_id': albumId,
         'created_at': createdAt,
@@ -28,6 +32,7 @@ class ShelfItem {
         'last_position_sec': lastPositionSec,
         'last_played_at': lastPlayedAt,
         'finished_chapters': finishedChapters,
+        'total_chapters': totalChapters,
       };
 
   factory ShelfItem.fromJson(Map<String, dynamic> j) => ShelfItem(
@@ -37,6 +42,7 @@ class ShelfItem {
         lastPositionSec: (j['last_position_sec'] as num?)?.toInt() ?? 0,
         lastPlayedAt: (j['last_played_at'] as num?)?.toInt() ?? 0,
         finishedChapters: (j['finished_chapters'] as num?)?.toInt() ?? 0,
+        totalChapters: (j['total_chapters'] as num?)?.toInt() ?? 0,
       );
 }
 

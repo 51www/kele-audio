@@ -30,7 +30,7 @@ class AlbumDao {
       _db.albums.where((a) => a.categoryId == categoryId);
 
   List<Album> recent({int limit = 20}) {
-    final rows = _db.albums.all()
+    final rows = [..._db.albums.all()]
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return rows.take(limit).toList();
   }
@@ -93,11 +93,35 @@ class ShelfDao {
 
   bool has(String albumId) => _db.shelf.byId(albumId) != null;
 
+  /// 同步收听进度（专辑**在书架上**才写；M4 书架卡片的「已听 x/y」与
+  /// 「在听置顶区」都读这里）。不在书架时静默返回，不产生任何副作用。
+  Future<void> touch({
+    required String albumId,
+    required String chapterId,
+    required int positionSec,
+    required int totalChapters,
+  }) async {
+    await _db.ensureCreated();
+    final item = _db.shelf.byId(albumId);
+    if (item == null) return;
+    await _db.shelf.upsert(ShelfItem(
+      albumId: albumId,
+      createdAt: item.createdAt,
+      lastChapterId: chapterId,
+      lastPositionSec: positionSec,
+      lastPlayedAt: DateTime.now().millisecondsSinceEpoch,
+      finishedChapters: item.finishedChapters,
+      totalChapters: totalChapters > 0
+          ? totalChapters
+          : item.totalChapters,
+    ));
+  }
+
   int get count => _db.shelf.count;
 
   /// 默认按最近收听排序（PRD §5.3）。
   List<ShelfItem> list() {
-    final rows = _db.shelf.all()
+    final rows = [..._db.shelf.all()]
       ..sort((a, b) {
         final la = a.lastPlayedAt > 0 ? a.lastPlayedAt : a.createdAt;
         final lb = b.lastPlayedAt > 0 ? b.lastPlayedAt : b.createdAt;
@@ -129,7 +153,7 @@ class PlayHistoryDao {
   }
 
   List<PlayHistory> recent({int limit = 50}) {
-    final rows = _db.playHistory.all()
+    final rows = [..._db.playHistory.all()]
       ..sort((a, b) => b.playedAt.compareTo(a.playedAt));
     return rows.take(limit).toList();
   }

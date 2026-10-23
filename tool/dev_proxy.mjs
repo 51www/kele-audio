@@ -13,6 +13,7 @@
 // 仅用于本地开发预览，不参与 Android 打包（Android 端直连，不走反代）。
 
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -114,6 +115,77 @@ function pick(req, key, fallback) {
   return typeof v === 'string' && v.length > 0 ? v : fallback;
 }
 
+// ───────────────────────────────────────────────── /audio 音频反代（M2）
+//
+// Web 端浏览器禁止给 <video>/<audio> 设置 UA / Referer（「禁止头」），
+// 而 B 站 CDN 缺一即 403。media_kit Web 端把音源改写成
+//   /audio?u=<encoded>&ref=<encoded>&ua=<encoded>
+// 这里还原请求头后**流式转发**，并透传 Range（长音频边下边播 + 断点续传）。
+async function proxyAudio(req, res, url) {
+  let target;
+  try {
+    target = decodeURIComponent(url.searchParams.get('u') || '');
+  } catch {
+    target = '';
+  }
+  if (!/^https?:\/\//.test(target)) {
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('缺少或非法的 u 参数（应为完整音频 URL）');
+    return;
+  }
+
+  const referer = url.searchParams.get('ref') || 'https://www.bilibili.com';
+  const ua = url.searchParams.get('ua') || DEFAULT_UA;
+  const headers = {
+    'user-agent': ua,
+    referer,
+    origin: (() => {
+      try {
+        return new URL(referer).origin;
+      } catch {
+        return 'https://www.bilibili.com';
+      }
+    })(),
+    accept: '*/*',
+    'accept-encoding': 'identity', // 音频不压缩，且 Range 与 gzip 不兼容
+  };
+  // 关键：Range 透传（播放器拖动进度 / 长音频分段拉取都靠它）
+  if (req.headers.range) headers.range = req.headers.range;
+
+  const started = Date.now();
+  const upstream = httpsOrHttp(target, { method: 'GET', headers });
+  upstream.on('response', (up) => {
+    const out = {};
+    for (const [k, v] of Object.entries(up.headers)) {
+      if (!HOP_BY_HOP.has(k.toLowerCase())) out[k] = v;
+    }
+    out['access-control-allow-origin'] = '*'; // 本地预览放开
+    out['x-kele-via'] = `dev_proxy/audio ${Date.now() - started}ms`;
+    res.writeHead(up.statusCode || 502, out);
+    up.pipe(res); // 流式：不把整段音频缓冲进内存
+    console.log(
+      `[audio] ${up.statusCode} ${new URL(target).pathname} ` +
+        `range=${req.headers.range ?? '-'} (${Date.now() - started}ms)`,
+    );
+  });
+  upstream.on('error', (err) => {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+    }
+    res.end(`dev_proxy/audio: ${err.message}`);
+    console.error(`[audio] FAIL ${target}: ${err.message}`);
+  });
+  upstream.end();
+}
+
+function httpsOrHttp(target, options) {
+  // 用 node:http / node:https 的底层 request 保持流式与 Range 语义，
+  // 不用 fetch（fetch 会缓冲整段 body）。
+  return target.startsWith('https:')
+    ? https.request(target, options)
+    : http.request(target, options);
+}
+
 function serveStatic(req, res, url) {
   if (!fs.existsSync(WEB_ROOT)) {
     res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
@@ -151,6 +223,8 @@ http
     const url = new URL(req.url, `http://localhost:${PORT}`);
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       void proxyApi(req, res, url);
+    } else if (url.pathname === '/audio') {
+      void proxyAudio(req, res, url);
     } else if (url.pathname === '/__health') {
       res.writeHead(200, { 'content-type': 'text/plain' }).end('ok');
     } else {
@@ -161,4 +235,5 @@ http
     console.log(`kele-audio web preview → http://localhost:${PORT}`);
     console.log(`  static: ${WEB_ROOT}`);
     console.log(`  api   : ${API_BASE}  (via /api/*)`);
+    console.log('  audio : /audio?u=<url>&ref=<referer>&ua=<ua>  (M2 音频反代)');
   });

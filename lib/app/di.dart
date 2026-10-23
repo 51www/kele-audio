@@ -2,12 +2,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../core/api/api_config.dart';
+import '../core/api/album_source.dart';
 import '../core/api/bili_client.dart';
 import '../core/api/key_value_store.dart';
+import '../core/api/play_url_service.dart';
 import '../core/api/prefs_kv_store.dart';
 import '../core/data/daos.dart';
 import '../core/data/local_database.dart';
 import '../core/services/mini_player_controller.dart';
+import '../core/services/player/media_bridge.dart';
+import '../core/services/player/player_service.dart';
+import '../core/services/player/progress_store.dart';
 import 'theme/theme_controller.dart';
 
 /// 应用级服务集合（DI）：一次性启动装配，页面用 `context.read` 取用。
@@ -20,6 +25,11 @@ class AppServices {
     required this.daos,
     required this.theme,
     required this.miniPlayer,
+    required this.playUrl,
+    required this.albums,
+    required this.progress,
+    required this.prefs,
+    required this.player,
   });
 
   final KeyValueStore kv;
@@ -30,11 +40,32 @@ class AppServices {
   final ThemeController theme;
   final MiniPlayerController miniPlayer;
 
+  /// 播放地址服务（DASH 取址 + 内存缓存，**地址不落库**）
+  final PlayUrlService playUrl;
+
+  /// 章节来源（多 P / 合集系列）
+  final AlbumSource albums;
+
+  /// 播放进度持久化（P-03 / P-04）
+  final ProgressStore progress;
+
+  /// 播放参数持久化（P-08：倍速 / 音质 / 模式）
+  final PlayerPrefs prefs;
+
+  /// 播放核心（M2）：专辑 → 章节 → 取址 → 播放 → 落进度
+  final PlayerService player;
+
   /// 启动装配：**不发任何网络请求**（PRD 冷启动 ≤ 3s）。
   ///
   /// 顺序：本地 KV → 接口配置（内置 JSON，R1 远端覆盖失败静默）→
-  /// Dio 本地初始化 → 建表 → 主题读取。
-  static Future<AppServices> bootstrap({bool? isWeb}) async {
+  /// Dio 本地初始化 → 建表 → 主题读取 → 播放核心装配（零引擎、零网络）。
+  ///
+  /// [mediaBridge] 由 `main.dart` 在移动端注入（audio_service）；
+  /// Web / 初始化失败时为 [NoopMediaBridge]，播放照常。
+  static Future<AppServices> bootstrap({
+    bool? isWeb,
+    MediaSessionBridge? mediaBridge,
+  }) async {
     final web = isWeb ?? kIsWeb;
     final kv = await PrefsKeyValueStore.open();
 
@@ -55,14 +86,39 @@ class AppServices {
     final theme = ThemeController(kv);
     await theme.load();
 
+    final daos = Daos(db);
+    final playUrl = PlayUrlService(client: client, config: config, log: _log);
+    final albums = AlbumSource(client: client, config: config, log: _log);
+    final progress = ProgressStore(daos);
+    final prefs = PlayerPrefs(kv);
+    final miniPlayer = MiniPlayerController();
+    final player = PlayerService(
+      playUrl: playUrl,
+      albumSource: albums,
+      daos: daos,
+      store: progress,
+      prefs: prefs,
+      miniPlayer: miniPlayer,
+      saveInterval: const Duration(seconds: 15),
+      media: mediaBridge ?? NoopMediaBridge(),
+      log: _log,
+    );
+    // 零网络、零引擎：只挂生命周期/焦点/系统桥 + 读持久化参数
+    await player.init();
+
     return AppServices._(
       kv: kv,
       config: config,
       client: client,
       db: db,
-      daos: Daos(db),
+      daos: daos,
       theme: theme,
-      miniPlayer: MiniPlayerController(),
+      miniPlayer: miniPlayer,
+      playUrl: playUrl,
+      albums: albums,
+      progress: progress,
+      prefs: prefs,
+      player: player,
     );
   }
 
@@ -70,6 +126,11 @@ class AppServices {
   void warmupInBackground() {
     client.warmupIfNeeded().catchError((Object e) {
       _log('warmup error: $e');
+    });
+    // 同时装载上次的收听会话（**不自动发声**），让 MiniPlayer 一进来就有内容
+    player.restoreLastSession().catchError((Object e) {
+      _log('restore session error: $e');
+      return false;
     });
   }
 

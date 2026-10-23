@@ -27,6 +27,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
 
     final services = await AppServices.bootstrap(isWeb: false);
+    addTearDown(services.player.dispose); // M2：测试结束释放 watchdog Timer/观察者
     await tester.pumpWidget(KeleApp(services: services));
     await tester.pumpAndSettle();
 
@@ -36,7 +37,8 @@ void main() {
     expect(find.text('按类型找内容'), findsOneWidget);
     expect(find.text('未在播放'), findsOneWidget); // MiniPlayer 占位
 
-    // 分类切换（状态保留在页面里）
+    // 分类切换（状态保留在页面里）——M2 顶部新增播放样本卡，chips 需先滚入视口
+    await scrollTo(tester, find.text('相声曲艺'));
     await tester.tap(find.text('相声曲艺'));
     await tester.pumpAndSettle();
     expect(find.text('单田芳评书合集 · 白眉大侠'), findsOneWidget);

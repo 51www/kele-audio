@@ -1,0 +1,501 @@
+import 'dart:async';
+
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:kele_audio/core/api/album_source.dart';
+import 'package:kele_audio/core/api/api_config.dart';
+import 'package:kele_audio/core/api/bili_client.dart';
+import 'package:kele_audio/core/api/key_value_store.dart';
+import 'package:kele_audio/core/api/play_url_service.dart';
+import 'package:kele_audio/core/data/daos.dart';
+import 'package:kele_audio/core/data/local_database.dart';
+import 'package:kele_audio/core/domain/album.dart';
+import 'package:kele_audio/core/domain/playback.dart';
+import 'package:kele_audio/core/services/mini_player_controller.dart';
+import 'package:kele_audio/core/services/player/audio_focus.dart';
+import 'package:kele_audio/core/services/player/media_bridge.dart';
+import 'package:kele_audio/core/services/player/player_engine.dart';
+import 'package:kele_audio/core/services/player/player_service.dart';
+import 'package:kele_audio/core/services/player/progress_store.dart';
+
+/// M2 播放核心单测：注入假内核（不创建 media_kit）、假取址、假章节源，
+/// 覆盖 PRD §5.4 的 P-03 / P-04 / P-05 / P-08 与连播、循环、上一章习惯。
+
+// ───────────────────────────────────────────────────────────── 假内核
+
+class FakeEngine implements PlayerEngine {
+  final positionC = StreamController<Duration>.broadcast();
+  final durationC = StreamController<Duration>.broadcast();
+  final playingC = StreamController<bool>.broadcast();
+  final bufferingC = StreamController<bool>.broadcast();
+  final completedC = StreamController<void>.broadcast();
+  final errorsC = StreamController<String>.broadcast();
+
+  /// open 时命中的 URL 会抛错（模拟 403 播不了）
+  String? brokenPattern;
+
+  final List<({String url, Duration startAt, bool autoplay})> opens = [];
+  final List<Duration> seeks = [];
+  double appliedRate = 1.0;
+  bool _disposed = false;
+
+  @override
+  Stream<Duration> get position => positionC.stream;
+
+  @override
+  Stream<Duration> get duration => durationC.stream;
+
+  @override
+  Stream<bool> get playing => playingC.stream;
+
+  @override
+  Stream<bool> get buffering => bufferingC.stream;
+
+  @override
+  Stream<void> get completed => completedC.stream;
+
+  @override
+  Stream<String> get errors => errorsC.stream;
+
+  @override
+  Duration get positionValue => Duration.zero;
+
+  @override
+  Duration get durationValue => Duration.zero;
+
+  @override
+  bool get isPlaying => false;
+
+  @override
+  double get rate => appliedRate;
+
+  @override
+  double get volume => 1.0;
+
+  @override
+  Future<void> open({
+    required String url,
+    Map<String, String>? headers,
+    bool autoplay = true,
+    Duration startAt = Duration.zero,
+  }) async {
+    final pattern = brokenPattern;
+    if (pattern != null && url.contains(pattern)) {
+      // 真实 media_kit：坏地址多数不抛错，而是走 errors 流；
+      // 两种路径都模拟，PlayerService 都应自愈。
+      errorsC.add('HTTP 403 (CDN refused)');
+      throw StateError('打开失败：$url');
+    }
+    opens.add((url: url, startAt: startAt, autoplay: autoplay));
+  }
+
+  @override
+  Future<void> play() async => playingC.add(true);
+
+  @override
+  Future<void> pause() async => playingC.add(false);
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  Future<void> seek(Duration to) async => seeks.add(to);
+
+  @override
+  Future<void> setRate(double v) async => appliedRate = v;
+
+  @override
+  Future<void> setVolume(double v) async {}
+
+  @override
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    await positionC.close();
+    await durationC.close();
+    await playingC.close();
+    await bufferingC.close();
+    await completedC.close();
+    await errorsC.close();
+  }
+}
+
+// ─────────────────────────────────────────────────────── 假取址 / 章节源
+
+class FakePlayUrl extends PlayUrlService {
+  FakePlayUrl()
+        : super(
+          client: BiliClient(
+            config: ApiConfig.defaults(),
+            kv: MemoryKeyValueStore(),
+          ),
+          config: ApiConfig.defaults(),
+        );
+
+  final List<({String bvid, int cid, bool forceRefresh})> calls = [];
+
+  /// 当前可返回的候选地址
+  List<String> urls = ['https://cdn.example/ok-a.m4s'];
+
+  @override
+  Future<List<String>> resolve({
+    required String bvid,
+    required int cid,
+    AudioQuality quality = AudioQuality.q132k,
+    bool forceRefresh = false,
+  }) async {
+    calls.add((bvid: bvid, cid: cid, forceRefresh: forceRefresh));
+    return urls;
+  }
+
+  @override
+  Map<String, String> headersFor(String bvid) => {'User-Agent': 'fake'};
+
+  @override
+  void invalidate(String bvid, int cid) {
+    calls.add((bvid: bvid, cid: cid, forceRefresh: true)); // 标记作废
+  }
+}
+
+class FakeAlbumSource extends AlbumSource {
+  FakeAlbumSource()
+        : super(
+          client: BiliClient(
+            config: ApiConfig.defaults(),
+            kv: MemoryKeyValueStore(),
+          ),
+          config: ApiConfig.defaults(),
+        );
+}
+
+// ─────────────────────────────────────────────────────────── 测试环境
+
+/// 一套完整的假环境；[restart] 用同一个 kv 模拟「杀进程重开」。
+class Harness {
+  Harness(this.kv);
+
+  final KeyValueStore kv;
+  late final LocalDatabase db = LocalDatabase(kv);
+  late final Daos daos = Daos(db);
+  final FakePlayUrl playUrl = FakePlayUrl();
+  final FakeAlbumSource albums = FakeAlbumSource();
+  final MiniPlayerController mini = MiniPlayerController();
+  FakeEngine? _engine;
+  PlayerService? _player;
+
+  FakeEngine get engine => _engine!;
+  PlayerService get player => _player!;
+
+  Future<PlayerService> start() async {
+    await db.ensureCreated();
+    _engine = FakeEngine();
+    final p = PlayerService(
+      playUrl: playUrl,
+      albumSource: albums,
+      daos: daos,
+      store: ProgressStore(daos),
+      prefs: PlayerPrefs(kv),
+      miniPlayer: mini,
+      saveInterval: const Duration(seconds: 15),
+      focus: AudioFocus(),
+      media: NoopMediaBridge(),
+      engineFactory: () => _engine!,
+    );
+    await p.init();
+    _player = p;
+    return p;
+  }
+
+  /// 同一份本地数据 + 全新引擎/服务 = 冷启动（旧实例先销毁）
+  Future<PlayerService> restart() async {
+    _player?.dispose();
+    _player = null;
+    return start();
+  }
+
+  Future<void> dispose() async {
+    _player?.dispose();
+    _player = null;
+  }
+}
+
+Album makeAlbum() => Album(
+      id: 'BV1TEST',
+      sourceType: SourceType.multiPart,
+      title: '测试专辑',
+      coverUrl: '',
+      upName: '测试UP',
+      chapterCount: 3,
+      categoryId: 'rec',
+      bvid: 'BV1TEST',
+      createdAt: 1,
+    );
+
+List<Chapter> makeChapters() => [
+      for (var i = 1; i <= 3; i++)
+        Chapter(
+          id: Chapter.keyOf('BV1TEST', 100 + i),
+          albumId: 'BV1TEST',
+          index: i - 1,
+          title: '第$i章',
+          durationSec: 100,
+          bvid: 'BV1TEST',
+          cid: 100 + i,
+        ),
+    ];
+
+Harness makeHarness() => Harness(MemoryKeyValueStore());
+
+/// 等待事件流与异步编排跑完（假内核的流是异步广播）
+Future<void> settle([int rounds = 3]) async {
+  for (var i = 0; i < rounds; i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('P-03 断点续播：flush 后冷启动恢复「专辑 + 章节 + 秒级进度」', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    expect(await p.playAlbum(makeAlbum(), chapters: chapters), isTrue);
+    // 引擎上报进度到 42s
+    h.engine.durationC.add(const Duration(seconds: 100));
+    h.engine.positionC.add(const Duration(seconds: 42));
+    await settle();
+    await p.flushProgress();
+
+    // 落库检查：play_history 秒级进度
+    final saved = h.daos.playHistory.recent(limit: 1).first;
+    expect(saved.positionSec, 42);
+    expect(saved.chapterId, chapters.first.id);
+
+    // 杀进程重开：恢复会话但**不自动发声**
+    final p2 = await h.restart();
+    expect(await p2.restoreLastSession(), isTrue);
+    expect(p2.hasSession, isTrue);
+    expect(p2.index, 0);
+    expect(p2.position, const Duration(seconds: 42));
+    expect(p2.playing, isFalse);
+    expect(p2.mediaReady, isFalse);
+
+    // MiniPlayer 收到了恢复后的会话
+    expect(h.mini.state.hasTask, isTrue);
+    expect(h.mini.state.albumTitle, '测试专辑');
+
+    await h.dispose();
+  });
+
+  test('P-04 跨章续播：重进专辑定位到最后听的章节与进度', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    await p.playChapterAt(1); // 切到第 2 章
+    h.engine.durationC.add(const Duration(seconds: 100));
+    h.engine.positionC.add(const Duration(seconds: 30));
+    await settle();
+    await p.flushProgress();
+    await h.dispose();
+
+    final p2 = await h.restart();
+    await p2.playAlbum(makeAlbum()); // 不指定章节 → 应定位到第 2 章
+    await settle();
+    expect(p2.index, 1);
+    expect(p2.currentChapter?.title, '第2章');
+    // 续播位置：换源瞬间以 startAt 为准
+    expect(h.engine.opens.last.startAt, const Duration(seconds: 30));
+
+    await h.dispose();
+  });
+
+  test('P-08 倍速/音质/播放模式持久化：重启后保留', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    // 先播起来（引擎懒加载：播放时才创建）
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    await p.setRate(1.5);
+    await p.setQuality(AudioQuality.q192k);
+    await p.setMode(PlayMode.loopAll);
+    expect(h.engine.rate, 1.5); // 引擎同步生效
+    await h.dispose();
+
+    final p2 = await h.restart();
+    expect(p2.rate, 1.5);
+    expect(p2.quality, AudioQuality.q192k);
+    expect(p2.mode, PlayMode.loopAll);
+    expect(p2.rateLabel, '1.5x');
+    await h.dispose();
+  });
+
+  test('P-05 地址失效自愈：报错后重取地址并回到原进度续播', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    h.engine.durationC.add(const Duration(seconds: 100));
+    h.engine.positionC.add(const Duration(seconds: 42));
+    await settle();
+
+    // 模拟地址过期：内存地址作废 + 当前音源立即失效（403）
+    h.playUrl.urls = ['https://cdn.example/ok-b.m4s'];
+    h.engine.brokenPattern = 'expired';
+    await p.debugExpireCurrentUrl();
+    await settle(5);
+
+    // 自愈链路：重取地址（forceRefresh）→ 打开新地址 → 回到 42s
+    final resolveCalls = h.playUrl.calls.where((c) => c.forceRefresh).toList();
+    expect(resolveCalls, isNotEmpty);
+    final lastOpen = h.engine.opens.last;
+    expect(lastOpen.url, 'https://cdn.example/ok-b.m4s');
+    expect(lastOpen.startAt, const Duration(seconds: 42));
+    expect(p.error, isNull);
+    expect(p.recovering, isFalse);
+
+    await h.dispose();
+  });
+
+  test('分 P 连播：一章播完自动开下一章', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    h.engine.durationC.add(const Duration(seconds: 100));
+    h.engine.positionC.add(const Duration(seconds: 98));
+    await settle();
+
+    h.engine.completedC.add(null); // 自然播完
+    await settle(5);
+
+    expect(p.index, 1);
+    expect(p.currentChapter?.title, '第2章');
+    expect(h.engine.opens.length, 2);
+
+    await h.dispose();
+  });
+
+  test('列表循环：最后一章回到第一章；顺序播放则停下', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await p.playAlbum(makeAlbum(), chapters: chapters, startIndex: 2);
+    await p.setMode(PlayMode.loopAll);
+    h.engine.durationC.add(const Duration(seconds: 100));
+    h.engine.positionC.add(const Duration(seconds: 98));
+    await settle();
+
+    h.engine.completedC.add(null);
+    await settle(5);
+    expect(p.index, 0); // 回到第一章
+    await h.dispose();
+
+    // 顺序播放：最后一章播完 → 暂停，不再开新章
+    final h2 = makeHarness();
+    final p2 = await h2.start();
+    await p2.playAlbum(makeAlbum(), chapters: chapters, startIndex: 2);
+    h2.engine.durationC.add(const Duration(seconds: 100));
+    h2.engine.positionC.add(const Duration(seconds: 98));
+    await settle();
+    final opensBefore = h2.engine.opens.length;
+    h2.engine.completedC.add(null);
+    await settle(5);
+    expect(h2.engine.opens.length, opensBefore); // 没有开新章
+    expect(p2.playing, isFalse);
+    await h2.dispose();
+  });
+
+  test('上一章习惯：播放超 5s 重播本章，否则回上一章', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    h.engine.durationC.add(const Duration(seconds: 100));
+    h.engine.positionC.add(const Duration(seconds: 42)); // > 5s
+    await settle();
+
+    await p.previous();
+    expect(h.engine.seeks, contains(Duration.zero));
+    expect(p.index, 0); // 仍本章
+
+    await p.playChapterAt(2);
+    h.engine.positionC.add(const Duration(seconds: 3)); // < 5s
+    await settle();
+    await p.previous();
+    await settle();
+    expect(p.index, 1); // 回上一章
+
+    await h.dispose();
+  });
+
+  test('音质切换：持久化 + 重新取址 + 回原进度续播', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    h.engine.durationC.add(const Duration(seconds: 100));
+    h.engine.positionC.add(const Duration(seconds: 21));
+    await settle();
+
+    await p.setQuality(AudioQuality.q64k);
+    await settle(5);
+
+    expect(p.quality, AudioQuality.q64k);
+    final forced = h.playUrl.calls.where((c) => c.forceRefresh).toList();
+    expect(forced, isNotEmpty);
+    expect(h.engine.opens.last.startAt, const Duration(seconds: 21));
+
+    await h.dispose();
+  });
+
+  test('睡眠定时：本章结束开关持久化，取消后复位', () async {
+    final h = makeHarness();
+    final p = await h.start();
+
+    await p.setSleepTimer(minutes: 0); // 本章结束
+    expect(p.stopAtChapterEnd, isTrue);
+
+    await p.setSleepTimer(minutes: 15);
+    expect(p.hasSleepTimer, isTrue);
+    expect(p.stopAtChapterEnd, isFalse);
+
+    await p.cancelSleepTimer();
+    expect(p.hasSleepTimer, isFalse);
+
+    await h.dispose();
+
+    final p2 = await h.restart();
+    expect(p2.stopAtChapterEnd, isFalse); // 关闭状态也持久化
+    await h.dispose();
+  });
+
+  test('书架联动：播放进度同步到已收藏专辑的收听字段', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await h.daos.shelf.add('BV1TEST'); // 先收藏
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    h.engine.durationC.add(const Duration(seconds: 100));
+    h.engine.positionC.add(const Duration(seconds: 42));
+    await settle();
+    await p.flushProgress();
+
+    final item = h.daos.shelf.list().first;
+    expect(item.lastChapterId, chapters.first.id);
+    expect(item.lastPositionSec, 42);
+    expect(item.totalChapters, 3);
+
+    await h.dispose();
+  });
+}

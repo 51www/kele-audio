@@ -4,10 +4,12 @@ import 'package:provider/provider.dart';
 
 import '../../app/theme/app_tokens.dart';
 import '../../core/services/mini_player_controller.dart';
+import '../../core/services/player/player_service.dart';
 
 /// 全局播放条（PRD §4.1）：悬浮在 Bottom Navigation 之上，点击展开播放页。
 ///
-/// M1 占位态：无播放任务时展示「未在播放」，点击仍可进入 `/player` 占位页。
+/// M2 起接 [PlayerService] 真实状态：封面、专辑/章节、播放/暂停、进度。
+/// 状态由 `MiniPlayerController`（PlayerService 推送）驱动，进度条按秒节流。
 class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key});
 
@@ -16,6 +18,7 @@ class MiniPlayer extends StatelessWidget {
     final tokens = AppTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
     final state = context.watch<MiniPlayerController>().state;
+    final player = context.read<PlayerService>();
 
     // 反相胶囊：浅色主题下是深棕胶囊，深色主题下是暖白胶囊——
     // 颜色全部来自 ColorScheme，天然适配儿童模式（M6 换主题即可）。
@@ -39,7 +42,7 @@ class MiniPlayer extends StatelessWidget {
             height: 56,
             child: Stack(
               children: [
-                // 进度（M1 恒为 0，M2 由播放进度驱动）
+                // 进度（播放中每秒刷新）
                 Positioned(
                   left: 0,
                   right: 0,
@@ -57,22 +60,24 @@ class MiniPlayer extends StatelessWidget {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 7, 8, 7),
+                  padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
                   child: Row(
                     children: [
-                      // 封面占位
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: fg.withValues(alpha: 0.14),
-                          borderRadius:
-                              BorderRadius.circular(tokens.radiusSm + 2),
-                        ),
-                        child: Icon(
-                          Icons.headphones_rounded,
-                          size: 20,
-                          color: fg,
+                      // 封面：有真实封面用图片，否则耳机占位
+                      ClipRRect(
+                        borderRadius:
+                            BorderRadius.circular(tokens.radiusSm + 2),
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: state.coverUrl.isEmpty
+                              ? _placeholderCover(fg)
+                              : Image.network(
+                                  state.coverUrl,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) =>
+                                      _placeholderCover(fg),
+                                ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -94,7 +99,9 @@ class MiniPlayer extends StatelessWidget {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              state.hasTask ? state.chapterTitle : '播放核心将在 M2 接入',
+                              state.hasTask
+                                  ? state.chapterTitle
+                                  : '去发现页挑一张专辑开始收听',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: tokens.captionStyle.copyWith(
@@ -105,12 +112,18 @@ class MiniPlayer extends StatelessWidget {
                           ],
                         ),
                       ),
-                      Icon(
-                        state.playing
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
-                        color: scheme.primary,
-                        size: 30,
+                      IconButton(
+                        tooltip: state.playing ? '暂停' : '播放',
+                        onPressed: state.hasTask ? player.toggle : null,
+                        icon: Icon(
+                          state.playing
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          color: state.hasTask
+                              ? scheme.primary
+                              : fg.withValues(alpha: 0.4),
+                          size: 30,
+                        ),
                       ),
                     ],
                   ),
@@ -122,4 +135,11 @@ class MiniPlayer extends StatelessWidget {
       ),
     );
   }
+
+  Widget _placeholderCover(Color fg) => Container(
+        width: 40,
+        height: 40,
+        color: fg.withValues(alpha: 0.14),
+        child: Icon(Icons.headphones_rounded, size: 20, color: fg),
+      );
 }

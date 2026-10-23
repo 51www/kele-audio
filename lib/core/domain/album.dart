@@ -140,4 +140,16 @@ class Chapter {
       );
 
   static String keyOf(String albumId, int cid) => '$albumId:$cid';
+
+  /// 补齐 cid（合集/系列章节首次解析成功后回写）
+  Chapter copyWith({int? cid, int? index, String? title, int? durationSec}) =>
+      Chapter(
+        id: id,
+        albumId: albumId,
+        index: index ?? this.index,
+        title: title ?? this.title,
+        durationSec: durationSec ?? this.durationSec,
+        bvid: bvid,
+        cid: cid ?? this.cid,
+      );
 }

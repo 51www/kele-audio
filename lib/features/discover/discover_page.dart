@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/di.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../app/widgets/common.dart';
 import '../../core/api/api_config.dart';
 import '../../core/api/bili_client.dart';
+import '../../core/api/album_source.dart';
 import 'discover_seed.dart';
 
 /// Tab 1 发现页（PRD §5.1）。
@@ -45,6 +47,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
           padding: EdgeInsets.fromLTRB(0, 0, 0, tokens.spaceLg),
           children: [
             _buildHeader(context, tokens, scheme),
+            const _M2SampleCard(),
             const _ApiProbeCard(),
             Padding(
               padding: EdgeInsets.fromLTRB(
@@ -302,6 +305,118 @@ class _AlbumCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────── M2 播放样本（真实数据）
+
+/// M2 播放样本卡：搜一个真实的多 P 有声专辑，落到本地缓存后进详情页。
+///
+/// M3 接内容源前，这是「发现 → 详情 → 播放」主链路的唯一真实入口。
+class _M2SampleCard extends StatefulWidget {
+  const _M2SampleCard();
+
+  @override
+  State<_M2SampleCard> createState() => _M2SampleCardState();
+}
+
+class _M2SampleCardState extends State<_M2SampleCard> {
+  bool _loading = false;
+  String? _error;
+
+  Future<void> _open() async {
+    final source = context.read<AlbumSource>();
+    final daos = context.read<AppServices>().daos;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final bundle = await source.pickSample();
+      await daos.albums.upsert(bundle.album);
+      await daos.chapters.upsertAll(bundle.chapters);
+      if (!mounted) return;
+      setState(() => _loading = false);
+      context.push('/album/${bundle.album.id}');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '$e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        tokens.spaceMd,
+        tokens.spaceMd,
+        tokens.spaceMd,
+        0,
+      ),
+      child: KeleCard(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            scheme.primary.withValues(alpha: 0.12),
+            scheme.secondary.withValues(alpha: 0.10),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.graphic_eq_rounded, size: 18, color: scheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('M2 播放样本 · 真实专辑',
+                      style: tokens.sectionStyle),
+                ),
+                const StageTag('M2 播放核心', tone: StageTone.accent),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '从 B 站取一张真实的多 P 有声专辑（约 2~5 章），'
+              '验证「取址 → 播放 → 断点续播 → 跨章 → 自愈」全链路。',
+              style: tokens.captionStyle,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                FilledButton.icon(
+                  onPressed: _loading ? null : _open,
+                  icon: _loading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.play_arrow_rounded, size: 18),
+                  label: Text(_loading ? '取样中…' : '打开样本专辑'),
+                ),
+              ],
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                '取样失败：$_error',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: tokens.captionStyle.copyWith(color: scheme.error),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
