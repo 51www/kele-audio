@@ -1,0 +1,11 @@
+{
+  "run_at": "2026-10-23T16:24:41.297639",
+  "s3_validity": {
+    "status": "recorded",
+    "obtained_at": "2026-10-23T16:09:58.955",
+    "expires_at": "2026-10-23T18:09:59.000",
+    "validity_minutes_by_deadline": 120,
+    "plan": "dart run tool/spike/m0_probe.dart --check（1h/2h/4h/8h 各跑一次）",
+    "assumption": "abts 实测取 90 分钟（docs/reference-abts.md R5）；本次地址 deadline 字段给出 ≈ 120 分钟"
+  }
+}
