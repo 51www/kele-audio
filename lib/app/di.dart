@@ -16,6 +16,7 @@ import '../core/services/mini_player_controller.dart';
 import '../core/services/player/media_bridge.dart';
 import '../core/services/player/player_service.dart';
 import '../core/services/player/progress_store.dart';
+import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
 import 'theme/theme_controller.dart';
 
@@ -38,6 +39,7 @@ class AppServices {
     required this.prefs,
     required this.player,
     required this.shelf,
+    required this.settings,
   });
 
   final KeyValueStore kv;
@@ -74,6 +76,9 @@ class AppServices {
 
   /// 书架（M4）：收藏状态的单一事实源 + shelf×album×play_history 联合查询
   final ShelfController shelf;
+
+  /// 设置页持久化（M5）：仅 Wi-Fi 下载占位开关等
+  final SettingsStore settings;
 
   /// 启动装配：**不发任何网络请求**（PRD 冷启动 ≤ 3s）。
   ///
@@ -128,6 +133,7 @@ class AppServices {
     final discoverCache = DiscoverPageCache(kv);
     final progress = ProgressStore(daos);
     final prefs = PlayerPrefs(kv);
+    final settings = SettingsStore(kv);
     final miniPlayer = MiniPlayerController();
     final player = PlayerService(
       playUrl: playUrl,
@@ -161,6 +167,7 @@ class AppServices {
       prefs: prefs,
       player: player,
       shelf: shelf,
+      settings: settings,
     );
   }
 

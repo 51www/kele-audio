@@ -6,7 +6,10 @@ import '../../app/theme/app_tokens.dart';
 import '../../app/theme/theme_controller.dart';
 import '../../app/widgets/common.dart';
 import '../../core/api/api_config.dart';
+import '../../core/data/daos.dart';
 import '../../core/data/local_database.dart';
+import '../../core/services/listen_stats.dart';
+import '../../core/services/player/player_service.dart';
 
 /// 与 pubspec.yaml 的 version 保持一致（M5 设置页/关于页共用）。
 const String appVersion = '1.0.0';
@@ -25,6 +28,10 @@ class ProfilePage extends StatelessWidget {
     final theme = context.watch<ThemeController>();
     final config = context.read<ApiConfig>();
     final db = context.read<LocalDatabase>();
+    // watch PlayerService：播放落进度（_saveNow→play_log）后摘要自动刷新
+    context.watch<PlayerService>();
+    final daos = context.read<Daos>();
+    final stats = ListenStats.fromEntries(daos.playLogs.all());
 
     return SafeArea(
       bottom: false,
@@ -36,15 +43,15 @@ class ProfilePage extends StatelessWidget {
             subtitle: '未登录 · 收藏与进度只存这台设备',
           ),
 
-          // ── 收听摘要（M5/M8 补齐） ────────────────────────────────
+          // ── 收听摘要（M5：play_log 聚合；完整统计 M8） ──────────────
           Padding(
             padding: EdgeInsets.symmetric(horizontal: tokens.spaceMd),
             child: Row(
               children: [
-                for (final (i, stat) in const [
-                  ('今日收听', '0 分钟'),
-                  ('本周收听', '0 分钟'),
-                  ('累计听完', '0 本'),
+                for (final (i, stat) in [
+                  ('今日收听', ListenStats.formatDuration(stats.todaySec)),
+                  ('本周收听', ListenStats.formatDuration(stats.weekSec)),
+                  ('累计收听', ListenStats.formatDuration(stats.totalSec)),
                 ].indexed) ...[
                   if (i > 0) SizedBox(width: tokens.spaceSm),
                   Expanded(
@@ -65,7 +72,7 @@ class ProfilePage extends StatelessWidget {
                             children: [
                               Text(stat.$1, style: tokens.captionStyle),
                               const SizedBox(width: 6),
-                              const StageTag('M8'),
+                              if (i == 2) const StageTag('M8 统计'),
                             ],
                           ),
                         ],
@@ -87,7 +94,7 @@ class ProfilePage extends StatelessWidget {
                   _EntryTile(
                     icon: Icons.history_rounded,
                     label: '历史收听',
-                    stage: 'M5',
+                    stage: '',
                     onTap: () => context.push('/profile/history'),
                   ),
                   _divider(tokens),
@@ -108,7 +115,7 @@ class ProfilePage extends StatelessWidget {
                   _EntryTile(
                     icon: Icons.settings_outlined,
                     label: '设置',
-                    stage: 'M5',
+                    stage: '',
                     onTap: () => context.push('/profile/settings'),
                   ),
                   _divider(tokens),

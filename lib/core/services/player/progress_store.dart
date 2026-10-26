@@ -91,6 +91,9 @@ class PlayerPrefs {
   static const String keyQuality = 'player_quality';
   static const String keyStopAtChapterEnd = 'player_stop_at_chapter_end';
 
+  /// M5 设置页「后台自动播放下一章」（PRD §5.6.4）；默认开（连播是听书主场景）。
+  static const String keyAutoNext = 'player_auto_next';
+
   final KeyValueStore _kv;
 
   /// 倍速（0.5~3.0）；缺省 1.0（PRD 开放问题 Q3 采纳：**持久化倍速**）
@@ -115,4 +118,10 @@ class PlayerPrefs {
 
   Future<void> saveStopAtChapterEnd(bool v) =>
       _kv.setString(keyStopAtChapterEnd, v ? '1' : '0');
+
+  /// 「后台自动播放下一章」：关闭后本章播完即停（PRD §5.6.4 设置项）。
+  /// 缺省开启：老数据无此 key 时保持连播行为不变。
+  bool get autoNext => _kv.getString(keyAutoNext) != '0';
+
+  Future<void> saveAutoNext(bool v) => _kv.setString(keyAutoNext, v ? '1' : '0');
 }
