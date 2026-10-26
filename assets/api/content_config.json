@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "remote_config_url": "",
+  "cache_ttl_minutes": 30,
+  "categories": [
+    {
+      "category_id": "rec",
+      "name": "推荐",
+      "mode": "adult",
+      "filter": "audio",
+      "min_duration_sec": 300,
+      "queries": [
+        { "source": "up", "up_mids": [19566500] },
+        { "source": "search", "keyword": "有声小说 全集", "order": "click", "scope": "video" }
+      ],
+      "blacklist_up_mids": []
+    },
+    {
+      "category_id": "xiaoshuo",
+      "name": "有声书",
+      "mode": "adult",
+      "filter": "audio",
+      "min_duration_sec": 300,
+      "queries": [
+        { "source": "series", "series_ids": ["season:1683170"] },
+        { "source": "search", "keyword": "有声小说", "order": "click", "scope": "video" },
+        { "source": "search", "keyword": "有声书 全集", "scope": "video" }
+      ],
+      "blacklist_up_mids": []
+    },
+    {
+      "category_id": "xiangsheng",
+      "name": "相声曲艺",
+      "mode": "adult",
+      "filter": "audio",
+      "min_duration_sec": 300,
+      "queries": [
+        { "source": "search", "keyword": "相声", "order": "click", "scope": "video" },
+        { "source": "search", "keyword": "评书", "scope": "video" }
+      ],
+      "blacklist_up_mids": []
+    },
+    {
+      "category_id": "jiangshu",
+      "name": "讲书",
+      "mode": "adult",
+      "filter": "plain",
+      "min_duration_sec": 300,
+      "queries": [
+        { "source": "search", "keyword": "讲书", "scope": "video" },
+        { "source": "search", "keyword": "好书推荐", "scope": "video" }
+      ],
+      "blacklist_up_mids": []
+    },
+    {
+      "category_id": "music",
+      "name": "音乐",
+      "mode": "adult",
+      "filter": "plain",
+      "min_duration_sec": 180,
+      "queries": [
+        { "source": "search", "keyword": "纯音乐", "order": "click", "scope": "video" },
+        { "source": "search", "keyword": "音乐合集", "scope": "video" }
+      ],
+      "blacklist_up_mids": []
+    }
+  ]
+}

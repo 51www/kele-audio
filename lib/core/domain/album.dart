@@ -81,19 +81,30 @@ class Album {
         createdAt: (j['created_at'] as num?)?.toInt() ?? 0,
       );
 
-  Album copyWith({int? chapterCount, String? title}) => Album(
+  /// 局部替换（M3：详情页/发现页把列表接口缺的字段补齐后再入库）。
+  Album copyWith({
+    int? chapterCount,
+    String? title,
+    String? upName,
+    String? coverUrl,
+    String? intro,
+    int? upMid,
+    int? totalDurationSec,
+    int? playCount,
+  }) =>
+      Album(
         id: id,
         sourceType: sourceType,
         title: title ?? this.title,
-        coverUrl: coverUrl,
-        upName: upName,
+        coverUrl: coverUrl ?? this.coverUrl,
+        upName: upName ?? this.upName,
         chapterCount: chapterCount ?? this.chapterCount,
         categoryId: categoryId,
         bvid: bvid,
-        upMid: upMid,
-        intro: intro,
-        totalDurationSec: totalDurationSec,
-        playCount: playCount,
+        upMid: upMid ?? this.upMid,
+        intro: intro ?? this.intro,
+        totalDurationSec: totalDurationSec ?? this.totalDurationSec,
+        playCount: playCount ?? this.playCount,
         createdAt: createdAt,
       );
 }

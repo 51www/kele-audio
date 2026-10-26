@@ -41,9 +41,10 @@ class AlbumSource {
     required String id,
     required SourceType sourceType,
     String categoryId = '',
+    int upMid = 0,
   }) =>
       sourceType == SourceType.series
-          ? loadSeries(id, categoryId: categoryId)
+          ? loadSeries(id, categoryId: categoryId, upMid: upMid)
           : loadMultiPart(id, categoryId: categoryId);
 
   // ---------------------------------------------------------------- 多 P
@@ -138,10 +139,14 @@ class AlbumSource {
   /// 合集/系列 → 专辑 + 章节（章节的 cid 懒解析，见 [resolveCid]）。
   ///
   /// [id] 形如 `season:123` 或 `series:456`，也接受纯数字（按 season 处理）。
+  ///
+  /// [upMid]：`series:` 查询**必带 mid**（实测无 mid 报 -352），
+  /// 详情页从本地专辑缓存（发现页卡片入库）取到后传入。
   Future<AlbumBundle> loadSeries(
     String id, {
     String categoryId = '',
     int pageSize = 30,
+    int upMid = 0,
   }) async {
     final isSeries = id.startsWith('series:');
     final rawId = id.contains(':') ? id.substring(id.indexOf(':') + 1) : id;
@@ -153,6 +158,7 @@ class AlbumSource {
     final query = <String, dynamic>{};
     if (isSeries) {
       query['series_id'] = seasonId;
+      if (upMid > 0) query['mid'] = upMid;
     } else {
       query['season_id'] = seasonId;
     }
@@ -171,15 +177,26 @@ class AlbumSource {
     final list = archives is List ? archives : const [];
 
     final albumId = id.contains(':') ? id : 'season:$seasonId';
+    // meta 实测键：[category, cover, description, mid, name, ptime,
+    // season_id, total, title] —— 没有 up_name / upmid（见
+    // tool/spike/m3_shape_result.json），upName 由详情页经 card 接口补。
     final album = Album(
       id: albumId,
       sourceType: SourceType.series,
-      title: meta is Map ? _stripHtml('${meta['title'] ?? ''}') : '合集 $seasonId',
+      title: meta is Map
+          ? _stripHtml('${meta['title'] ?? meta['name'] ?? ''}')
+          : '合集 $seasonId',
       coverUrl: meta is Map ? '${meta['cover'] ?? ''}' : '',
       upName: meta is Map ? _stripHtml('${meta['up_name'] ?? ''}') : '',
-      chapterCount: list.length,
+      chapterCount:
+          meta is Map ? (meta['total'] as num?)?.toInt() ?? list.length : list.length,
       categoryId: categoryId,
-      upMid: meta is Map ? (meta['upmid'] as num?)?.toInt() ?? 0 : 0,
+      upMid: meta is Map
+          ? (meta['upmid'] as num?)?.toInt() ??
+              (meta['mid'] as num?)?.toInt() ??
+              0
+          : 0,
+      intro: meta is Map ? _stripHtml('${meta['description'] ?? ''}') : '',
       createdAt: DateTime.now().millisecondsSinceEpoch,
     );
 

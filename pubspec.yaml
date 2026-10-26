@@ -71,6 +71,8 @@ flutter:
   assets:
     # 接口配置（R1 远端热修复的内置基线）
     - assets/api/api_config.json
+    # 内容源配置（M3 分类/关键词/黑名单下发）
+    - assets/api/content_config.json
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

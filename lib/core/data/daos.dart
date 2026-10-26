@@ -152,6 +152,10 @@ class PlayHistoryDao {
     return rows.isEmpty ? null : rows.first;
   }
 
+  /// 专辑内全部收听记录（M3 详情页章节进度标记：未听 / 在听 x% / 已听完）。
+  List<PlayHistory> forAlbum(String albumId) =>
+      _db.playHistory.where((h) => h.albumId == albumId);
+
   List<PlayHistory> recent({int limit = 50}) {
     final rows = [..._db.playHistory.all()]
       ..sort((a, b) => b.playedAt.compareTo(a.playedAt));
