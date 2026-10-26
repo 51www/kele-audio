@@ -174,6 +174,66 @@ class AppTokens extends ThemeExtension<AppTokens> {
         ),
       );
 
+  /// 儿童：薄荷春芽（M6 儿童模式）—— 高饱和低刺激、大圆角卡片、
+  /// 字号整体 +1、间距放宽（PRD §5.5「大图标、插画风」）。
+  factory AppTokens.children() => AppTokens(
+        radiusSm: 12,
+        radiusMd: 18,
+        radiusLg: 24,
+        radiusPill: 999,
+        spaceXs: 4,
+        spaceSm: 10,
+        spaceMd: 18,
+        spaceLg: 26,
+        cardGradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppPalette.kidCard, AppPalette.kidCardDeep],
+          stops: [0.0, 1.0],
+        ),
+        accentGradient: const LinearGradient(
+          colors: [AppPalette.mintMid, AppPalette.kidGreen],
+        ),
+        hairlineColor: AppPalette.kidHairline,
+        onHairline: AppPalette.kidGrey,
+        displayStyle: const TextStyle(
+          fontSize: 30,
+          height: 1.2,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.5,
+          color: AppPalette.kidInk,
+        ),
+        titleStyle: const TextStyle(
+          fontSize: 21,
+          height: 1.3,
+          fontWeight: FontWeight.w700,
+          color: AppPalette.kidInk,
+        ),
+        sectionStyle: const TextStyle(
+          fontSize: 16,
+          height: 1.4,
+          fontWeight: FontWeight.w700,
+          color: AppPalette.kidInk,
+        ),
+        bodyStyle: const TextStyle(
+          fontSize: 15,
+          height: 1.55,
+          color: AppPalette.kidInkSoft,
+        ),
+        captionStyle: const TextStyle(
+          fontSize: 13,
+          height: 1.4,
+          color: AppPalette.kidGrey,
+        ),
+        numStyle: const TextStyle(
+          fontSize: 14,
+          height: 1.3,
+          fontWeight: FontWeight.w600,
+          color: AppPalette.kidInkSoft,
+          fontFeatures: [FontFeature.tabularFigures()],
+        ),
+      );
+
   static AppTokens of(BuildContext context) =>
       Theme.of(context).extension<AppTokens>() ?? AppTokens.light();
 

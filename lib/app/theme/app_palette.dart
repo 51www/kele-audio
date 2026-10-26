@@ -34,9 +34,17 @@ class AppPalette {
   static const Color goldDeep = Color(0xFFC9962A); // 金 渐变暗部
   static const Color alertRed = Color(0xFFE63B2E); // 警示红
 
-  // ── 儿童：薄荷春芽（M6 用，先占位保证 token 齐全） ────────────────
+  // ── 儿童：薄荷春芽（M6 儿童模式，docs/theme.md 主题 5） ────────────
   static const Color mintLight = Color(0xFFCDE9C8);
   static const Color mintMid = Color(0xFF9FD4A6);
   static const Color kidInk = Color(0xFF1B5E4B);
   static const Color kidPink = Color(0xFFF8BBD0);
+  static const Color kidPage = Color(0xFFEFF8F0); // 页面背景 薄荷浅底
+  static const Color kidCard = Color(0xFFFFFFFF); // 卡片 纯白
+  static const Color kidCardDeep = Color(0xFFF0F9F1); // 卡片暗面（微渐变）
+  static const Color kidHairline = Color(0xFFD5EBD9); // 分隔细线
+  static const Color kidInkSoft = Color(0xFF4E6B5E); // 次级文字
+  static const Color kidGrey = Color(0xFF7E948A); // 弱化文字
+  static const Color kidGreen = Color(0xFF3E9E6E); // 强调绿（主行动）
+  static const Color kidTeal = Color(0xFF1F7A63); // 深青绿（可读文字/标签）
 }

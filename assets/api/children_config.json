@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "remote_config_url": "",
+  "cache_ttl_minutes": 30,
+  "categories": [
+    {
+      "category_id": "kid_huiBen",
+      "name": "绘本",
+      "mode": "children",
+      "filter": "children",
+      "min_duration_sec": 120,
+      "queries": [
+        { "source": "search", "keyword": "绘本故事" },
+        { "source": "search", "keyword": "有声绘本" }
+      ],
+      "blacklist_up_mids": []
+    },
+    {
+      "category_id": "kid_erGe",
+      "name": "儿歌",
+      "mode": "children",
+      "filter": "children",
+      "min_duration_sec": 60,
+      "queries": [
+        { "source": "search", "keyword": "儿歌" },
+        { "source": "search", "keyword": "童谣" }
+      ],
+      "blacklist_up_mids": []
+    },
+    {
+      "category_id": "kid_tongHua",
+      "name": "童话",
+      "mode": "children",
+      "filter": "children",
+      "min_duration_sec": 120,
+      "queries": [
+        { "source": "search", "keyword": "童话故事" },
+        { "source": "search", "keyword": "格林童话" }
+      ],
+      "blacklist_up_mids": []
+    },
+    {
+      "category_id": "kid_shuiQian",
+      "name": "睡前故事",
+      "mode": "children",
+      "filter": "children",
+      "min_duration_sec": 120,
+      "queries": [
+        { "source": "search", "keyword": "睡前故事" },
+        { "source": "search", "keyword": "儿童睡前故事" }
+      ],
+      "blacklist_up_mids": []
+    },
+    {
+      "category_id": "kid_kePu",
+      "name": "科普",
+      "mode": "children",
+      "filter": "children",
+      "min_duration_sec": 120,
+      "queries": [
+        { "source": "search", "keyword": "儿童科普" },
+        { "source": "search", "keyword": "十万个为什么" }
+      ],
+      "blacklist_up_mids": []
+    }
+  ]
+}

@@ -395,6 +395,15 @@ class DiscoverSource {
   }) {
     if (durationSec <= 0) return false;
     final noise = _containsAny(title, noiseWords);
+    if (category.filter == CategoryConfig.filterChildren) {
+      return passesChildrenFilter(
+        title: title,
+        durationSec: durationSec,
+        tag: tag,
+        upName: upName,
+        minDurationSec: category.minDurationSec,
+      );
+    }
     if (category.filter == CategoryConfig.filterPlain) {
       if (durationSec < category.minDurationSec) return false;
       return !noise;
@@ -411,6 +420,26 @@ class DiscoverSource {
       return true;
     }
     return false;
+  }
+
+  /// 儿童白名单过滤（PRD §5.5 / §7.3，R4 无官方元数据 → 关键词白名单）：
+  ///
+  /// 1. 成人内容词一票否决（标题，白名单宁可错杀）；
+  /// 2. 正向特征词命中才收：标题/标签/UP 名至少一处含儿童内容词，
+  ///    保证「内容 100% 来自白名单口径」（抽样核对可解释）；
+  /// 3. 时长 ≥ 分类门槛（儿歌 60s，其余 120s）。
+  static bool passesChildrenFilter({
+    required String title,
+    required int durationSec,
+    required String tag,
+    required String upName,
+    required int minDurationSec,
+  }) {
+    if (durationSec < minDurationSec) return false;
+    if (_containsAny(title, kidNoiseWords)) return false;
+    return _containsAny(title, kidHintWords) ||
+        _containsAny(tag, kidHintWords) ||
+        _containsAny(upName, kidHintWords);
   }
 
   /// 标题 → 专辑（搜索结果）。`bvid` 为空或标题为空时返回 null。
@@ -520,5 +549,64 @@ class DiscoverSource {
     '琴书',
     '鼓书',
     '戏曲',
+  ];
+
+  /// 儿童内容特征词（children 白名单正向判定，M6）。
+  static const List<String> kidHintWords = [
+    '儿童',
+    '孩子',
+    '宝宝',
+    '幼儿',
+    '少儿',
+    '亲子',
+    '启蒙',
+    '绘本',
+    '儿歌',
+    '童谣',
+    '童话',
+    '睡前故事',
+    '故事',
+    '睡前',
+    '十万个为什么',
+    '国学',
+    '古诗',
+    '成语故事',
+    '寓言',
+    '安徒生',
+    '格林',
+    '科普',
+    '恐龙',
+    '西游记（少儿）',
+  ];
+
+  /// 儿童模式一票否决词（白名单口径：宁可错杀，发现即加入）。
+  static const List<String> kidNoiseWords = [
+    '鬼畜',
+    '混剪',
+    '沙雕',
+    'reaction',
+    '游戏实况',
+    '配音秀',
+    '漫推',
+    '恐怖',
+    '惊悚',
+    '悬疑',
+    '灵异',
+    '细思极恐',
+    '都市',
+    '言情',
+    '恋',
+    '赘婿',
+    '爽文',
+    '职场',
+    '宫斗',
+    '盗墓',
+    '末世',
+    '打赏',
+    '直播',
+    '小说推文',
+    '攻略',
+    '抽卡',
+    '活动奖励',
   ];
 }

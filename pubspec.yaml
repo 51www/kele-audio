@@ -75,6 +75,8 @@ flutter:
     - assets/api/api_config.json
     # 内容源配置（M3 分类/关键词/黑名单下发）
     - assets/api/content_config.json
+    # 儿童白名单配置（M6 / PRD §7.3，内置默认 + 远端覆盖）
+    - assets/api/children_config.json
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see
