@@ -190,6 +190,7 @@ class PlayerService extends ChangeNotifier
     if (_started) return;
     _started = true;
     _bindMedia();
+    _bindFocus();
     _focus.start();
     WidgetsBinding.instance.addObserver(this);
     // 看门狗随播放懒启动（_ensureWatchdog），空闲不空转
@@ -928,6 +929,68 @@ class PlayerService extends ChangeNotifier
     );
   }
 
+  // ---------------------------------------------------- 音频焦点（P-07）
+
+  /// 被来电/导航等**瞬时**打断，等 `gained` 自动续播
+  bool _focusInterrupted = false;
+
+  /// 被提示音闪避（duck）压低了音量，等 `gained` 还原
+  bool _focusDucked = false;
+
+  /// 打断期间压低到的音量（abts 语义：×0.3，不再更低）
+  static const double _duckVolume = 0.3;
+
+  /// 把系统焦点的五个事件接到播放动作上（语义表见 [AudioFocus]）。
+  ///
+  /// 真机（2026-10-26）发现：原生侧事件一直在发，但**从未有人订阅回调**，
+  /// 导致导航/来电打断、提示音闪避、拔耳机都不会影响播放（P-07 缺口）。
+  void _bindFocus() {
+    _focus.onFocusInterrupted = () {
+      if (!_playing) return;
+      _focusInterrupted = true;
+      _log('[focus] interrupted → 暂停，等待 regained 续播');
+      unawaited(pause());
+    };
+
+    _focus.onFocusLost = () {
+      // 被别的播放器永久抢占：暂停且**不**自动恢复（交给用户手动继续）
+      _focusInterrupted = false;
+      _restoreVolume();
+      _log('[focus] lost → 暂停（不自动恢复）');
+      unawaited(pause());
+    };
+
+    _focus.onFocusDucked = () {
+      if (!_playing || _engine == null) return;
+      _focusDucked = true;
+      _log('[focus] ducked → 音量 ×$_duckVolume');
+      unawaited(engine.setVolume(_duckVolume));
+    };
+
+    _focus.onFocusGained = () {
+      _restoreVolume();
+      if (_focusInterrupted) {
+        _focusInterrupted = false;
+        _log('[focus] gained → 续播');
+        unawaited(play());
+      }
+    };
+
+    _focus.onNoisy = () {
+      // 拔耳机 / 蓝牙断开：立即暂停并写盘，不等下个状态周期
+      _focusInterrupted = false;
+      _restoreVolume();
+      _log('[noisy] 拔耳机/蓝牙断开 → 暂停');
+      unawaited(pause());
+    };
+  }
+
+  void _restoreVolume() {
+    if (!_focusDucked) return;
+    _focusDucked = false;
+    if (_engine != null) unawaited(engine.setVolume(1.0));
+  }
+
   void _pushBridge({bool force = false}) {
     if (_disposed) return;
     final now = DateTime.now();
@@ -946,6 +1009,7 @@ class PlayerService extends ChangeNotifier
       coverUrl: album?.coverUrl ?? '',
       hasNext: hasNext,
       hasPrev: hasPrev,
+      speed: _rate,
     ));
   }
 
@@ -1001,6 +1065,12 @@ class PlayerService extends ChangeNotifier
     _watchdog?.cancel();
     _sleepTimer?.cancel();
     positionTick.dispose();
+    // 清空焦点回调：AudioFocus 是单例，防止服务销毁后仍被回调
+    _focus.onFocusLost = null;
+    _focus.onFocusInterrupted = null;
+    _focus.onFocusDucked = null;
+    _focus.onFocusGained = null;
+    _focus.onNoisy = null;
     unawaited(_focus.abandon());
     if (_engine != null) unawaited(_engine!.dispose());
     super.dispose();

@@ -65,21 +65,27 @@ class AudioServiceBridge extends BaseAudioHandler implements MediaSessionBridge 
       duration: s.duration > Duration.zero ? s.duration : null,
     ));
 
+    // 控件顺序随「上一章/下一章可用性」变化，所以紧凑栏下标必须跟着算：
+    // PlaybackState 断言 androidCompactActionIndices.length <= 3，
+    // 写死 4 个会让整条 playbackState 推送抛断言 → 通知栏/锁屏永远是空的（P-02）。
+    final controls = <MediaControl>[
+      if (s.hasPrev) MediaControl.skipToPrevious,
+      if (s.playing) MediaControl.pause else MediaControl.play,
+      if (s.hasNext) MediaControl.skipToNext,
+      // 停止放最后、不进紧凑栏（Android 13+ 会把它变成需要图标的自定义动作）
+      MediaControl.stop,
+    ];
+
     playbackState.add(playbackState.value.copyWith(
       playing: s.playing,
-      processingState:
-          s.playing ? AudioProcessingState.ready : AudioProcessingState.ready,
+      processingState: AudioProcessingState.ready,
       updatePosition: s.position,
-      speed: 1.0,
-      // 每次状态变化都把全部控制列上去，保证通知栏/线控按钮齐全。
-      controls: [
-        if (s.hasPrev) MediaControl.skipToPrevious,
-        MediaControl.play,
-        MediaControl.pause,
-        MediaControl.stop,
-        if (s.hasNext) MediaControl.skipToNext,
-      ],
-      androidCompactActionIndices: const [0, 1, 3, 4],
+      speed: s.speed,
+      controls: controls,
+      androidCompactActionIndices: List.generate(
+        controls.length - 1,
+        (i) => i,
+      ),
       systemActions: const {
         MediaAction.seek,
         MediaAction.seekForward,

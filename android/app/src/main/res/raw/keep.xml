@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  audio_service 通知栏/锁屏按钮的图标不走 R 引用，而是运行期
+  Resources.getIdentifier("audio_service_stop", ...) 按名查找；
+  release 构建的资源收缩（shrinkResources）按引用可达性判定，
+  会把它们当作未使用删掉 → getIdentifier 返回 0 →
+  Android 13+ 构建 CustomAction 抛 IllegalArgumentException，
+  整条 PlaybackState 推送失败，通知栏/锁屏/线控全空（PRD P-01/P-02/P-06）。
+  2026-10-26 真机（OPPO / Android 17）复现后加此保活清单。
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/audio_service_play_arrow,
+                 @drawable/audio_service_pause,
+                 @drawable/audio_service_stop,
+                 @drawable/audio_service_skip_next,
+                 @drawable/audio_service_skip_previous,
+                 @drawable/audio_service_fast_forward,
+                 @drawable/audio_service_fast_rewind" />

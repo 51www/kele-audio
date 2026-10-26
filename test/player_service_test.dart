@@ -69,8 +69,11 @@ class FakeEngine implements PlayerEngine {
   @override
   double get rate => appliedRate;
 
+  /// 当前生效音量（duck 逻辑用它断言）
+  double appliedVolume = 1.0;
+
   @override
-  double get volume => 1.0;
+  double get volume => appliedVolume;
 
   @override
   Future<void> open({
@@ -105,7 +108,7 @@ class FakeEngine implements PlayerEngine {
   Future<void> setRate(double v) async => appliedRate = v;
 
   @override
-  Future<void> setVolume(double v) async {}
+  Future<void> setVolume(double v) async => appliedVolume = v;
 
   @override
   Future<void> dispose() async {
@@ -168,13 +171,57 @@ class FakeAlbumSource extends AlbumSource {
         );
 }
 
+// ─────────────────────────────────────────────────────── 假音频焦点
+
+/// 可手动触发系统音频焦点事件（打断/丢失/压低/恢复/拔耳机）。
+class FakeFocus implements AudioFocus {
+  @override
+  void Function()? onFocusLost;
+  @override
+  void Function()? onFocusInterrupted;
+  @override
+  void Function()? onFocusDucked;
+  @override
+  void Function()? onFocusGained;
+  @override
+  void Function()? onNoisy;
+
+  bool started = false;
+  int requestCount = 0;
+  int abandonCount = 0;
+
+  @override
+  Future<void> start() async => started = true;
+
+  @override
+  Future<bool> request() async {
+    requestCount++;
+    return true;
+  }
+
+  @override
+  Future<void> abandon() async => abandonCount++;
+
+  @override
+  void dispose() {}
+
+  // 事件模拟
+  void fireLost() => onFocusLost?.call();
+  void fireInterrupted() => onFocusInterrupted?.call();
+  void fireDucked() => onFocusDucked?.call();
+  void fireGained() => onFocusGained?.call();
+  void fireNoisy() => onNoisy?.call();
+}
+
 // ─────────────────────────────────────────────────────────── 测试环境
 
 /// 一套完整的假环境；[restart] 用同一个 kv 模拟「杀进程重开」。
 class Harness {
-  Harness(this.kv);
+  Harness(this.kv, {AudioFocus? focus}) : _focus = focus ?? AudioFocus();
 
   final KeyValueStore kv;
+  final AudioFocus _focus;
+
   late final LocalDatabase db = LocalDatabase(kv);
   late final Daos daos = Daos(db);
   final FakePlayUrl playUrl = FakePlayUrl();
@@ -197,7 +244,7 @@ class Harness {
       prefs: PlayerPrefs(kv),
       miniPlayer: mini,
       saveInterval: const Duration(seconds: 15),
-      focus: AudioFocus(),
+      focus: _focus,
       media: NoopMediaBridge(),
       engineFactory: () => _engine!,
     );
@@ -245,6 +292,10 @@ List<Chapter> makeChapters() => [
     ];
 
 Harness makeHarness() => Harness(MemoryKeyValueStore());
+
+/// 注入假音频焦点的环境（P-07 焦点/拔耳机用例）
+Harness makeFocusHarness(FakeFocus focus) =>
+    Harness(MemoryKeyValueStore(), focus: focus);
 
 /// 等待事件流与异步编排跑完（假内核的流是异步广播）
 Future<void> settle([int rounds = 3]) async {
@@ -495,6 +546,94 @@ void main() {
     expect(item.lastChapterId, chapters.first.id);
     expect(item.lastPositionSec, 42);
     expect(item.totalChapters, 3);
+
+    await h.dispose();
+  });
+
+  // ───────────────────────────────────────── P-07 音频焦点 / 拔耳机
+
+  test('P-07 短暂打断（interrupted→gained）：暂停后自动续播', () async {
+    final focus = FakeFocus();
+    final h = makeFocusHarness(focus);
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    h.engine.positionC.add(const Duration(seconds: 42));
+    await settle();
+    expect(p.playing, isTrue);
+
+    focus.fireInterrupted(); // 来电/导航播报抢占
+    await settle();
+    expect(p.playing, isFalse, reason: '打断须暂停');
+
+    focus.fireGained(); // 打断结束
+    await settle(5);
+    expect(p.playing, isTrue, reason: '短暂打断须自动续播');
+
+    await h.dispose();
+  });
+
+  test('P-07 完全丢失（lost→gained）：暂停但不自动续播', () async {
+    final focus = FakeFocus();
+    final h = makeFocusHarness(focus);
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    await settle();
+    expect(p.playing, isTrue);
+
+    focus.fireLost(); // 其他 App 长期占用焦点
+    await settle();
+    expect(p.playing, isFalse, reason: '完全丢失须暂停');
+
+    focus.fireGained();
+    await settle(5);
+    expect(p.playing, isFalse, reason: '用户未操作不得自动恢复');
+
+    await h.dispose();
+  });
+
+  test('P-07 焦点被压低（ducked）：音量降到 0.3，恢复后还原 1.0', () async {
+    final focus = FakeFocus();
+    final h = makeFocusHarness(focus);
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    await settle();
+    expect(h.engine.appliedVolume, 1.0);
+
+    focus.fireDucked(); // 导航提示音等短促抢占
+    await settle();
+    expect(h.engine.appliedVolume, 0.3, reason: 'duck 须降到 0.3');
+    expect(p.playing, isTrue, reason: 'duck 不应打断播放');
+
+    focus.fireGained();
+    await settle();
+    expect(h.engine.appliedVolume, 1.0, reason: '恢复须还原音量');
+
+    await h.dispose();
+  });
+
+  test('P-07 拔耳机（becoming noisy）：暂停且不自动续播', () async {
+    final focus = FakeFocus();
+    final h = makeFocusHarness(focus);
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    await settle();
+    expect(p.playing, isTrue);
+
+    focus.fireNoisy(); // AUDIO_BECOMING_NOISY
+    await settle();
+    expect(p.playing, isFalse, reason: '拔耳机须暂停');
+
+    focus.fireGained();
+    await settle(5);
+    expect(p.playing, isFalse, reason: '拔耳机后不得自动恢复');
 
     await h.dispose();
   });

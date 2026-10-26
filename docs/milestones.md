@@ -153,19 +153,22 @@ M1 工程骨架 ──► M2 播放核心 ──► M3 发现页 ──► M4 �
 
 ### 准出条件（对应 PRD §5.4 P-01~P-08，逐条实测）
 
-> 2026-10-23 核对：P-03/P-04/P-05/P-08 浏览器实测通过（截图 `docs/shortscreen/m2-*.png`）；
-> P-01/P-02/P-06/P-07 代码就绪、**待真机补测**（本机无 Android 设备/adb）。
+> 2026-10-26 核对：**P-01~P-08 全部通过**。
+> P-03/P-04/P-05/P-08 浏览器实测（截图 `docs/shortscreen/m2-*.png`）；
+> P-01/P-02/P-06/P-07 真机实测（OPPO PKC110 / Android 17，截图 `docs/shortscreen/m2d-*.png`，清单 `.logs/m2-device-checklist.md`）。
 
-- [x] P-01 后台播放：切后台/锁屏不断音 —— ⚠️ 前台服务/WAKE_LOCK/audio_service 已接，待真机；
-- [x] P-02 锁屏通知展示与控制 —— ⚠️ MediaSession 已推送元数据/播放态，待真机；
+- [x] P-01 后台播放：切后台/锁屏不断音 —— ✅ 真机：灭屏 60s 进度推进 67s、前台服务存活、`state=PLAYING` 持续；
+- [x] P-02 锁屏通知展示与控制 —— ✅ 真机：通知 `channel=…channel.audio` / `category=transport` / `actions=3` / `FOREGROUND_SERVICE`；锁屏媒体卡 uia dump 确认（`m2d-08-lockscreen-uia.xml`）；
 - [x] P-03 杀进程重启 → 回到原进度（误差 ≤ 5s）—— ✅ reload 实测：恢复同章节，续播 Range 精确到原进度；
 - [x] P-04 跨章续播：重进专辑定位到"最后听的章节"—— ✅ 实测：恢复第 04 章 + 抽屉高亮 + 切章取新 cid 续播；
 - [x] P-05 手动把内存中的 URL 改坏模拟过期 → 自动重取并续播 —— ✅ 实测：演练菜单作废地址 → 自动重取 playurl → 原进度无中断续播；
-- [x] P-06 蓝牙耳机按键控制正常 —— ⚠️ MediaButtonReceiver 已接，待真机；
-- [x] P-07 播放中触发导航语音 → 音频压低/暂停并恢复 —— ⚠️ 音频焦点五事件已接（移植 abts），待真机；
+- [x] P-06 蓝牙耳机按键控制正常 —— ✅ 真机：`keyevent 85/87/88` 播放暂停、切章、`>5s` 重播本章均正确，日志确认媒体键路由到我方 session；**物理耳机实按留 M7**（无耳机硬件），`media dispatch` 该 ROM 不可用；
+- [x] P-07 播放中触发导航语音 → 音频压低/暂停并恢复 —— ✅ 真机：`interrupted`（相机录像 GAIN_TRANSIENT 抢占 → 暂停 → 释放后自动续播）、`ducked`（语音助手 MAY_DUCK → 不中断）、`lost`（永久抢占 → 暂停不自动恢复）；`noisy` 受保护广播无法注入且无耳机，由 4 个单测 + 原生 receiver 代码覆盖；
 - [x] P-08 定时关闭到点停止；倍速重启后保留 —— ✅ 实测：1.25x reload 保留、定时全档 + 本章结束生效（到点暂停有单测）。
 
-**风险提示**：本里程碑是 R5/R6 的集中消化点，若国产 ROM 后台限制导致音频中断，需在通知渠道/前台服务类型（`mediaPlayback`）上排查。
+**开发期修复的缺陷**：紧凑栏下标越界断言（动态计算）、release 资源收缩剔除 audio_service 图标（`res/raw/keep.xml` 保活）、**音频焦点五事件回调从未接线**（补 `_bindFocus`/`_restoreVolume` + `dispose` 清理）、锁屏进度按 1.0 倍速外推（`MediaSnapshot.speed` 传真实倍速）。
+
+**风险提示**：本里程碑是 R5/R6 的集中消化点，若国产 ROM 后台限制导致音频中断，需在通知渠道/前台服务类型（`mediaPlayback`）上排查。—— 真机 OPPO ROM 实测未出现该问题。
 
 **预估**：5 天。
 
@@ -352,7 +355,7 @@ M1 工程骨架 ──► M2 播放核心 ──► M3 发现页 ──► M4 �
 |---|---|---|---|---|---|
 | M0 | 技术验证 | ⚠️ 部分通过 | 2026-10-23 | | S1/S2 接口层 PASS；S3 有效期 120min + T+14min（长周期待补）；S2 真机播放 / S4 移交 M2。详见 `docs/spike-report.md` |
 | M1 | 工程骨架 | ✅ 已完成 | 2026-10-23 | 2026-10-23 | 准出 5/5；analyze 0 issue；测试全绿；8 张截图 `docs/shortscreen/` |
-| M2 | 播放核心 | ⚠️ 待真机补测 | 2026-10-23 | | P-03/04/05/08 浏览器实测过（10 张截图）；P-01/02/06/07 代码就绪待真机；analyze 0 issue、11 测试全绿、web+apk 构建通过。详见 `.logs/milestone-2.md` |
+| M2 | 播放核心 | ✅ 已完成 | 2026-10-23 | 2026-10-26 | 准出 8/8（P-01~P-08）：P-03/04/05/08 浏览器实测 + P-01/02/06/07 真机实测；analyze 0 issue、18 测试全绿、web+release apk 构建通过。详见 `.logs/milestone-2.md`、`.logs/m2-device-checklist.md` |
 | M3 | 发现页与详情页 | ⬜ 未开始 | | | |
 | M4 | 书架 | ⬜ 未开始 | | | |
 | M5 | 我的 | ⬜ 未开始 | | | |

@@ -21,6 +21,7 @@ class MediaSnapshot {
     this.coverUrl = '',
     this.hasNext = false,
     this.hasPrev = false,
+    this.speed = 1.0,
   });
 
   /// 无播放任务时为 false（此时应把通知收掉）
@@ -34,6 +35,10 @@ class MediaSnapshot {
   final bool hasNext;
   final bool hasPrev;
 
+  /// 当前倍速（0.5~3.0）。系统靠它外推通知栏/锁屏上的进度，
+  /// 写死 1.0 会让 1.25x 播放时锁屏进度条越走越慢。
+  final double speed;
+
   MediaSnapshot copyWith({
     bool? active,
     bool? playing,
@@ -44,6 +49,7 @@ class MediaSnapshot {
     String? coverUrl,
     bool? hasNext,
     bool? hasPrev,
+    double? speed,
   }) =>
       MediaSnapshot(
         active: active ?? this.active,
@@ -55,6 +61,7 @@ class MediaSnapshot {
         coverUrl: coverUrl ?? this.coverUrl,
         hasNext: hasNext ?? this.hasNext,
         hasPrev: hasPrev ?? this.hasPrev,
+        speed: speed ?? this.speed,
       );
 }
 
