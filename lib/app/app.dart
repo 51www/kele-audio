@@ -12,6 +12,7 @@ import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
 import '../core/services/mini_player_controller.dart';
 import '../core/services/player/player_service.dart';
+import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
 import 'di.dart';
 import 'router.dart';
@@ -34,6 +35,7 @@ class KeleApp extends StatelessWidget {
         ),
         ChangeNotifierProvider<PlayerService>.value(value: services.player),
         ChangeNotifierProvider<ShelfController>.value(value: services.shelf),
+        ChangeNotifierProvider<SettingsStore>.value(value: services.settings),
         Provider<AppServices>.value(value: services),
         Provider<BiliClient>.value(value: services.client),
         Provider<ApiConfig>.value(value: services.config),

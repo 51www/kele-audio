@@ -168,6 +168,13 @@ class PlayHistoryDao {
           .where((h) => h.albumId == albumId && h.percent >= 90)
           .length;
 
+  /// 全部记录（M5 历史页聚合用），按 playedAt 降序。
+  List<PlayHistory> all() {
+    final rows = [..._db.playHistory.all()]
+      ..sort((a, b) => b.playedAt.compareTo(a.playedAt));
+    return rows;
+  }
+
   List<PlayHistory> recent({int limit = 50}) {
     final rows = [..._db.playHistory.all()]
       ..sort((a, b) => b.playedAt.compareTo(a.playedAt));
@@ -203,6 +210,9 @@ class PlayLogDao {
 
   List<PlayLogEntry> byDate(String date) =>
       _db.playLogs.where((e) => e.date == date);
+
+  /// 全部日志（M5 收听摘要聚合用）。
+  List<PlayLogEntry> all() => _db.playLogs.all();
 
   int get count => _db.playLogs.count;
 }
