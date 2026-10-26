@@ -265,6 +265,9 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                               content: Text(wasIn
                                   ? '已移出书架：${album.title}'
                                   : '已加入书架：${album.title}'),
+                              // M7 修复遗留：收藏/播放钮在页首操作区，
+                              // Snackbar 悬浮避让不遮挡页面内容
+                              margin: const EdgeInsets.fromLTRB(16, 0, 16, 96),
                             ));
                         },
                         icon: Icon(

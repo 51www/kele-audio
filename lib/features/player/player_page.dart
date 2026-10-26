@@ -611,6 +611,8 @@ class _ShelfButton extends StatelessWidget {
             content: Text(wasIn
                 ? '已移出书架：${album!.title}'
                 : '已加入书架：${album!.title}'),
+            // M7 修复遗留：收藏钮在页面底部，Snackbar 悬浮避让不遮挡
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 96),
           ));
       },
       icon: Icon(
