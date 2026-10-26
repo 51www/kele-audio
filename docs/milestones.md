@@ -362,6 +362,6 @@ M1 工程骨架 ──► M2 播放核心 ──► M3 发现页 ──► M4 �
 | M4 | 书架 | ✅ 已完成 | 2026-10-26 | 2026-10-26 | 准出 5/5 浏览器实测（收藏/进度/删除/空态/布局独立于儿童模式）；14 张截图 `.logs/m4shots/`。详见 `.logs/milestone-4.md` |
 | M5 | 我的 | ✅ 已完成 | 2026-10-26 | 2026-10-26 | 准出 4/4 浏览器实测（历史分组/单删撤销/清空二次确认/点击续播、设置五项+清除缓存 reload 持久化、关于页声明+检查更新/意见反馈、三页返回 MiniPlayer 常驻）；analyze 0 issue、55 测试全绿；21 张截图 `.logs/m5shots/`。详见 `.logs/milestone-5.md` |
 | M6 | 儿童模式 | ✅ 已完成 | 2026-10-26 | 2026-10-26 | 准出 5/5 浏览器实测（白名单抽样 24 条含 1 漏网修复复验、成人分类恢复、四主题组合无穿帮、即时切换无闪屏、reload 保留）；analyze 0 issue、67 测试全绿；15 张截图 `docs/shortscreen/milestone-6/`。终审流程 `docs/children-whitelist-review.md`。详见 `.logs/milestone-6.md` |
-| M7 | 稳定性与验收 | ⬜ 未开始 | | | |
+| M7 | 稳定性与验收 | 🚧 浏览器项完成 | 2026-10-26 | | PRD §10 六条浏览器可测项全过 + -412/断网降级走查；修复 SnackBar 遮挡遗留；analyze 0 issue、66 测试全绿；19 张截图 `docs/shortscreen/milestone-7/`。**真机项（3 机型走查/连续播放 2h/切章 50 次）遗留**，自测清单 `.logs/m7-device-checklist.md`。详见 `.logs/milestone-7.md` |
 
 状态图例：⬜ 未开始 / 🚧 进行中 / ✅ 已完成 / ⏸ 暂停 / ❌ 阻塞
