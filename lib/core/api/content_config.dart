@@ -114,6 +114,10 @@ class CategoryConfig {
   static const String filterAudio = 'audio';
   static const String filterPlain = 'plain';
 
+  /// 儿童白名单过滤（M6 / PRD §7.3）：正向特征词命中才收 +
+  /// 成人内容词一票否决，见 [DiscoverSource.kidHintWords]。
+  static const String filterChildren = 'children';
+
   /// 分类 id（= `category_id`，专辑缓存表用它归类）。
   final String id;
   final String name;
@@ -182,6 +186,10 @@ class ContentConfig {
   /// 发现页可见分类：成人 5 类（儿童分类 M6 儿童模式下再启用）。
   List<CategoryConfig> get adultCategories =>
       categories.where((c) => c.mode != 'children').toList();
+
+  /// 儿童分类（M6：绘本/儿歌/童话/睡前故事/科普，mode == 'children'）。
+  List<CategoryConfig> get childrenCategories =>
+      categories.where((c) => c.mode == 'children').toList();
 
   CategoryConfig? byId(String id) {
     for (final c in categories) {
@@ -267,6 +275,68 @@ class ContentConfig {
         ],
       );
 
+  /// 儿童白名单内置兜底（与 `assets/api/children_config.json` 同内容）：
+  /// 儿童配置文件缺失/损坏时兜底，保证儿童模式不白屏。
+  factory ContentConfig.childrenBuiltIn() => ContentConfig(
+        categories: [
+          CategoryConfig(
+            id: 'kid_huiBen',
+            name: '绘本',
+            mode: 'children',
+            filter: CategoryConfig.filterChildren,
+            minDurationSec: 120,
+            queries: const [
+              ContentQuery(source: QuerySource.search, keyword: '绘本故事'),
+              ContentQuery(source: QuerySource.search, keyword: '有声绘本'),
+            ],
+          ),
+          CategoryConfig(
+            id: 'kid_erGe',
+            name: '儿歌',
+            mode: 'children',
+            filter: CategoryConfig.filterChildren,
+            minDurationSec: 60,
+            queries: const [
+              ContentQuery(source: QuerySource.search, keyword: '儿歌'),
+              ContentQuery(source: QuerySource.search, keyword: '童谣'),
+            ],
+          ),
+          CategoryConfig(
+            id: 'kid_tongHua',
+            name: '童话',
+            mode: 'children',
+            filter: CategoryConfig.filterChildren,
+            minDurationSec: 120,
+            queries: const [
+              ContentQuery(source: QuerySource.search, keyword: '童话故事'),
+              ContentQuery(source: QuerySource.search, keyword: '格林童话'),
+            ],
+          ),
+          CategoryConfig(
+            id: 'kid_shuiQian',
+            name: '睡前故事',
+            mode: 'children',
+            filter: CategoryConfig.filterChildren,
+            minDurationSec: 120,
+            queries: const [
+              ContentQuery(source: QuerySource.search, keyword: '睡前故事'),
+              ContentQuery(source: QuerySource.search, keyword: '儿童睡前故事'),
+            ],
+          ),
+          CategoryConfig(
+            id: 'kid_kePu',
+            name: '科普',
+            mode: 'children',
+            filter: CategoryConfig.filterChildren,
+            minDurationSec: 120,
+            queries: const [
+              ContentQuery(source: QuerySource.search, keyword: '儿童科普'),
+              ContentQuery(source: QuerySource.search, keyword: '十万个为什么'),
+            ],
+          ),
+        ],
+      );
+
   factory ContentConfig.fromJson(Map<String, dynamic> j) => ContentConfig(
         version: (j['version'] as num?)?.toInt() ?? 1,
         remoteConfigUrl: '${j['remote_config_url'] ?? ''}',
@@ -292,14 +362,21 @@ class ContentConfigLoader {
 
   static const String remoteCacheKey = 'content_config_remote_json';
 
+  /// 儿童白名单远端覆盖缓存 key（M6，与成人配置分开存）。
+  static const String childrenRemoteCacheKey = 'children_config_remote_json';
+
   /// [bundledJson]：读取随包配置（App 传 `rootBundle.loadString`，测试传 null）。
+  /// [builtIn]：内置兜底（成人主配置 / 儿童白名单各一份）。
+  /// [cacheKey]：远端覆盖缓存 key（成人 / 儿童配置分开存，互不污染）。
   static Future<ContentConfig> load({
     required KeyValueStore store,
     Future<String?> Function()? bundledJson,
+    ContentConfig Function()? builtIn,
+    String cacheKey = remoteCacheKey,
     Duration remoteTtl = const Duration(hours: 6),
     Duration timeout = const Duration(seconds: 6),
   }) async {
-    var config = ContentConfig.builtIn();
+    var config = builtIn?.call() ?? ContentConfig.builtIn();
 
     if (bundledJson != null) {
       try {
@@ -319,7 +396,7 @@ class ContentConfigLoader {
     if (remote.isEmpty) return config;
 
     try {
-      final cached = store.getString(remoteCacheKey);
+      final cached = store.getString(cacheKey);
       if (cached != null) {
         final map = jsonDecode(cached) as Map<String, dynamic>;
         final fetchedAt = (map['fetched_at'] as num?)?.toInt() ?? 0;
@@ -342,7 +419,7 @@ class ContentConfigLoader {
         final decoded = jsonDecode(body) as Map<String, dynamic>;
         final parsed = ContentConfig.fromJson(decoded);
         if (parsed.categories.isNotEmpty) {
-          await store.setString(remoteCacheKey, jsonEncode({
+          await store.setString(cacheKey, jsonEncode({
             'fetched_at': DateTime.now().millisecondsSinceEpoch,
             'config': decoded,
           }));

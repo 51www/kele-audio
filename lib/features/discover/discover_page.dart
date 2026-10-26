@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/di.dart';
 import '../../app/theme/app_tokens.dart';
+import '../../app/theme/theme_controller.dart';
 import '../../core/api/content_config.dart';
 import 'category_feed.dart';
 
-/// Tab 1 发现页（PRD §5.1，M3 接入真实内容源）。
+/// Tab 1 发现页（PRD §5.1，M3 接入真实内容源；M6 接入儿童模式联动）。
 ///
-/// 结构：顶部栏 → 横向分类 Tab（内容配置下发）→ [IndexedStack] 信息流。
+/// 结构：顶部栏（含儿童模式开关）→ 横向分类 Tab → [IndexedStack] 信息流。
 /// 每个分类一个 [CategoryFeed]：**访问过才创建，创建后保留滚动位置与页码**；
-/// 分类数据来自 `assets/api/content_config.json`（内置）+ 远端覆盖（R1 热修复）。
+/// 成人分类来自 `assets/api/content_config.json`，儿童五类来自
+/// `assets/api/children_config.json`（白名单，PRD §7.3）。
 class DiscoverPage extends StatefulWidget {
   const DiscoverPage({super.key});
 
@@ -21,12 +24,13 @@ class _DiscoverPageState extends State<DiscoverPage> {
   /// 已访问过的分类（保持 feed 实例与滚动位置）。
   final List<CategoryConfig> _visited = [];
   String _categoryId = '';
+  bool _kidsAtBuild = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_visited.isEmpty) {
-      final cats = context.read<ContentConfig>().adultCategories;
+      final cats = _categoriesOf(context);
       if (cats.isNotEmpty) {
         _categoryId = cats.first.id;
         _visited.add(cats.first);
@@ -34,13 +38,34 @@ class _DiscoverPageState extends State<DiscoverPage> {
     }
   }
 
+  /// 当前模式下的分类：儿童模式 → 儿童白名单五类，否则成人 5 类。
+  List<CategoryConfig> _categoriesOf(BuildContext context) {
+    final services = context.read<AppServices>();
+    final kids = context.read<ThemeController>().children;
+    return kids
+        ? services.childrenContent.childrenCategories
+        : services.content.adultCategories;
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final config = context.read<ContentConfig>();
-    final cacheTtl = Duration(minutes: config.cacheTtlMinutes);
-    final categories = config.adultCategories;
+    final kids = context.watch<ThemeController>().children;
+    final services = context.read<AppServices>();
+    final activeConfig = kids ? services.childrenContent : services.content;
+    final cacheTtl = Duration(minutes: activeConfig.cacheTtlMinutes);
+    final categories = _categoriesOf(context);
+
+    // 模式切换（M6）：分类集合整体替换，feed 实例与滚动位置重建，
+    // 避免成人/儿童 feed 串内容。
+    if (kids != _kidsAtBuild) {
+      _kidsAtBuild = kids;
+      _visited
+        ..clear()
+        ..addAll(categories);
+      _categoryId = categories.isNotEmpty ? categories.first.id : '';
+    }
 
     if (categories.isEmpty) {
       return const Center(child: Text('内容配置为空，请重启应用重试'));
@@ -85,6 +110,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
     AppTokens tokens,
     ColorScheme scheme,
   ) {
+    final kids = context.watch<ThemeController>().children;
     return Padding(
       padding: EdgeInsets.fromLTRB(
         tokens.spaceMd,
@@ -117,22 +143,54 @@ class _DiscoverPageState extends State<DiscoverPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('可乐听书', style: tokens.titleStyle),
-                Text('免登录 · 无广告 · 专注收听', style: tokens.captionStyle),
+                Text(
+                  kids ? '儿童模式已开启 · 只看白名单内容' : '免登录 · 无广告 · 专注收听',
+                  style: tokens.captionStyle,
+                ),
               ],
             ),
           ),
+          // 儿童模式开关（PRD §5.5）：开启直接切，关闭走二次确认防误触
           IconButton(
-            tooltip: '儿童模式 · M6 接入',
-            onPressed: () => ScaffoldMessenger.of(context)
-              ..hideCurrentSnackBar()
-              ..showSnackBar(const SnackBar(
-                content: Text('儿童模式将在 M6 接入（主题皮肤 + 白名单内容）'),
-              )),
-            icon: const Icon(Icons.child_care_outlined),
+            tooltip: kids ? '退出儿童模式' : '进入儿童模式',
+            style: IconButton.styleFrom(
+              backgroundColor:
+                  kids ? scheme.primary.withValues(alpha: 0.14) : null,
+            ),
+            onPressed: () => _toggleKids(context, kids),
+            icon: Icon(
+              kids ? Icons.child_care : Icons.child_care_outlined,
+              color: kids ? scheme.primary : null,
+            ),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _toggleKids(BuildContext context, bool current) async {
+    if (current) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('退出儿童模式？'),
+          content: const Text('退出后将恢复成人分类与常规主题。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('退出'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    if (!context.mounted) return;
+    await context.read<ThemeController>().setChildren(!current);
   }
 
   Widget _buildChips(

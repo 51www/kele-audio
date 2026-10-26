@@ -26,6 +26,7 @@ class AppServices {
     required this.kv,
     required this.config,
     required this.content,
+    required this.childrenContent,
     required this.client,
     required this.db,
     required this.daos,
@@ -47,6 +48,9 @@ class AppServices {
 
   /// 内容源配置（M3：分类 / 查询 / 黑名单，R1 式远端热修复）
   final ContentConfig content;
+
+  /// 儿童白名单配置（M6 / PRD §7.3）：内置默认 + 远端覆盖，独立缓存 key
+  final ContentConfig childrenContent;
   final BiliClient client;
   final LocalDatabase db;
   final Daos daos;
@@ -110,6 +114,16 @@ class AppServices {
       ),
     );
 
+    // 儿童白名单配置（M6 / PRD §7.3）：同构加载链路，独立远端缓存 key
+    final childrenContent = await ContentConfigLoader.load(
+      store: kv,
+      bundledJson: () async => rootBundle.loadString(
+        'assets/api/children_config.json',
+      ),
+      builtIn: ContentConfig.childrenBuiltIn,
+      cacheKey: ContentConfigLoader.childrenRemoteCacheKey,
+    );
+
     final client = BiliClient(config: config, kv: kv, log: _log);
     await client.initLocal();
 
@@ -154,6 +168,7 @@ class AppServices {
       kv: kv,
       config: config,
       content: content,
+      childrenContent: childrenContent,
       client: client,
       db: db,
       daos: daos,

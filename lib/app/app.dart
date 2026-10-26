@@ -49,13 +49,15 @@ class KeleApp extends StatelessWidget {
       ],
       child: Consumer<ThemeController>(
         builder: (context, themeController, _) {
-          final mode = themeController.mode;
+          // 主题优先级（PRD §5.5）：儿童主题 > 用户浅/深色设置；
+          // 儿童主题只有浅色一套，开启后固定 light，切换即换肤（无重启）。
+          final kids = themeController.children;
           return MaterialApp.router(
             title: '可乐听书',
             debugShowCheckedModeBanner: false,
-            theme: AppTheme.light,
-            darkTheme: AppTheme.dark,
-            themeMode: mode,
+            theme: kids ? AppTheme.children : AppTheme.light,
+            darkTheme: kids ? AppTheme.children : AppTheme.dark,
+            themeMode: themeController.effectiveThemeMode,
             routerConfig: AppRouter.router,
           );
         },

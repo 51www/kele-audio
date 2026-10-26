@@ -3,14 +3,34 @@ import 'package:flutter/material.dart';
 import 'app_palette.dart';
 import 'app_tokens.dart';
 
-/// 全局主题：浅色（暖纸书卷）/ 深色（暗夜金橙）。
+/// 全局主题：浅色（暖纸书卷）/ 深色（暗夜金橙）/ 儿童（薄荷春芽）。
 ///
-/// M6 儿童模式接入时在 [build] 里加第三套（主题优先级：儿童 > 用户设置）。
+/// 主题优先级：**儿童主题 > 用户浅/深色设置**（PRD §5.5）——
+/// 儿童模式开启时整个 App 固定用 [children]，不看用户的深色设置。
 class AppTheme {
   AppTheme._();
 
   static ThemeData get light => build(Brightness.light);
   static ThemeData get dark => build(Brightness.dark);
+
+  /// 儿童主题（M6）：薄荷春芽，固定浅色底。
+  static ThemeData get children => _build(
+        brightness: Brightness.light,
+        tokens: AppTokens.children(),
+        scheme: const ColorScheme.light().copyWith(
+          primary: AppPalette.kidTeal,
+          onPrimary: Colors.white,
+          secondary: AppPalette.kidGreen,
+          onSecondary: Colors.white,
+          surface: AppPalette.kidPage,
+          onSurface: AppPalette.kidInk,
+          onSurfaceVariant: AppPalette.kidInkSoft,
+          outline: AppPalette.kidHairline,
+          outlineVariant: AppPalette.kidHairline,
+          surfaceContainer: AppPalette.kidCard,
+          error: AppPalette.alertRed,
+        ),
+      );
 
   static ThemeData build(Brightness brightness) {
     final isLight = brightness == Brightness.light;
@@ -35,6 +55,16 @@ class AppTheme {
           isLight ? AppPalette.paperCard : AppPalette.nightCard,
       error: isLight ? AppPalette.alertRed : AppPalette.alertRed,
     );
+
+    return _build(brightness: brightness, tokens: tokens, scheme: scheme);
+  }
+
+  static ThemeData _build({
+    required Brightness brightness,
+    required AppTokens tokens,
+    required ColorScheme scheme,
+  }) {
+    final isLight = brightness == Brightness.light;
 
     final textTheme = ThemeData(brightness: brightness)
         .textTheme
