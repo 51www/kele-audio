@@ -1,0 +1,46 @@
+{
+  "card": {
+    "ok": true,
+    "name": "紫襟丶白",
+    "keys": [
+      "mid",
+      "name",
+      "approve",
+      "sex",
+      "rank",
+      "face",
+      "face_nft",
+      "face_nft_type",
+      "DisplayRank",
+      "regtime",
+      "spacesta",
+      "birthday",
+      "place",
+      "description",
+      "article",
+      "attentions",
+      "fans",
+      "friend",
+      "attention",
+      "sign",
+      "level_info",
+      "pendant",
+      "nameplate",
+      "Official",
+      "official_verify",
+      "vip",
+      "is_senior_member",
+      "name_render"
+    ]
+  },
+  "arc_search": {
+    "ok": false,
+    "data_keys": [
+      "list",
+      "page",
+      "is_risk",
+      "gaia_res_type",
+      "gaia_data"
+    ]
+  }
+}

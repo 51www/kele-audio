@@ -1,0 +1,542 @@
+{
+  "search_item_keys": [
+    "type",
+    "id",
+    "author",
+    "mid",
+    "typeid",
+    "typename",
+    "arcurl",
+    "aid",
+    "bvid",
+    "title",
+    "description",
+    "pic",
+    "play",
+    "video_review",
+    "favorites",
+    "tag",
+    "review",
+    "pubdate",
+    "senddate",
+    "duration",
+    "badgepay",
+    "hit_columns",
+    "view_type",
+    "is_pay",
+    "is_union_video",
+    "rec_tags",
+    "new_rec_tags",
+    "like",
+    "upic",
+    "corner",
+    "cover",
+    "desc",
+    "url",
+    "rec_reason",
+    "danmaku",
+    "biz_data",
+    "is_charge_video",
+    "vt",
+    "enable_vt",
+    "vt_display",
+    "subtitle",
+    "episode_count_text",
+    "release_status",
+    "is_intervene",
+    "area",
+    "style",
+    "cate_name",
+    "is_live_room_inline",
+    "live_status",
+    "live_time",
+    "online",
+    "rank_index",
+    "rank_offset",
+    "roomid",
+    "short_id",
+    "spread_id",
+    "tags",
+    "uface",
+    "uid",
+    "uname",
+    "user_cover",
+    "parent_area_id",
+    "parent_area_name",
+    "watched_show",
+    "cny_flag",
+    "card_status"
+  ],
+  "search_item_sample": {
+    "bvid": "BV1714y1a7ww",
+    "title": "多人<em class=\"keyword\">有声</em>剧 |《凡人修仙传》忘语著 完结",
+    "pic": "//i1.hdslb.com/bfs/archive/2cdb050c6954eb36a5814321e43f80803f689c4c.jpg",
+    "author": "SimpleLifeT",
+    "mid": "688151637",
+    "videos": "null",
+    "episode_count_text": "",
+    "duration": "25724:11",
+    "play": "20135253",
+    "pubdate": "1664340276",
+    "typeid": "168",
+    "tag": "有声,玄幻,仙侠,凡人修仙传,有声小说,多人有声剧,有声书,修真,修仙",
+    "description": "一个普通的山村穷小子，偶然之下，跨入到一个江湖小门派，成了一名记名弟子。他以这样身份，如何在门派中立足,如何以平庸的资质进入到修仙者的行列，从而笑傲三界之中！又如何以平庸的资质，进入到修仙者的行列？和其他巨枭魔头、仙宗仙师并列于山海内外？修仙世界尔虞我诈、弱肉强食，大道漫漫，仙途凶险，看普通山村少年韩立如何艰难修仙。虽然资质平庸，但依靠自身努力和合理算计修炼成仙。修仙的过程极为不易，不仅需要克服自身的种种缺陷，同时还要接受敌人和天地的考验，经过重重“跋涉”才能得道。"
+  },
+  "bili_user_items": [
+    {
+      "mid": "19566500",
+      "uname": "紫襟丶白",
+      "fans": "11754",
+      "keys": [
+        "type",
+        "mid",
+        "uname",
+        "usign",
+        "fans",
+        "videos",
+        "upic",
+        "face_nft",
+        "face_nft_type",
+        "verify_info",
+        "level",
+        "gender",
+        "is_upuser",
+        "is_live",
+        "room_id",
+        "res",
+        "official_verify",
+        "hit_columns",
+        "is_senior_member"
+      ],
+      "usign": "待到秋来九月八，我花开后百花杀"
+    },
+    {
+      "mid": "514374388",
+      "uname": "BTC紫襟书遥",
+      "fans": "193",
+      "keys": [
+        "type",
+        "mid",
+        "uname",
+        "usign",
+        "fans",
+        "videos",
+        "upic",
+        "face_nft",
+        "face_nft_type",
+        "verify_info",
+        "level",
+        "gender",
+        "is_upuser",
+        "is_live",
+        "room_id",
+        "res",
+        "official_verify",
+        "hit_columns",
+        "is_senior_member"
+      ],
+      "usign": "全网同名 专业分析 策略分享 公zhong号"
+    },
+    {
+      "mid": "17548927",
+      "uname": "倾卿紫襟",
+      "fans": "107",
+      "keys": [
+        "type",
+        "mid",
+        "uname",
+        "usign",
+        "fans",
+        "videos",
+        "upic",
+        "face_nft",
+        "face_nft_type",
+        "verify_info",
+        "level",
+        "gender",
+        "is_upuser",
+        "is_live",
+        "room_id",
+        "res",
+        "official_verify",
+        "hit_columns",
+        "is_senior_member"
+      ],
+      "usign": ""
+    }
+  ],
+  "seasons_series_data_keys": [
+    "items_lists"
+  ],
+  "season_meta_keys": [
+    "category",
+    "cover",
+    "description",
+    "mid",
+    "name",
+    "ptime",
+    "season_id",
+    "total",
+    "title"
+  ],
+  "season_meta_sample": {
+    "category": 0,
+    "cover": "https://archive.biliimg.com/bfs/archive/3519d04fc152c414c915e043c5c1b4a4ff551918.jpg",
+    "description": "",
+    "mid": 19566500,
+    "name": "合集·【十日终焉】我来自终焉之地，我要开始说谎了",
+    "ptime": 1788321147,
+    "season_id": 1683170,
+    "total": 60,
+    "title": "【十日终焉】我来自终焉之地，我要开始说谎了"
+  },
+  "season_archives_len": 6,
+  "archives_meta_keys": [
+    "category",
+    "cover",
+    "description",
+    "mid",
+    "name",
+    "ptime",
+    "season_id",
+    "total",
+    "title"
+  ],
+  "archives_meta_sample": {
+    "category": 0,
+    "cover": "https://archive.biliimg.com/bfs/archive/3519d04fc152c414c915e043c5c1b4a4ff551918.jpg",
+    "description": "",
+    "mid": 19566500,
+    "name": "合集·【十日终焉】我来自终焉之地，我要开始说谎了",
+    "ptime": 1788321147,
+    "season_id": 1683170,
+    "total": 60,
+    "title": "【十日终焉】我来自终焉之地，我要开始说谎了"
+  },
+  "archives_len": 10,
+  "archive_item_keys": [
+    "aid",
+    "bvid",
+    "ctime",
+    "duration",
+    "enable_vt",
+    "interactive_video",
+    "pic",
+    "playback_position",
+    "pubdate",
+    "stat",
+    "state",
+    "title",
+    "ugc_pay",
+    "vt_display",
+    "is_lesson_video"
+  ],
+  "kw_相声": {
+    "total": "1000",
+    "samples": [
+      {
+        "title": "⚡考 研 秘 籍⚡",
+        "dur": "1:44",
+        "videos": "null",
+        "typeid": "22"
+      },
+      {
+        "title": "讲课（X）讲相声（√）",
+        "dur": "2:18",
+        "videos": "null",
+        "typeid": "138"
+      },
+      {
+        "title": "【油管无水印高清版本】1990年春晚小品《主角与配角》 陈佩斯＆朱时茂",
+        "dur": "16:52",
+        "videos": "null",
+        "typeid": "71"
+      },
+      {
+        "title": "你们敢说我都有点不敢听了！经典高能相声《帽子工厂》｜高清重制版",
+        "dur": "16:21",
+        "videos": "null",
+        "typeid": "208"
+      },
+      {
+        "title": "你们那好好说中文判几年",
+        "dur": "6:3",
+        "videos": "null",
+        "typeid": "228"
+      },
+      {
+        "title": "郭德纲&amp;于谦相声集",
+        "dur": "2501:33",
+        "videos": "null",
+        "typeid": "71"
+      },
+      {
+        "title": "“近视，每天都是一场赌局”",
+        "dur": "1:41",
+        "videos": "null",
+        "typeid": "28"
+      },
+      {
+        "title": "德云社系列美食之【烤鸭三吃】，您吃几卷？",
+        "dur": "2:43",
+        "videos": "null",
+        "typeid": "76"
+      },
+      {
+        "title": "后来才发现，赵本山说的全是对的！",
+        "dur": "2:37",
+        "videos": "null",
+        "typeid": "137"
+      },
+      {
+        "title": "全网最全，《郭德纲单口全集》你想要的全都有，能找到的就这么多啦！求关注！求充电┬＿┬！",
+        "dur": "6141:47",
+        "videos": "null",
+        "typeid": "138"
+      },
+      {
+        "title": "三俗午夜场 苗阜、王声 - 相声合集（一）【20190520 开放粉丝投稿字幕功能】",
+        "dur": "7297:22",
+        "videos": "null",
+        "typeid": "21"
+      },
+      {
+        "title": "轻音少年垃圾堆里攒辆车，载着心爱姑娘羡煞今人",
+        "dur": "7:18",
+        "videos": "null",
+        "typeid": "205"
+      }
+    ]
+  },
+  "kw_讲书": {
+    "total": "1000",
+    "samples": [
+      {
+        "title": "【詹青云】人生不必太用力，坦率地接受每一天｜奇葩说BBKing解读90岁心理医生写给我们的哲理小书《人间值得》",
+        "dur": "36:23",
+        "videos": "null",
+        "typeid": "124"
+      },
+      {
+        "title": "【9小时8本书】重塑自我 ！ 建议一口气看完，制定2026年计划",
+        "dur": "551:3",
+        "videos": "null",
+        "typeid": "124"
+      },
+      {
+        "title": "【没动力？没热情？】《认知觉醒》深度解析｜成长你所需要知道的事情",
+        "dur": "45:3",
+        "videos": "null",
+        "typeid": "124"
+      },
+      {
+        "title": "纵有诗书在心间，岁月终究败美人。【冯唐】",
+        "dur": "1:11",
+        "videos": "null",
+        "typeid": "228"
+      },
+      {
+        "title": "思屹讲书|《矛盾论》：如何走出人生困局？",
+        "dur": "43:3",
+        "videos": "null",
+        "typeid": "124"
+      },
+      {
+        "title": "思屹讲书|《实践论》解读：戒掉空想，扎根现实，改造人生。",
+        "dur": "27:37",
+        "videos": "null",
+        "typeid": "228"
+      },
+      {
+        "title": "一口气读完悬疑神作《告白》：真正的复仇不是杀戮，而是让凶手绝望地活着，当母爱变成利刃，谁才是真正的恶魔？",
+        "dur": "36:34",
+        "videos": "null",
+        "typeid": "228"
+      },
+      {
+        "title": "《清晰思考》：如何像情报专家一样理性决策，将平凡时刻变成非凡成就？｜冰雹讲书｜英文原版",
+        "dur": "21:18",
+        "videos": "null",
+        "typeid": "124"
+      },
+      {
+        "title": "《自私的基因》：少一些内疚，多一点不要脸。| 冯唐讲书",
+        "dur": "9:24",
+        "videos": "null",
+        "typeid": "228"
+      },
+      {
+        "title": "余华是受了多大的苦，才写出《活着》？| 冯唐讲书",
+        "dur": "12:37",
+        "videos": "null",
+        "typeid": "228"
+      },
+      {
+        "title": "不要用价格，去判断价值。【冯唐】",
+        "dur": "1:22",
+        "videos": "null",
+        "typeid": "228"
+      },
+      {
+        "title": "思屹讲书|《认知觉醒》解读：如何消除焦虑，做成一件事情",
+        "dur": "44:29",
+        "videos": "null",
+        "typeid": "124"
+      }
+    ]
+  },
+  "kw_纯音乐": {
+    "total": "1000",
+    "samples": [
+      {
+        "title": "【无损音质】周杰伦歌曲精选100首 歌词版纯享 地表最高音质 每一首都是顶级文案 中国流行音乐开拓者JAY",
+        "dur": "419:2",
+        "videos": "null",
+        "typeid": "267"
+      },
+      {
+        "title": "第三期舞台纯享完整版《月牙湾》旧曲新唱好听【我的音乐你听吗】",
+        "dur": "35:41",
+        "videos": "null",
+        "typeid": "71"
+      },
+      {
+        "title": "【TF家族】2026新年音乐会「荣耀」:《来自天堂的魔鬼》纯享版（DAY2）",
+        "dur": "4:41",
+        "videos": "null",
+        "typeid": "137"
+      },
+      {
+        "title": "“那些宿命感拉满的顶级纯音乐”",
+        "dur": "35:1",
+        "videos": "null",
+        "typeid": "267"
+      },
+      {
+        "title": "『4K60p·Hi-Res』坂本龍一《圣诞快乐劳伦斯先生/Merry Christmas Mr.Lawrence》祝大家圣诞快乐!",
+        "dur": "5:58",
+        "videos": "null",
+        "typeid": "29"
+      },
+      {
+        "title": "【纯音音乐馆】【240+10P】它们不需要歌词,也可以打动你的心（2018.10.05更新）",
+        "dur": "1217:49",
+        "videos": "null",
+        "typeid": "243"
+      },
+      {
+        "title": "终于弹了这首 世界上最治愈的钢琴曲♪卡农",
+        "dur": "5:28",
+        "videos": "null",
+        "typeid": "59"
+      },
+      {
+        "title": "元 辅 导",
+        "dur": "0:58",
+        "videos": "null",
+        "typeid": "59"
+      },
+      {
+        "title": "顶级的纯音乐到底有多牛?没有一句歌词却能直击听众灵魂！",
+        "dur": "11:37",
+        "videos": "null",
+        "typeid": "243"
+      },
+      {
+        "title": "【小提琴/演奏】《玫瑰少年》小提琴直击灵魂的声音 丨 “生而为人无罪，你不需要抱歉” “哪朵玫瑰没有荆棘？”",
+        "dur": "4:16",
+        "videos": "null",
+        "typeid": "59"
+      },
+      {
+        "title": "（无损音质）《精卫》作曲：30年前，50年后",
+        "dur": "2:57",
+        "videos": "null",
+        "typeid": "267"
+      },
+      {
+        "title": "&quot;那些旋律封神的顶级纯音乐&quot;",
+        "dur": "34:20",
+        "videos": "null",
+        "typeid": "130"
+      }
+    ]
+  },
+  "kw_有声小说 全集": {
+    "total": "1000",
+    "samples": [
+      {
+        "title": "有声书《十日终焉》全集，多人小说剧",
+        "dur": "13270:50",
+        "videos": "null",
+        "typeid": "195"
+      },
+      {
+        "title": "有声小说【13路末班车】| 又名惊魂夜车 | 惊悚&amp;恐怖&amp;灵异&amp;悬疑 | 精品探案力作 | 畅听全集",
+        "dur": "3233:50",
+        "videos": "null",
+        "typeid": "195"
+      },
+      {
+        "title": "有声书《十日终焉》完整版全集，多人有声剧",
+        "dur": "13273:23",
+        "videos": "null",
+        "typeid": "195"
+      },
+      {
+        "title": "搞笑科幻种田多人有声《黎明之剑》去片头片尾‖全集‖超爽有声书‖一次性看个够‖听书‖有声小说",
+        "dur": "23528:12",
+        "videos": "null",
+        "typeid": "195"
+      },
+      {
+        "title": "精品有声书《余罪》全集|超爽有声书|一次性看个够|听书|有声小说|有声读物",
+        "dur": "10860:30",
+        "videos": "null",
+        "typeid": "168"
+      },
+      {
+        "title": "【430小时】科幻种田爽文《黎明之剑》by懒人，一口气看完全集搞笑无脑爽到爆！高文穿越了，但穿越的时候稍微出了点问题！",
+        "dur": "26160:27",
+        "videos": "null",
+        "typeid": "195"
+      },
+      {
+        "title": "【240小时】奇幻修真小说一口气看完，全集带脑算计爽到爆！大爱仙尊，人是万物之灵，枭魔重生，昔日旧梦，一个穿越者不断重生的故事！蛊真人 小说剧",
+        "dur": "14690:29",
+        "videos": "null",
+        "typeid": "195"
+      },
+      {
+        "title": "《牧神记》全集一口气看完，超长连更",
+        "dur": "13090:51",
+        "videos": "null",
+        "typeid": "168"
+      },
+      {
+        "title": "有声书《惊悚乐园》全集，多人小说剧",
+        "dur": "22050:4",
+        "videos": "null",
+        "typeid": "195"
+      },
+      {
+        "title": "有声书《北派盗墓笔记》无删减全集，多人有声剧",
+        "dur": "22630:11",
+        "videos": "null",
+        "typeid": "195"
+      },
+      {
+        "title": "有声书《夫人请住手》全集，搞笑后宫爽文，多人有声剧",
+        "dur": "7759:32",
+        "videos": "null",
+        "typeid": "195"
+      },
+      {
+        "title": "有声书《最后一个道士》完整版全集，悬疑恐怖，多人小说剧",
+        "dur": "5152:33",
+        "videos": "null",
+        "typeid": "195"
+      }
+    ]
+  }
+}

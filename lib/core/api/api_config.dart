@@ -30,6 +30,9 @@ class BiliPaths {
   /// 视频基本信息（含分P列表）
   static const String view = '/x/web-interface/view';
 
+  /// 用户卡片（mid → 名字/头像，免 WBI 免风控）
+  static const String userCard = '/x/web-interface/card';
+
   /// 分P列表
   static const String pageList = '/x/player/pagelist';
 

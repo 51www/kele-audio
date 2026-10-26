@@ -178,6 +178,49 @@ async function proxyAudio(req, res, url) {
   upstream.end();
 }
 
+// ───────────────────────────────────────────────── /img 图片反代（M3）
+//
+// 与 /audio 同理：浏览器环境（无外网直连/跨域）下封面图走本地反代，
+//   /img?u=<encoded 图片 URL>
+// 回补 CORS 头 + 缓存头（同一封面多处复用，交给 HTTP 缓存）。
+async function proxyImg(req, res, url) {
+  let target;
+  try {
+    target = decodeURIComponent(url.searchParams.get('u') || '');
+  } catch {
+    target = '';
+  }
+  if (!/^https?:\/\//.test(target)) {
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('缺少或非法的 u 参数（应为完整图片 URL）');
+    return;
+  }
+  const headers = {
+    'user-agent': DEFAULT_UA,
+    referer: 'https://www.bilibili.com',
+    accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+  };
+  const started = Date.now();
+  try {
+    const upstream = await fetch(target, { headers, redirect: 'follow' });
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    res.writeHead(upstream.status, {
+      'content-type': upstream.headers.get('content-type') || 'image/jpeg',
+      'access-control-allow-origin': '*',
+      'cache-control': 'public, max-age=604800',
+      'x-kele-via': `dev_proxy/img ${Date.now() - started}ms`,
+    });
+    res.end(buf);
+    console.log(`[img] ${upstream.status} ${buf.length}B (${Date.now() - started}ms)`);
+  } catch (err) {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+    }
+    res.end(`dev_proxy/img: ${err.message}`);
+    console.error(`[img] FAIL ${target}: ${err.message}`);
+  }
+}
+
 function httpsOrHttp(target, options) {
   // 用 node:http / node:https 的底层 request 保持流式与 Range 语义，
   // 不用 fetch（fetch 会缓冲整段 body）。
@@ -225,6 +268,8 @@ http
       void proxyApi(req, res, url);
     } else if (url.pathname === '/audio') {
       void proxyAudio(req, res, url);
+    } else if (url.pathname === '/img') {
+      void proxyImg(req, res, url);
     } else if (url.pathname === '/__health') {
       res.writeHead(200, { 'content-type': 'text/plain' }).end('ok');
     } else {
@@ -236,4 +281,5 @@ http
     console.log(`  static: ${WEB_ROOT}`);
     console.log(`  api   : ${API_BASE}  (via /api/*)`);
     console.log('  audio : /audio?u=<url>&ref=<referer>&ua=<ua>  (M2 音频反代)');
+    console.log('  img   : /img?u=<url>  (M3 封面图反代)');
   });

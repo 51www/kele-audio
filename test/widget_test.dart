@@ -23,6 +23,15 @@ void main() {
     }
   }
 
+  /// 发现页网络请求被 450ms 节流 / 风控退避的定时器卡着，
+  /// `pumpAndSettle` 会在「无帧可画」时提前退出 —— 这里手动推进假时钟。
+  Future<void> pumpThroughLoad(WidgetTester tester) async {
+    for (var i = 0; i < 12; i++) {
+      await tester.pump(const Duration(milliseconds: 600));
+    }
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('M1 准出冒烟：三 Tab 壳 + 主题切换 + 二级页返回', (tester) async {
     SharedPreferences.setMockInitialValues({});
 
@@ -30,18 +39,31 @@ void main() {
     addTearDown(services.player.dispose); // M2：测试结束释放 watchdog Timer/观察者
     await tester.pumpWidget(KeleApp(services: services));
     await tester.pumpAndSettle();
+    await pumpThroughLoad(tester);
 
-    // ── Tab 1 发现：接口自检卡片 + 卡片流 ────────────────────────────
+    // ── Tab 1 发现：分类 chips + 加载态/错误态（flutter_test 无网络） ──
     expect(find.text('可乐听书'), findsOneWidget);
-    expect(find.text('接口自检 · core/api'), findsOneWidget);
     expect(find.text('按类型找内容'), findsOneWidget);
     expect(find.text('未在播放'), findsOneWidget); // MiniPlayer 占位
 
-    // 分类切换（状态保留在页面里）——M2 顶部新增播放样本卡，chips 需先滚入视口
-    await scrollTo(tester, find.text('相声曲艺'));
+    // M3：分类 chips 来自内容配置（assets/api/content_config.json）
+    for (final label in ['推荐', '有声书', '相声曲艺', '讲书', '音乐']) {
+      expect(find.text(label), findsOneWidget);
+    }
+
+    // flutter_test 环境 HTTP 被挡 → 发现页应展示错误态 + 重试（不白屏）
+    expect(find.text('加载失败'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+
+    // 分类切换：另一个 feed 独立加载（IndexedStack 保留访问过的分类）
     await tester.tap(find.text('相声曲艺'));
-    await tester.pumpAndSettle();
-    expect(find.text('单田芳评书合集 · 白眉大侠'), findsOneWidget);
+    await pumpThroughLoad(tester);
+    expect(find.text('加载失败'), findsOneWidget); // 当前可见的分类
+    // 访问过的两个分类都保活（含隐藏的推荐 feed）
+    expect(
+      find.text('加载失败', skipOffstage: false).evaluate().length,
+      2,
+    );
 
     // ── Tab 2 书架：空态 + 建表/DAO 读写 Demo ───────────────────────
     await tester.tap(find.text('书架'));

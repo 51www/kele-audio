@@ -4,10 +4,13 @@ import 'package:flutter/services.dart';
 import '../core/api/api_config.dart';
 import '../core/api/album_source.dart';
 import '../core/api/bili_client.dart';
+import '../core/api/content_config.dart';
+import '../core/api/discover_source.dart';
 import '../core/api/key_value_store.dart';
 import '../core/api/play_url_service.dart';
 import '../core/api/prefs_kv_store.dart';
 import '../core/data/daos.dart';
+import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
 import '../core/services/mini_player_controller.dart';
 import '../core/services/player/media_bridge.dart';
@@ -20,6 +23,7 @@ class AppServices {
   AppServices._({
     required this.kv,
     required this.config,
+    required this.content,
     required this.client,
     required this.db,
     required this.daos,
@@ -27,6 +31,8 @@ class AppServices {
     required this.miniPlayer,
     required this.playUrl,
     required this.albums,
+    required this.discover,
+    required this.discoverCache,
     required this.progress,
     required this.prefs,
     required this.player,
@@ -34,6 +40,9 @@ class AppServices {
 
   final KeyValueStore kv;
   final ApiConfig config;
+
+  /// 内容源配置（M3：分类 / 查询 / 黑名单，R1 式远端热修复）
+  final ContentConfig content;
   final BiliClient client;
   final LocalDatabase db;
   final Daos daos;
@@ -45,6 +54,12 @@ class AppServices {
 
   /// 章节来源（多 P / 合集系列）
   final AlbumSource albums;
+
+  /// 发现页聚合源（合集/UP 优先 + 搜索补充 + 过滤去重）
+  final DiscoverSource discover;
+
+  /// 分类首页缓存（TTL 由内容配置下发）
+  final DiscoverPageCache discoverCache;
 
   /// 播放进度持久化（P-03 / P-04）
   final ProgressStore progress;
@@ -77,6 +92,14 @@ class AppServices {
       ),
     );
 
+    // 内容源配置（M3）：内置 JSON → 远端覆盖，损坏静默回退内置分类
+    final content = await ContentConfigLoader.load(
+      store: kv,
+      bundledJson: () async => rootBundle.loadString(
+        'assets/api/content_config.json',
+      ),
+    );
+
     final client = BiliClient(config: config, kv: kv, log: _log);
     await client.initLocal();
 
@@ -89,6 +112,13 @@ class AppServices {
     final daos = Daos(db);
     final playUrl = PlayUrlService(client: client, config: config, log: _log);
     final albums = AlbumSource(client: client, config: config, log: _log);
+    final discover = DiscoverSource(
+      client: client,
+      config: config,
+      kv: kv,
+      log: _log,
+    );
+    final discoverCache = DiscoverPageCache(kv);
     final progress = ProgressStore(daos);
     final prefs = PlayerPrefs(kv);
     final miniPlayer = MiniPlayerController();
@@ -109,6 +139,7 @@ class AppServices {
     return AppServices._(
       kv: kv,
       config: config,
+      content: content,
       client: client,
       db: db,
       daos: daos,
@@ -116,6 +147,8 @@ class AppServices {
       miniPlayer: miniPlayer,
       playUrl: playUrl,
       albums: albums,
+      discover: discover,
+      discoverCache: discoverCache,
       progress: progress,
       prefs: prefs,
       player: player,

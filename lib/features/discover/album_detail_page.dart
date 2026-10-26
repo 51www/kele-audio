@@ -5,18 +5,21 @@ import 'package:provider/provider.dart';
 import '../../app/di.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../app/widgets/common.dart';
+import '../../core/api/discover_source.dart';
 import '../../core/domain/album.dart';
+import '../../core/domain/records.dart';
 import '../../core/services/player/player_service.dart';
 import '../player/player_page.dart';
-import 'discover_seed.dart';
+import 'album_card.dart';
 
-/// 专辑详情页（PRD §5.2）—— M2：真实章节数据 + 点击播放。
+/// 专辑详情页（PRD §5.2，M3）：
+/// 播放全部 + 章节目录（长列表懒加载）+ 进度标记（读 `play_history`：
+/// 未听 / 在听 x% / 已听完 ✓）+ 简介展开。
 ///
 /// 数据来源（按优先级）：
-/// 1. 本地 `album` / `chapter` 表（播放过即有缓存，秒开）；
-/// 2. [AlbumSource] 现取（多 P 用 `view.pages`，合集用 archives 列表）。
-///
-/// 种子卡片（`m1-*`，M1 占位）仍显示占位结构，M3 接内容源后整体替换。
+/// 1. 本地 `album` / `chapter` 表（播放过/发现页卡片落库即有缓存，秒开）；
+/// 2. [DiscoverSource.upNameOf] 补齐合集缺失的 UP 名（card 接口，KV 缓存）；
+/// 3. [AlbumSource] 现取（多 P 用 `view.pages`，合集用 archives 列表）。
 class AlbumDetailPage extends StatefulWidget {
   const AlbumDetailPage({super.key, required this.albumId});
 
@@ -29,7 +32,9 @@ class AlbumDetailPage extends StatefulWidget {
 class _AlbumDetailPageState extends State<AlbumDetailPage> {
   Album? _album;
   List<Chapter> _chapters = const [];
+  List<PlayHistory> _history = const [];
   bool _loading = true;
+  bool _introExpanded = false;
   String? _error;
 
   @override
@@ -47,57 +52,54 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   Future<void> _load() async {
     final services = context.read<AppServices>();
 
-    // 1) 本地缓存优先
-    final cached = services.daos.albums.get(widget.albumId);
-    final cachedChapters = services.daos.chapters.byAlbum(widget.albumId);
-    if (cached != null && cachedChapters.isNotEmpty) {
-      setState(() {
-        _album = cached;
-        _chapters = cachedChapters;
-        _loading = false;
-      });
-      return;
+    // 1) 本地缓存优先（发现页卡片已入库 / 播放过）
+    var album = services.daos.albums.get(widget.albumId);
+    var chapters = services.daos.chapters.byAlbum(widget.albumId);
+
+    if (album == null || chapters.isEmpty) {
+      // 2) 现取
+      try {
+        final bundle = await services.albums.load(
+          id: widget.albumId,
+          sourceType: _sourceType,
+          categoryId: album?.categoryId ?? '',
+          upMid: album?.upMid ?? 0,
+        );
+        album = bundle.album;
+        chapters = bundle.chapters;
+        await services.daos.albums.upsert(bundle.album);
+        await services.daos.chapters.upsertAll(bundle.chapters);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _error = '$e';
+          _loading = false;
+        });
+        return;
+      }
     }
 
-    // 2) 种子占位（M1 卡片）
-    final seed = kSeedAlbums.where((a) => a.id == widget.albumId).firstOrNull;
-    if (seed != null) {
-      setState(() {
-        _album = null;
-        _chapters = const [];
-        _loading = false;
-      });
-      return;
+    // 3) 合集接口的 meta 没有 UP 名：card 接口补齐（KV 缓存，失败静默）
+    if (album.upName.isEmpty && album.upMid > 0) {
+      final name = await services.discover.upNameOf(album.upMid);
+      if (name.isNotEmpty) {
+        album = album.copyWith(upName: name);
+        await services.daos.albums.upsert(album);
+      }
     }
 
-    // 3) 现取
-    try {
-      final bundle = await services.albums.load(
-        id: widget.albumId,
-        sourceType: _sourceType,
-      );
-      await services.daos.albums.upsert(bundle.album);
-      await services.daos.chapters.upsertAll(bundle.chapters);
-      if (!mounted) return;
-      setState(() {
-        _album = bundle.album;
-        _chapters = bundle.chapters;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = '$e';
-        _loading = false;
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      _album = album;
+      _chapters = chapters;
+      _history = services.daos.playHistory.forAlbum(widget.albumId);
+      _loading = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final seed = kSeedAlbums.where((a) => a.id == widget.albumId).firstOrNull;
 
     if (_loading) {
       return Scaffold(
@@ -105,9 +107,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         body: const Center(child: CircularProgressIndicator()),
       );
     }
-
-    // 种子占位卡片：保持 M1 视觉 + 引导到 M2 真实样本
-    if (seed != null) return _seedView(context, tokens, scheme, seed);
 
     final album = _album;
     if (album == null) {
@@ -127,252 +126,257 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       );
     }
 
-    final player = context.read<PlayerService>();
-    final history = context.read<AppServices>().progress.lastOfAlbum(album.id);
-    final currentChapterIndex = history == null
-        ? -1
-        : _chapters.indexWhere((c) => c.id == history.chapterId);
-
-    return Scaffold(
-      appBar: AppBar(title: Text(album.title)),
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(
-          tokens.spaceMd,
-          tokens.spaceSm,
-          tokens.spaceMd,
-          tokens.spaceLg,
-        ),
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(tokens.radiusMd),
-                child: SizedBox(
-                  width: 110,
-                  height: 146,
-                  child: album.coverUrl.isEmpty
-                      ? _placeholderCover(album, scheme)
-                      : Image.network(
-                          album.coverUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) =>
-                              _placeholderCover(album, scheme),
-                        ),
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(album.title,
-                        style: tokens.titleStyle,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 8),
-                    Text(
-                      album.upName.isEmpty ? 'UP 主未知' : album.upName,
-                      style: tokens.bodyStyle,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${_chapters.length} 章 · 播放 ${_playCount(album)}',
-                      style: tokens.captionStyle,
-                    ),
-                    if (history != null) ...[
-                      const SizedBox(height: 8),
-                      StageTag(
-                        '上次听到：${history.chapterTitle} '
-                        '${fmtClock(Duration(seconds: history.positionSec))}',
-                        tone: StageTone.accent,
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: tokens.spaceMd),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: () => player.playAlbum(album, chapters: _chapters),
-                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                  label: const Text('播放全部'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              OutlinedButton.icon(
-                onPressed: () => ScaffoldMessenger.of(context)
-                  ..hideCurrentSnackBar()
-                  ..showSnackBar(const SnackBar(
-                    content: Text('收藏将在 M4 书架接入'),
-                  )),
-                icon: const Icon(Icons.favorite_border_rounded, size: 18),
-                label: const Text('收藏'),
-              ),
-            ],
-          ),
-          const SectionTitle('章节目录'),
-          KeleCard(
-            padding: EdgeInsets.zero,
-            child: Column(
-              children: [
-                for (var i = 0; i < _chapters.length; i++) ...[
-                  if (i > 0)
-                    Divider(
-                        indent: 16, endIndent: 16, color: tokens.hairlineColor),
-                  ListTile(
-                    dense: true,
-                    leading: Text(
-                      (i + 1).toString().padLeft(2, '0'),
-                      style: tokens.numStyle.copyWith(
-                        color: i == currentChapterIndex ? scheme.primary : null,
-                      ),
-                    ),
-                    title: Text(
-                      _chapters[i].title,
-                      style: tokens.bodyStyle.copyWith(
-                        fontWeight:
-                            i == currentChapterIndex ? FontWeight.w700 : null,
-                        color: i == currentChapterIndex ? scheme.primary : null,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: Text(
-                      _fmtDur(_chapters[i].durationSec),
-                      style: tokens.captionStyle,
-                    ),
-                    onTap: () {
-                      player.playAlbum(
-                        album,
-                        chapters: _chapters,
-                        startIndex: i,
-                      );
-                      context.push('/player');
-                    },
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+    return _detailView(context, tokens, album);
   }
 
-  Widget _seedView(
+  Widget _detailView(
     BuildContext context,
     AppTokens tokens,
-    ColorScheme scheme,
-    SeedAlbum seed,
+    Album album,
   ) {
+    final scheme = Theme.of(context).colorScheme;
+    final player = context.read<PlayerService>();
+
+    // 进度标记：chapterId → 历史；「在听」= 最近收听的章节
+    final byChapter = {for (final h in _history) h.chapterId: h};
+    final last = context.read<AppServices>().progress.lastOfAlbum(album.id);
+    final playingChapterId = last?.chapterId ?? '';
+    final totalSec = _chapters.fold<int>(0, (s, c) => s + c.durationSec);
+
     return Scaffold(
-      appBar: AppBar(title: Text(seed.title)),
-      body: ListView(
-        padding: EdgeInsets.all(tokens.spaceMd),
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 110,
-                height: 146,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(tokens.radiusMd),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      scheme.primary.withValues(alpha: 0.9),
-                      scheme.secondary.withValues(alpha: 0.7),
+      appBar: AppBar(title: Text(album.title, maxLines: 1)),
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                tokens.spaceMd,
+                tokens.spaceSm,
+                tokens.spaceMd,
+                0,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(tokens.radiusMd),
+                        child: SizedBox(
+                          width: 110,
+                          height: 146,
+                          child: CoverImage(
+                            url: album.coverUrl,
+                            title: album.title,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(album.title,
+                                style: tokens.titleStyle,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis),
+                            const SizedBox(height: 8),
+                            Text(
+                              album.upName.isEmpty ? 'UP 主未知' : album.upName,
+                              style: tokens.bodyStyle,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              [
+                                if (_chapters.isNotEmpty)
+                                  '${_chapters.length} 章',
+                                if (totalSec > 0) '总时长 ${_fmtTotal(totalSec)}',
+                                if (album.playCount > 0)
+                                  '播放 ${_fmtPlay(album.playCount)}',
+                              ].join(' · '),
+                              style: tokens.captionStyle,
+                            ),
+                            if (last != null) ...[
+                              const SizedBox(height: 8),
+                              StageTag(
+                                '上次听到：${last.chapterTitle} '
+                                '${fmtClock(Duration(seconds: last.positionSec))}',
+                                tone: StageTone.accent,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ],
                   ),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  seed.title.characters.first,
-                  style: TextStyle(
-                    color: scheme.onPrimary,
-                    fontSize: 44,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(seed.title, style: tokens.titleStyle, maxLines: 3),
-                    const SizedBox(height: 8),
-                    Text(seed.upName, style: tokens.bodyStyle),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${seed.chapters} 集 · ${seed.durationLabel} · '
-                      '播放 ${seed.playCount}',
-                      style: tokens.captionStyle,
+                  if (album.intro.isNotEmpty) ...[
+                    SizedBox(height: tokens.spaceSm),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(tokens.radiusSm),
+                      onTap: () =>
+                          setState(() => _introExpanded = !_introExpanded),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Text(
+                          album.intro,
+                          maxLines: _introExpanded ? null : 3,
+                          overflow:
+                              _introExpanded ? null : TextOverflow.ellipsis,
+                          style: tokens.captionStyle,
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 10),
-                    const StageTag('M1 占位数据', tone: StageTone.accent),
+                    Center(
+                      child: Text(
+                        _introExpanded ? '收起简介' : '展开简介',
+                        style: tokens.captionStyle.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   ],
-                ),
+                  SizedBox(height: tokens.spaceMd),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _chapters.isEmpty
+                              ? null
+                              : () => player.playAlbum(album,
+                                  chapters: _chapters),
+                          icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                          label: const Text('播放全部'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      OutlinedButton.icon(
+                        onPressed: () => ScaffoldMessenger.of(context)
+                          ..hideCurrentSnackBar()
+                          ..showSnackBar(const SnackBar(
+                            content: Text('收藏将在 M4 书架接入'),
+                          )),
+                        icon: const Icon(Icons.favorite_border_rounded,
+                            size: 18),
+                        label: const Text('收藏'),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-            ],
-          ),
-          SizedBox(height: tokens.spaceMd),
-          KeleCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('这是 M1 的占位卡片', style: tokens.sectionStyle),
-                const SizedBox(height: 8),
-                Text(
-                  'M2 已接入真实播放核心。回到发现页顶部的「M2 播放样本」，'
-                  '即可打开真实专辑（B 站多 P / 合集）并播放；'
-                  'M3 接入内容源后，本页全部改为真实数据。',
-                  style: tokens.bodyStyle,
-                ),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: () => context.go('/discover'),
-                  icon: const Icon(Icons.explore_outlined, size: 18),
-                  label: const Text('去发现页看真实样本'),
-                ),
-              ],
             ),
           ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(0, tokens.spaceSm, 0, 0),
+              child: SectionTitle(
+                '章节目录',
+                trailing: Text(
+                  '已听 ${_finishedCount(byChapter)}/${_chapters.length}',
+                  style: tokens.captionStyle,
+                ),
+              ),
+            ),
+          ),
+          // 长列表懒加载：SliverList 按需构建（合集动辄 60+ 章不卡顿）
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, i) => _chapterTile(
+                context,
+                tokens,
+                album,
+                i,
+                byChapter[_chapters[i].id],
+                playingChapterId,
+              ),
+              childCount: _chapters.length,
+            ),
+          ),
+          SliverToBoxAdapter(child: SizedBox(height: tokens.spaceLg)),
         ],
       ),
     );
   }
 
-  Widget _placeholderCover(Album album, ColorScheme scheme) => Container(
-        color: scheme.primary.withValues(alpha: 0.9),
-        alignment: Alignment.center,
-        child: Text(
-          album.title.isEmpty ? '书' : album.title.characters.first,
-          style: TextStyle(
-            color: scheme.onPrimary,
-            fontSize: 44,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      );
+  Widget _chapterTile(
+    BuildContext context,
+    AppTokens tokens,
+    Album album,
+    int i,
+    PlayHistory? history,
+    String playingChapterId,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    final chapter = _chapters[i];
+    final playing = chapter.id == playingChapterId;
+    final percent = history?.percent ?? 0;
+    final done = percent >= 90;
 
-  String _playCount(Album album) {
-    if (album.playCount <= 0) return '-';
-    if (album.playCount >= 10000) {
-      return '${(album.playCount / 10000).toStringAsFixed(1)} 万';
-    }
-    return '${album.playCount}';
+    final (mark, markColor) = switch ((done, percent)) {
+      (true, _) => ('✓ 已听完', scheme.secondary),
+      (false, > 0) => ('在听 $percent%', scheme.primary),
+      _ => ('未听', scheme.onSurfaceVariant),
+    };
+
+    return Column(
+      children: [
+        if (i > 0)
+          Divider(indent: 16, endIndent: 16, color: tokens.hairlineColor),
+        ListTile(
+          dense: true,
+          leading: Text(
+            (i + 1).toString().padLeft(2, '0'),
+            style: tokens.numStyle.copyWith(
+              color: playing || done ? scheme.primary : null,
+            ),
+          ),
+          title: Text(
+            chapter.title,
+            style: tokens.bodyStyle.copyWith(
+              fontWeight: playing ? FontWeight.w700 : null,
+              color: playing ? scheme.primary : null,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(mark, style: tokens.captionStyle.copyWith(color: markColor)),
+          trailing: Text(
+            _fmtDur(chapter.durationSec),
+            style: tokens.captionStyle,
+          ),
+          onTap: () {
+            final player = context.read<PlayerService>();
+            player.playAlbum(album, chapters: _chapters, startIndex: i);
+            context.push('/player');
+          },
+        ),
+      ],
+    );
   }
 
-  String _fmtDur(int sec) {
+  int _finishedCount(Map<String, PlayHistory> byChapter) {
+    var n = 0;
+    for (final c in _chapters) {
+      if ((byChapter[c.id]?.percent ?? 0) >= 90) n++;
+    }
+    return n;
+  }
+
+  static String _fmtDur(int sec) {
     if (sec <= 0) return '--:--';
     return fmtClock(Duration(seconds: sec));
+  }
+
+  static String _fmtTotal(int sec) {
+    final h = sec ~/ 3600;
+    final m = (sec % 3600) ~/ 60;
+    if (h <= 0) return '$m 分钟';
+    return m <= 0 ? '$h 小时' : '$h 小时 $m 分';
+  }
+
+  static String _fmtPlay(int play) {
+    if (play >= 10000) return '${(play / 10000).toStringAsFixed(1)} 万';
+    return '$play';
   }
 }
