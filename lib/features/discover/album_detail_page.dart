@@ -9,6 +9,7 @@ import '../../core/api/discover_source.dart';
 import '../../core/domain/album.dart';
 import '../../core/domain/records.dart';
 import '../../core/services/player/player_service.dart';
+import '../../core/services/shelf_controller.dart';
 import '../player/player_page.dart';
 import 'album_card.dart';
 
@@ -136,6 +137,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   ) {
     final scheme = Theme.of(context).colorScheme;
     final player = context.read<PlayerService>();
+    // watch：收藏状态变化实时反映（加入/取消书架）
+    final shelf = context.watch<ShelfController>();
 
     // 进度标记：chapterId → 历史；「在听」= 最近收听的章节
     final byChapter = {for (final h in _history) h.chapterId: h};
@@ -252,14 +255,25 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                       ),
                       const SizedBox(width: 10),
                       OutlinedButton.icon(
-                        onPressed: () => ScaffoldMessenger.of(context)
-                          ..hideCurrentSnackBar()
-                          ..showSnackBar(const SnackBar(
-                            content: Text('收藏将在 M4 书架接入'),
-                          )),
-                        icon: const Icon(Icons.favorite_border_rounded,
-                            size: 18),
-                        label: const Text('收藏'),
+                        onPressed: () async {
+                          final wasIn = shelf.has(album.id);
+                          await shelf.toggle(album.id);
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context)
+                            ..hideCurrentSnackBar()
+                            ..showSnackBar(SnackBar(
+                              content: Text(wasIn
+                                  ? '已移出书架：${album.title}'
+                                  : '已加入书架：${album.title}'),
+                            ));
+                        },
+                        icon: Icon(
+                          shelf.has(album.id)
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          size: 18,
+                        ),
+                        label: Text(shelf.has(album.id) ? '已收藏' : '收藏'),
                       ),
                     ],
                   ),

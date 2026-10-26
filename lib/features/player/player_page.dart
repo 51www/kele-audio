@@ -4,10 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/theme/app_tokens.dart';
-import '../../core/data/daos.dart';
 import '../../core/domain/album.dart';
 import '../../core/domain/playback.dart';
 import '../../core/services/player/player_service.dart';
+import '../../core/services/shelf_controller.dart';
 
 /// 播放页（PRD §5.4）—— M2：真实播放控制。
 ///
@@ -596,27 +596,28 @@ class _ShelfButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final daos = context.read<Daos>();
     if (album == null) return const SizedBox.shrink();
-    final has = daos.shelf.has(album!.id);
+    // watch：收藏状态实时反映（加入/取消书架）
+    final shelf = context.watch<ShelfController>();
+    final inShelf = shelf.has(album!.id);
     return OutlinedButton.icon(
-      onPressed: has
-          ? null
-          : () async {
-              await daos.shelf.add(album!.id);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context)
-                  ..hideCurrentSnackBar()
-                  ..showSnackBar(SnackBar(
-                    content: Text('已加入书架：${album!.title}'),
-                  ));
-              }
-            },
+      onPressed: () async {
+        final wasIn = shelf.has(album!.id);
+        await shelf.toggle(album!.id);
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text(wasIn
+                ? '已移出书架：${album!.title}'
+                : '已加入书架：${album!.title}'),
+          ));
+      },
       icon: Icon(
-        has ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+        inShelf ? Icons.favorite_rounded : Icons.favorite_border_rounded,
         size: 18,
       ),
-      label: Text(has ? '已在书架' : '加入书架'),
+      label: Text(inShelf ? '已收藏' : '加入书架'),
     );
   }
 }

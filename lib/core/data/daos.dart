@@ -93,6 +93,12 @@ class ShelfDao {
 
   bool has(String albumId) => _db.shelf.byId(albumId) != null;
 
+  /// 整条写回（左滑/多选删除的「撤销」用，保留原进度字段）
+  Future<void> upsertItem(ShelfItem item) async {
+    await _db.ensureCreated();
+    await _db.shelf.upsert(item);
+  }
+
   /// 同步收听进度（专辑**在书架上**才写；M4 书架卡片的「已听 x/y」与
   /// 「在听置顶区」都读这里）。不在书架时静默返回，不产生任何副作用。
   Future<void> touch({
@@ -155,6 +161,12 @@ class PlayHistoryDao {
   /// 专辑内全部收听记录（M3 详情页章节进度标记：未听 / 在听 x% / 已听完）。
   List<PlayHistory> forAlbum(String albumId) =>
       _db.playHistory.where((h) => h.albumId == albumId);
+
+  /// 已听完的章节数（percent ≥ 90%；书架卡片「已听 12/86」的分子）
+  int finishedCount(String albumId) =>
+      _db.playHistory
+          .where((h) => h.albumId == albumId && h.percent >= 90)
+          .length;
 
   List<PlayHistory> recent({int limit = 50}) {
     final rows = [..._db.playHistory.all()]

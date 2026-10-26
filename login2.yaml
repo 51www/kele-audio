@@ -1,0 +1,15 @@
+- generic [ref=f1e3]:
+  - complementary [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - heading "卓见" [level=1] [ref=f1e6]
+      - paragraph [ref=f1e8]: 让数据形成洞察
+  - generic [ref=f1e10]:
+    - heading "欢迎登录" [level=2] [ref=f1e11]
+    - generic [ref=f1e13]:
+      - textbox "请输入账号" [ref=f1e21]
+      - textbox "请输入密码" [ref=f1e30]
+      - generic [ref=f1e31] [cursor=pointer]:
+        - generic [ref=f1e32]:
+          - checkbox "记住密码"
+        - generic [ref=f1e34]: 记住密码
+      - button "登录" [ref=f1e35] [cursor=pointer]

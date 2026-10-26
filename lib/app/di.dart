@@ -16,6 +16,7 @@ import '../core/services/mini_player_controller.dart';
 import '../core/services/player/media_bridge.dart';
 import '../core/services/player/player_service.dart';
 import '../core/services/player/progress_store.dart';
+import '../core/services/shelf_controller.dart';
 import 'theme/theme_controller.dart';
 
 /// 应用级服务集合（DI）：一次性启动装配，页面用 `context.read` 取用。
@@ -36,6 +37,7 @@ class AppServices {
     required this.progress,
     required this.prefs,
     required this.player,
+    required this.shelf,
   });
 
   final KeyValueStore kv;
@@ -69,6 +71,9 @@ class AppServices {
 
   /// 播放核心（M2）：专辑 → 章节 → 取址 → 播放 → 落进度
   final PlayerService player;
+
+  /// 书架（M4）：收藏状态的单一事实源 + shelf×album×play_history 联合查询
+  final ShelfController shelf;
 
   /// 启动装配：**不发任何网络请求**（PRD 冷启动 ≤ 3s）。
   ///
@@ -110,6 +115,8 @@ class AppServices {
     await theme.load();
 
     final daos = Daos(db);
+    final shelf = ShelfController(daos);
+    await shelf.ensure();
     final playUrl = PlayUrlService(client: client, config: config, log: _log);
     final albums = AlbumSource(client: client, config: config, log: _log);
     final discover = DiscoverSource(
@@ -132,6 +139,7 @@ class AppServices {
       saveInterval: const Duration(seconds: 15),
       media: mediaBridge ?? NoopMediaBridge(),
       log: _log,
+      shelf: shelf,
     );
     // 零网络、零引擎：只挂生命周期/焦点/系统桥 + 读持久化参数
     await player.init();
@@ -152,6 +160,7 @@ class AppServices {
       progress: progress,
       prefs: prefs,
       player: player,
+      shelf: shelf,
     );
   }
 

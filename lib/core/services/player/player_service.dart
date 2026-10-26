@@ -10,6 +10,7 @@ import '../../data/daos.dart';
 import '../../domain/album.dart';
 import '../../domain/playback.dart';
 import '../mini_player_controller.dart';
+import '../shelf_controller.dart';
 import 'audio_focus.dart';
 import 'media_bridge.dart';
 import 'media_kit_engine.dart';
@@ -50,6 +51,7 @@ class PlayerService extends ChangeNotifier
     MediaSessionBridge? media,
     PlayerEngine Function()? engineFactory,
     this.log,
+    this.shelf,
   })  : _focus = focus ?? AudioFocus.instance,
         _media = media ?? NoopMediaBridge(),
         _engineFactory = engineFactory ?? createPlayerEngine {
@@ -73,6 +75,9 @@ class PlayerService extends ChangeNotifier
   final MediaSessionBridge _media;
   final PlayerEngine Function() _engineFactory;
   final void Function(String message)? log;
+
+  /// M4：进度落盘后通知书架页刷新「在听置顶区 / 已听 x/y」。可选（单测可省略）。
+  final ShelfController? shelf;
 
   /// 常用倍速档（PRD §5.4：0.75/1.0/1.25/1.5/2.0 为常用档）
   static const List<double> speedSteps = <double>[
@@ -859,6 +864,8 @@ class PlayerService extends ChangeNotifier
       positionSec: 0,
       totalChapters: _chapters.length,
     );
+    // M4：进度落盘后通知书架页刷新
+    shelf?.notifyProgressChanged();
     _position = Duration.zero;
     _lastKnown = Duration.zero;
     positionTick.value = Duration.zero;
@@ -897,6 +904,8 @@ class PlayerService extends ChangeNotifier
       positionSec: pos.inSeconds,
       totalChapters: _chapters.length,
     );
+    // M4：进度落盘后通知书架页刷新「在听置顶区 / 已听 x/y」
+    shelf?.notifyProgressChanged();
     await _commitTally();
   }
 
