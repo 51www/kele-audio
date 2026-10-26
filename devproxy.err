@@ -1,3 +1,1 @@
-[img] FAIL https://i1.hdslb.com/bfs/archive/60bd05f7c59348b8b766fc8dffd3e8a7fe607b00.jpg: terminated
-[audio] FAIL https://0.0.0.0:1/expired-1793012815477.m4s: connect ECONNREFUSED 0.0.0.0:1
-[img] FAIL https://i2.hdslb.com/bfs/archive/5d000a243c424c581a039cf3d0996ae3499b197a.png: terminated
+[audio] FAIL https://upos-sz-mirror08c.bilivideo.com/test: getaddrinfo ENOTFOUND upos-sz-mirror08c.bilivideo.com

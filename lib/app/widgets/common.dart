@@ -167,33 +167,46 @@ class EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: scheme.onSurface.withValues(alpha: 0.06),
-              shape: BoxShape.circle,
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        // M8：发现页新增 Banner 后错误态可用高度变小，
+        // 空态/错误态改为「居中 + 不足时可滚动」，任何父级高度都不溢出。
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            // 无界父级（如 ListView 内嵌空态）不注入 minHeight
+            minHeight: constraints.hasBoundedHeight ? constraints.maxHeight : 0,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: scheme.onSurface.withValues(alpha: 0.06),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, size: 34, color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 16),
+                Text(title, style: tokens.titleStyle.copyWith(fontSize: 17)),
+                const SizedBox(height: 8),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: tokens.bodyStyle,
+                ),
+                if (actionLabel != null) ...[
+                  const SizedBox(height: 20),
+                  FilledButton(onPressed: onAction, child: Text(actionLabel!)),
+                ],
+              ],
             ),
-            child: Icon(icon, size: 34, color: scheme.onSurfaceVariant),
           ),
-          const SizedBox(height: 16),
-          Text(title, style: tokens.titleStyle.copyWith(fontSize: 17)),
-          const SizedBox(height: 8),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: tokens.bodyStyle,
-          ),
-          if (actionLabel != null) ...[
-            const SizedBox(height: 20),
-            FilledButton(onPressed: onAction, child: Text(actionLabel!)),
-          ],
-        ],
+        ),
       ),
     );
   }

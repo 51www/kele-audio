@@ -64,5 +64,25 @@
       ],
       "blacklist_up_mids": []
     }
+  ],
+  "featured": [
+    {
+      "title": "高分有声书精选",
+      "subtitle": "编辑每周人工核对",
+      "keyword": "有声书 高分 全集",
+      "emoji": "📚"
+    },
+    {
+      "title": "经典评书专场",
+      "subtitle": "单田芳 / 田连元",
+      "keyword": "评书 全集",
+      "emoji": "📻"
+    },
+    {
+      "title": "睡前放松纯音乐",
+      "subtitle": "助眠 · 解压",
+      "keyword": "纯音乐 助眠",
+      "emoji": "🌙"
+    }
   ]
 }

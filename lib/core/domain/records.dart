@@ -146,6 +146,7 @@ class DownloadTask {
     required this.status,
     this.albumId = '',
     this.updatedAt = 0,
+    this.error = '',
   });
 
   final String chapterId;
@@ -155,6 +156,9 @@ class DownloadTask {
   final DownloadStatus status;
   final int updatedAt;
 
+  /// 失败原因（status == failed 时有值；缓存页展示用，M8）。
+  final String error;
+
   Map<String, dynamic> toJson() => {
         'chapter_id': chapterId,
         'album_id': albumId,
@@ -162,6 +166,7 @@ class DownloadTask {
         'size': sizeBytes,
         'status': status.wire,
         'updated_at': updatedAt,
+        'error': error,
       };
 
   factory DownloadTask.fromJson(Map<String, dynamic> j) => DownloadTask(
@@ -171,5 +176,6 @@ class DownloadTask {
         sizeBytes: (j['size'] as num?)?.toInt() ?? 0,
         status: DownloadStatusX.fromWire('${j['status'] ?? ''}'),
         updatedAt: (j['updated_at'] as num?)?.toInt() ?? 0,
+        error: '${j['error'] ?? ''}',
       );
 }

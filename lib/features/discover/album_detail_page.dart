@@ -8,6 +8,7 @@ import '../../app/widgets/common.dart';
 import '../../core/api/discover_source.dart';
 import '../../core/domain/album.dart';
 import '../../core/domain/records.dart';
+import '../../core/services/offline/offline_cache_service.dart';
 import '../../core/services/player/player_service.dart';
 import '../../core/services/shelf_controller.dart';
 import '../player/player_page.dart';
@@ -279,6 +280,32 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                         label: Text(shelf.has(album.id) ? '已收藏' : '收藏'),
                       ),
                     ],
+                  ),
+                  SizedBox(height: tokens.spaceSm),
+                  // M8 离线缓存：整本入队（状态进度见 我的 → 离线缓存）
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _chapters.isEmpty
+                          ? null
+                          : () {
+                              context.read<OfflineCacheService>().cacheAlbum(
+                                    album,
+                                    _chapters,
+                                  );
+                              ScaffoldMessenger.of(context)
+                                ..hideCurrentSnackBar()
+                                ..showSnackBar(SnackBar(
+                                  content: Text(
+                                      '已加入缓存队列：${album.title}（${_chapters.length} 章）'),
+                                  margin:
+                                      const EdgeInsets.fromLTRB(16, 0, 16, 96),
+                                ));
+                            },
+                      icon: const Icon(Icons.download_for_offline_outlined,
+                          size: 18),
+                      label: const Text('整本缓存'),
+                    ),
                   ),
                 ],
               ),

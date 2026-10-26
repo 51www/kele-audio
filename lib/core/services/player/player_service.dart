@@ -10,6 +10,7 @@ import '../../data/daos.dart';
 import '../../domain/album.dart';
 import '../../domain/playback.dart';
 import '../mini_player_controller.dart';
+import '../offline/offline_cache_service.dart';
 import '../shelf_controller.dart';
 import 'audio_focus.dart';
 import 'media_bridge.dart';
@@ -52,6 +53,7 @@ class PlayerService extends ChangeNotifier
     PlayerEngine Function()? engineFactory,
     this.log,
     this.shelf,
+    this.offline,
   })  : _focus = focus ?? AudioFocus.instance,
         _media = media ?? NoopMediaBridge(),
         _engineFactory = engineFactory ?? createPlayerEngine {
@@ -76,6 +78,10 @@ class PlayerService extends ChangeNotifier
   final MediaSessionBridge _media;
   final PlayerEngine Function() _engineFactory;
   final void Function(String message)? log;
+
+  /// M8：离线缓存服务（可选）。已缓存章节优先用本地音频，
+  /// `onlyCached` 开启时未缓存章节拒绝联网播放。
+  final OfflineCacheService? offline;
 
   /// M4：进度落盘后通知书架页刷新「在听置顶区 / 已听 x/y」。可选（单测可省略）。
   final ShelfController? shelf;
@@ -339,26 +345,44 @@ class PlayerService extends ChangeNotifier
       final bvid = chapter.bvid.isEmpty ? targetAlbum.bvid : chapter.bvid;
       if (bvid.isEmpty) throw StateError('章节缺少 bvid，无法取址');
 
-      final candidates = await playUrl.resolve(
-        bvid: bvid,
-        cid: cid,
-        quality: _quality,
-      );
+      // M8 离线缓存优先：已缓存章节直接用本地/blob 地址，不取网络流。
+      final cachedUrl = offline?.cachedUrlFor(chapter.id) ?? Future.value();
+      final local = await cachedUrl;
       if (mySession != _session) return false;
+      if (local != null && local.isNotEmpty) {
+        _log('[open] 使用已缓存音频：${chapter.title}');
+        await engine.open(
+          url: local,
+          headers: null,
+          autoplay: autoPlay,
+          startAt: startAt,
+        );
+        opened = true;
+      } else {
+        if (offline?.onlyCached ?? false) {
+          throw StateError('该章节未缓存（已开启「仅播放已缓存」）');
+        }
+        final candidates = await playUrl.resolve(
+          bvid: bvid,
+          cid: cid,
+          quality: _quality,
+        );
+        if (mySession != _session) return false;
 
-      for (var i = 0; i < candidates.length; i++) {
-        try {
-          await engine.open(
-            url: candidates[i],
-            headers: playUrl.headersFor(bvid),
-            autoplay: autoPlay,
-            startAt: startAt,
-          );
-          opened = true;
-          break;
-        } catch (e) {
-          _log('[open] 候选 $i 打开失败：$e');
-          if (i < candidates.length - 1) await engine.stop();
+        for (var i = 0; i < candidates.length; i++) {
+          try {
+            await engine.open(
+              url: candidates[i],
+              headers: playUrl.headersFor(bvid),
+              autoplay: autoPlay,
+              startAt: startAt,
+            );
+            opened = true;
+            break;
+          } catch (e) {
+            _log('[open] 候选 $i 打开失败：$e');
+            if (i < candidates.length - 1) await engine.stop();
+          }
         }
       }
       if (!opened) throw StateError('所有候选地址都无法播放');

@@ -13,6 +13,9 @@ import '../core/data/daos.dart';
 import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
 import '../core/services/mini_player_controller.dart';
+import '../core/services/offline/dio_audio_fetcher.dart';
+import '../core/services/offline/audio_store.dart';
+import '../core/services/offline/offline_cache_service.dart';
 import '../core/services/player/media_bridge.dart';
 import '../core/services/player/player_service.dart';
 import '../core/services/player/progress_store.dart';
@@ -41,6 +44,7 @@ class AppServices {
     required this.player,
     required this.shelf,
     required this.settings,
+    required this.offline,
   });
 
   final KeyValueStore kv;
@@ -83,6 +87,9 @@ class AppServices {
 
   /// 设置页持久化（M5）：仅 Wi-Fi 下载占位开关等
   final SettingsStore settings;
+
+  /// 离线缓存（M8）：整本缓存队列 + 缓存播放联动
+  final OfflineCacheService offline;
 
   /// 启动装配：**不发任何网络请求**（PRD 冷启动 ≤ 3s）。
   ///
@@ -149,6 +156,16 @@ class AppServices {
     final prefs = PlayerPrefs(kv);
     final settings = SettingsStore(kv);
     final miniPlayer = MiniPlayerController();
+    final offline = OfflineCacheService(
+      daos: daos,
+      playUrl: playUrl,
+      albumSource: albums,
+      store: createAudioStore(),
+      fetcher: DioAudioFetcher(),
+      log: _log,
+    );
+    await offline.initFlags(kv);
+    offline.useAudioProxy = web;
     final player = PlayerService(
       playUrl: playUrl,
       albumSource: albums,
@@ -160,6 +177,7 @@ class AppServices {
       media: mediaBridge ?? NoopMediaBridge(),
       log: _log,
       shelf: shelf,
+      offline: offline,
     );
     // 零网络、零引擎：只挂生命周期/焦点/系统桥 + 读持久化参数
     await player.init();
@@ -183,6 +201,7 @@ class AppServices {
       player: player,
       shelf: shelf,
       settings: settings,
+      offline: offline,
     );
   }
 

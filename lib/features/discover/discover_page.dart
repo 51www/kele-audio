@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/di.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../app/theme/theme_controller.dart';
+import '../../app/widgets/common.dart';
 import '../../core/api/content_config.dart';
 import 'category_feed.dart';
 
@@ -76,6 +78,8 @@ class _DiscoverPageState extends State<DiscoverPage> {
       child: Column(
         children: [
           _buildHeader(context, tokens, scheme),
+          if (!kids && activeConfig.featured.isNotEmpty)
+            _buildFeatured(context, tokens, scheme, activeConfig.featured),
           Padding(
             padding: EdgeInsets.fromLTRB(
               tokens.spaceMd,
@@ -150,6 +154,13 @@ class _DiscoverPageState extends State<DiscoverPage> {
               ],
             ),
           ),
+          // 搜索（M8）：成人模式显示，儿童模式收起（白名单内不需要搜索）
+          if (!kids)
+            IconButton(
+              tooltip: '搜索',
+              onPressed: () => context.push('/search'),
+              icon: const Icon(Icons.search_rounded),
+            ),
           // 儿童模式开关（PRD §5.5）：开启直接切，关闭走二次确认防误触
           IconButton(
             tooltip: kids ? '退出儿童模式' : '进入儿童模式',
@@ -161,6 +172,83 @@ class _DiscoverPageState extends State<DiscoverPage> {
             icon: Icon(
               kids ? Icons.child_care : Icons.child_care_outlined,
               color: kids ? scheme.primary : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Banner + 编辑精选（M8 / PRD §5.1）：内容配置下发的专题关键词，
+  /// 点卡跳搜索页出结果（`/search?q=...`）。主题渐变 + emoji，不写死颜色。
+  Widget _buildFeatured(
+    BuildContext context,
+    AppTokens tokens,
+    ColorScheme scheme,
+    List<FeaturedTopic> topics,
+  ) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        tokens.spaceMd,
+        tokens.spaceMd,
+        tokens.spaceMd,
+        0,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 96,
+            child: PageView.builder(
+              controller: PageController(viewportFraction: 0.92),
+              itemCount: topics.length,
+              itemBuilder: (context, i) {
+                final t = topics[i];
+                return Padding(
+                  padding: EdgeInsets.only(
+                    right: i == topics.length - 1 ? 0 : tokens.spaceSm,
+                  ),
+                  child: KeleCard(
+                    onTap: () =>
+                        context.push('/search?q=${Uri.encodeComponent(t.keyword)}'),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: tokens.spaceMd,
+                      vertical: tokens.spaceSm,
+                    ),
+                    child: Row(
+                      children: [
+                        Text(t.emoji, style: const TextStyle(fontSize: 30)),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                '编辑精选 · ${t.title}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: tokens.sectionStyle,
+                              ),
+                              if (t.subtitle.isNotEmpty)
+                                Text(
+                                  '${t.subtitle} · ${t.keyword}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: tokens.captionStyle,
+                                ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: tokens.onHairline,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         ],
