@@ -101,14 +101,14 @@ class ProfilePage extends StatelessWidget {
                   _EntryTile(
                     icon: Icons.download_for_offline_outlined,
                     label: '离线缓存',
-                    stage: 'M8',
+                    stage: '',
                     onTap: () => context.push('/profile/downloads'),
                   ),
                   _divider(tokens),
                   _EntryTile(
                     icon: Icons.bar_chart_rounded,
                     label: '听书统计',
-                    stage: 'M8',
+                    stage: '',
                     onTap: () => context.push('/profile/stats'),
                   ),
                   _divider(tokens),

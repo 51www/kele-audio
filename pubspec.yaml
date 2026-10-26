@@ -46,6 +46,10 @@ dependencies:
   cached_network_image: ^4.0.4
   # 图片磁盘缓存管理（cached_network_image 底层）；M5 设置页「清除图片缓存」直接调用
   flutter_cache_manager: ^3.4.5
+  # M8 离线缓存：音频文件落盘目录（IO 平台；Web 走 IndexedDB 不需要）
+  path_provider: ^2.1.4
+  # M8 Web 端 IndexedDB 访问（dart:html 已弃用的官方替代）
+  web: ^1.1.0
 
 dev_dependencies:
   flutter_test:

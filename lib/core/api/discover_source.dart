@@ -91,6 +91,31 @@ class DiscoverSource {
     return DiscoverPageData(items: out, hasMore: hasMore, page: page);
   }
 
+  /// 关键词搜索（M8 搜索页 / PRD §5.1）。
+  ///
+  /// `filterSearch` 口径：仅噪音词 + 60s 时长地板，不做白名单/听书信号
+  /// 判定（用户主动搜索，尊重意图）。复用 `_searchRaw` 的风控兜底。
+  Future<DiscoverPageData> searchAlbums({
+    required String keyword,
+    int page = 1,
+  }) async {
+    final category = CategoryConfig(
+      id: 'search',
+      name: '搜索',
+      filter: CategoryConfig.filterSearch,
+      minDurationSec: 60,
+      queries: const [],
+    );
+    final query = ContentQuery(source: QuerySource.search, keyword: keyword);
+    final res = await _searchPage(query, page, category);
+    final seen = <String>{};
+    final items = [
+      for (final a in res.items)
+        if (a.id.isNotEmpty && seen.add(a.id)) a,
+    ];
+    return DiscoverPageData(items: items, hasMore: res.hasMore, page: page);
+  }
+
   // ------------------------------------------------------------ 搜索（主干）
 
   Future<DiscoverPageData> _searchPage(
@@ -395,6 +420,10 @@ class DiscoverSource {
   }) {
     if (durationSec <= 0) return false;
     final noise = _containsAny(title, noiseWords);
+    if (category.filter == CategoryConfig.filterSearch) {
+      // 搜索结果（M8）：用户主动意图优先，仅噪音词 + 时长地板
+      return !noise && durationSec >= category.minDurationSec;
+    }
     if (category.filter == CategoryConfig.filterChildren) {
       return passesChildrenFilter(
         title: title,

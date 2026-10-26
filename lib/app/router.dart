@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/discover/album_detail_page.dart';
 import '../features/discover/discover_page.dart';
+import '../features/discover/search_page.dart';
 import '../features/profile/pages/about_page.dart';
 import '../features/profile/pages/downloads_page.dart';
 import '../features/profile/pages/history_page.dart';
@@ -103,6 +104,14 @@ class AppRouter {
         name: 'album',
         builder: (context, state) => AlbumDetailPage(
           albumId: state.pathParameters['id'] ?? '',
+        ),
+      ),
+      // 11. 搜索（M8）：`?q=` 支持编辑精选专题卡预置关键词
+      GoRoute(
+        path: '/search',
+        name: 'search',
+        builder: (context, state) => SearchPage(
+          initialKeyword: state.uri.queryParameters['q'] ?? '',
         ),
       ),
     ],

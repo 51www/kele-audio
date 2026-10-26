@@ -29,6 +29,9 @@ class AlbumDao {
   List<Album> byCategory(String categoryId) =>
       _db.albums.where((a) => a.categoryId == categoryId);
 
+  /// 全部专辑（M8 统计页「累计听完专辑数」扫描用）。
+  List<Album> all() => _db.albums.all();
+
   List<Album> recent({int limit = 20}) {
     final rows = [..._db.albums.all()]
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -228,12 +231,24 @@ class DownloadDao {
     await _db.downloads.upsert(task);
   }
 
+  Future<void> upsertAll(Iterable<DownloadTask> tasks) async {
+    await _db.ensureCreated();
+    await _db.downloads.upsertAll(tasks);
+  }
+
   DownloadTask? get(String chapterId) => _db.downloads.byId(chapterId);
 
   Future<void> remove(String chapterId) async {
     await _db.ensureCreated();
     await _db.downloads.deleteById(chapterId);
   }
+
+  Future<void> clear() async {
+    await _db.ensureCreated();
+    await _db.downloads.clear();
+  }
+
+  List<DownloadTask> all() => _db.downloads.all();
 
   int totalBytes() =>
       _db.downloads.all().fold<int>(0, (sum, d) => sum + d.sizeBytes);

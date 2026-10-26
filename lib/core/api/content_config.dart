@@ -118,6 +118,10 @@ class CategoryConfig {
   /// 成人内容词一票否决，见 [DiscoverSource.kidHintWords]。
   static const String filterChildren = 'children';
 
+  /// 搜索结果过滤（M8 搜索页）：只打噪音词，不做白名单口径
+  ///（用户主动搜索，尊重意图；时长门槛用分类的 minDurationSec）。
+  static const String filterSearch = 'search';
+
   /// 分类 id（= `category_id`，专辑缓存表用它归类）。
   final String id;
   final String name;
@@ -164,6 +168,40 @@ class CategoryConfig {
       };
 }
 
+/// 编辑精选专题（M8 / PRD §5.1）：发现页 Banner 与专题卡的配置源。
+///
+/// 本质是「运营预置的关键词」：点专题卡跳搜索页按 [keyword] 出结果，
+/// 运营调整走内容配置下发（R1 通道），不发版。
+class FeaturedTopic {
+  const FeaturedTopic({
+    required this.title,
+    this.subtitle = '',
+    required this.keyword,
+    this.emoji = '🎧',
+  });
+
+  final String title;
+  final String subtitle;
+  final String keyword;
+
+  /// 展示用 emoji（无图片资源时用 emoji + 主题渐变，不写死颜色）。
+  final String emoji;
+
+  factory FeaturedTopic.fromJson(Map<String, dynamic> j) => FeaturedTopic(
+        title: '${j['title'] ?? ''}',
+        subtitle: '${j['subtitle'] ?? ''}',
+        keyword: '${j['keyword'] ?? ''}',
+        emoji: '${j['emoji'] ?? '🎧'}',
+      );
+
+  Map<String, dynamic> toJson() => {
+        'title': title,
+        'subtitle': subtitle,
+        'keyword': keyword,
+        'emoji': emoji,
+      };
+}
+
 /// 分类查询配置全集。
 class ContentConfig {
   ContentConfig({
@@ -171,6 +209,7 @@ class ContentConfig {
     this.remoteConfigUrl = '',
     this.cacheTtlMinutes = 30,
     required this.categories,
+    this.featured = const [],
   });
 
   final int version;
@@ -182,6 +221,9 @@ class ContentConfig {
   final int cacheTtlMinutes;
 
   final List<CategoryConfig> categories;
+
+  /// 编辑精选专题（M8：Banner 轮播 + 专题横滑；空 = 不展示该区块）。
+  final List<FeaturedTopic> featured;
 
   /// 发现页可见分类：成人 5 类（儿童分类 M6 儿童模式下再启用）。
   List<CategoryConfig> get adultCategories =>
@@ -273,6 +315,28 @@ class ContentConfig {
             ],
           ),
         ],
+        // 编辑精选（M8 / PRD §5.1）：Banner + 专题横滑，点卡跳搜索页。
+        // 关键词由人工运营挑选，可经内容配置远端下发调整。
+        featured: const [
+          FeaturedTopic(
+            title: '高分有声书精选',
+            subtitle: '编辑每周人工核对',
+            keyword: '有声书 高分 全集',
+            emoji: '📚',
+          ),
+          FeaturedTopic(
+            title: '经典评书专场',
+            subtitle: '单田芳 / 田连元',
+            keyword: '评书 全集',
+            emoji: '📻',
+          ),
+          FeaturedTopic(
+            title: '睡前放松纯音乐',
+            subtitle: '助眠 · 解压',
+            keyword: '纯音乐 助眠',
+            emoji: '🌙',
+          ),
+        ],
       );
 
   /// 儿童白名单内置兜底（与 `assets/api/children_config.json` 同内容）：
@@ -346,6 +410,10 @@ class ContentConfig {
             if (e is Map)
               CategoryConfig.fromJson(Map<String, dynamic>.from(e)),
         ],
+        featured: [
+          for (final e in (j['featured'] as List?) ?? const [])
+            if (e is Map) FeaturedTopic.fromJson(Map<String, dynamic>.from(e)),
+        ],
       );
 
   Map<String, dynamic> toJson() => {
@@ -353,6 +421,7 @@ class ContentConfig {
         'remote_config_url': remoteConfigUrl,
         'cache_ttl_minutes': cacheTtlMinutes,
         'categories': [for (final c in categories) c.toJson()],
+        'featured': [for (final f in featured) f.toJson()],
       };
 }
 
