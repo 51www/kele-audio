@@ -37,7 +37,8 @@ class MiniPlayer extends StatelessWidget {
         borderRadius: BorderRadius.circular(tokens.radiusPill),
         child: InkWell(
           borderRadius: BorderRadius.circular(tokens.radiusPill),
-          onTap: () => context.go('/player'),
+          // push 进入播放页（go 会清空导航栈，导致播放页向下按钮无栈可弹）
+          onTap: () => context.push('/player'),
           child: SizedBox(
             height: 56,
             child: Stack(

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -11,8 +13,9 @@ import '../../core/services/shelf_controller.dart';
 
 /// 播放页（PRD §5.4）—— M2：真实播放控制。
 ///
-/// 结构：封面 → 标题 → 进度条（独立节流，不整页刷新）→ 控制区 →
-/// 功能区（倍速/定时/音质/章节/模式）→ 加入书架。
+/// 布局（拇指区重构）：上区封面 + 标题（弹性高度，短屏自动压缩封面）；
+/// 页面下部拇指区自上而下为——功能图标带（倍速/定时/音质/播放顺序/收藏/章节，
+/// 图标-only，语义进 tooltip，非默认状态用主色 + 状态点提示）→ 进度条 → 传输控件。
 /// 状态一律来自 [PlayerService]（唯一事实源）。
 class PlayerPage extends StatelessWidget {
   const PlayerPage({super.key});
@@ -30,7 +33,15 @@ class PlayerPage extends StatelessWidget {
         title: const Text('播放'),
         leading: IconButton(
           icon: const Icon(Icons.keyboard_arrow_down_rounded),
-          onPressed: () => Navigator.of(context).maybePop(),
+          tooltip: '收起',
+          onPressed: () {
+            // go_router 栈：push 进入时弹回来源页；直达 /player 无栈可弹时兜底回发现页
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/discover');
+            }
+          },
         ),
         actions: [
           // 演练菜单：debug/profile 构建可见（release 不出现）
@@ -64,41 +75,70 @@ class PlayerPage extends StatelessWidget {
                 padding: EdgeInsets.symmetric(horizontal: tokens.spaceLg),
                 child: Column(
                   children: [
-                    SizedBox(height: tokens.spaceLg),
-                    _Cover(coverUrl: album?.coverUrl ?? ''),
-                    SizedBox(height: tokens.spaceLg),
-                    Text(
-                      album?.title ?? '未选择内容',
-                      style: tokens.titleStyle,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      chapter?.title ?? '准备播放',
-                      style: tokens.captionStyle,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (player.error != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        player.error!,
-                        style: tokens.captionStyle.copyWith(color: scheme.error),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                    // ── 上区：封面 + 标题（弹性高度，短屏自动压缩） ──
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final raw = math.min(constraints.maxWidth * 0.58,
+                              constraints.maxHeight * 0.58);
+                          final coverSize = raw.clamp(140.0, 230.0).toDouble();
+                          return SingleChildScrollView(
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                  minHeight: constraints.maxHeight),
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _Cover(
+                                      coverUrl: album?.coverUrl ?? '',
+                                      size: coverSize,
+                                    ),
+                                    SizedBox(height: tokens.spaceLg),
+                                    Text(
+                                      album?.title ?? '未选择内容',
+                                      style: tokens.titleStyle,
+                                      textAlign: TextAlign.center,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      chapter?.title ?? '准备播放',
+                                      style: tokens.captionStyle,
+                                      textAlign: TextAlign.center,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    if (player.error != null) ...[
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        player.error!,
+                                        style: tokens.captionStyle
+                                            .copyWith(color: scheme.error),
+                                        textAlign: TextAlign.center,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    ],
-                    SizedBox(height: tokens.spaceLg),
+                    ),
+
+                    // ── 拇指区：功能图标带 → 进度条 → 传输控件，整体贴近页面下部 ──
+                    _ControlBand(player: player, album: album),
+                    SizedBox(height: tokens.spaceMd),
 
                     // 进度条：位置更新走 positionTick（独立刷新，不整页重建）
                     _ProgressBar(player: player),
-                    SizedBox(height: tokens.spaceMd),
+                    SizedBox(height: tokens.spaceSm),
 
-                    // 控制区
+                    // 传输控件
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -118,46 +158,6 @@ class PlayerPage extends StatelessWidget {
                       ],
                     ),
                     SizedBox(height: tokens.spaceMd),
-
-                    // 功能区
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: tokens.spaceSm,
-                      runSpacing: tokens.spaceSm,
-                      children: [
-                        _FeatureChip(
-                          icon: Icons.speed_rounded,
-                          label: player.rateLabel,
-                          onTap: () => _showSpeedSheet(context, player),
-                        ),
-                        _FeatureChip(
-                          icon: Icons.bedtime_outlined,
-                          label: _sleepLabel(player),
-                          onTap: () => _showSleepSheet(context, player),
-                        ),
-                        _FeatureChip(
-                          icon: Icons.tune_rounded,
-                          label: player.quality.label,
-                          onTap: () => _showQualitySheet(context, player),
-                        ),
-                        _FeatureChip(
-                          icon: Icons.playlist_play_rounded,
-                          label: '章节 ${player.chapters.length}',
-                          onTap: () => _showChapterSheet(context, player),
-                        ),
-                        _FeatureChip(
-                          icon: _modeIcon(player.mode),
-                          label: player.mode.label,
-                          onTap: () => player.setMode(nextMode(player.mode)),
-                        ),
-                      ],
-                    ),
-                    const Spacer(),
-                    SizedBox(
-                      width: double.infinity,
-                      child: _ShelfButton(album: album),
-                    ),
-                    SizedBox(height: tokens.spaceMd),
                   ],
                 ),
               ),
@@ -165,8 +165,9 @@ class PlayerPage extends StatelessWidget {
     );
   }
 
+  /// 顺序 / 列表循环 / 单曲循环三态图标各不相同，一眼可辨当前模式
   static IconData _modeIcon(PlayMode m) => switch (m) {
-        PlayMode.sequential => Icons.repeat_rounded,
+        PlayMode.sequential => Icons.playlist_play_rounded,
         PlayMode.loopAll => Icons.repeat_rounded,
         PlayMode.loopOne => Icons.repeat_one_rounded,
       };
@@ -453,14 +454,14 @@ class _IdleView extends StatelessWidget {
 }
 
 class _Cover extends StatelessWidget {
-  const _Cover({required this.coverUrl});
+  const _Cover({required this.coverUrl, this.size = 230});
 
   final String coverUrl;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    const size = 230.0;
     final placeholder = Container(
       width: size,
       height: size,
@@ -484,13 +485,14 @@ class _Cover extends StatelessWidget {
       ),
       child: Center(
         child: Container(
-          width: 74,
-          height: 74,
+          width: size * 0.32,
+          height: size * 0.32,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: scheme.surface.withValues(alpha: 0.92),
           ),
-          child: Icon(Icons.headphones_rounded, color: scheme.primary, size: 34),
+          child: Icon(Icons.headphones_rounded,
+              color: scheme.primary, size: size * 0.15),
         ),
       ),
     );
@@ -589,81 +591,168 @@ class _ProgressBar extends StatelessWidget {
   }
 }
 
-class _ShelfButton extends StatelessWidget {
-  const _ShelfButton({required this.album});
+/// 功能图标带（进度条上方，拇指区上沿）：
+/// 倍速 / 定时 / 音质 / 播放顺序 / 收藏 / 章节 —— 仅保留图标，
+/// 文字信息收进 tooltip（长按可见并供无障碍朗读），
+/// 「非默认值」以主色 + 6dp 状态点提示，替代原文字标签的提示职责。
+class _ControlBand extends StatelessWidget {
+  const _ControlBand({required this.player, required this.album});
 
+  final PlayerService player;
   final Album? album;
-
-  @override
-  Widget build(BuildContext context) {
-    if (album == null) return const SizedBox.shrink();
-    // watch：收藏状态实时反映（加入/取消书架）
-    final shelf = context.watch<ShelfController>();
-    final inShelf = shelf.has(album!.id);
-    return OutlinedButton.icon(
-      onPressed: () async {
-        final wasIn = shelf.has(album!.id);
-        await shelf.toggle(album!.id);
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(
-            content: Text(wasIn
-                ? '已移出书架：${album!.title}'
-                : '已加入书架：${album!.title}'),
-            // M7 修复遗留：收藏钮在页面底部，Snackbar 悬浮避让不遮挡
-            margin: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-          ));
-      },
-      icon: Icon(
-        inShelf ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-        size: 18,
-      ),
-      label: Text(inShelf ? '已收藏' : '加入书架'),
-    );
-  }
-}
-
-class _FeatureChip extends StatelessWidget {
-  const _FeatureChip({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
-    return InkWell(
-      borderRadius: BorderRadius.circular(tokens.radiusPill),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(tokens.radiusPill),
-          border: Border.all(color: tokens.hairlineColor),
-          color: scheme.surfaceContainer,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: scheme.primary),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: tokens.captionStyle.copyWith(
-                color: scheme.onSurface,
-                fontWeight: FontWeight.w600,
+    final rateOn = (player.rate - 1.0).abs() > 0.001;
+    final sleepOn = player.hasSleepTimer || player.stopAtChapterEnd;
+    final qualityOn = player.quality != AudioQuality.q132k;
+    final modeOn = player.mode != PlayMode.sequential;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(tokens.radiusPill),
+        border: Border.all(color: tokens.hairlineColor),
+        color: scheme.surfaceContainer,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _IconAction(
+              icon: Icons.speed_rounded,
+              tooltip: '倍速 ${player.rateLabel}',
+              active: rateOn,
+              onTap: () => PlayerPage._showSpeedSheet(context, player),
+            ),
+          ),
+          Expanded(
+            child: _IconAction(
+              icon: sleepOn ? Icons.bedtime_rounded : Icons.bedtime_outlined,
+              tooltip: sleepOn
+                  ? '定时 ${PlayerPage._sleepLabel(player)}'
+                  : '定时关闭',
+              active: sleepOn,
+              onTap: () => PlayerPage._showSleepSheet(context, player),
+            ),
+          ),
+          Expanded(
+            child: _IconAction(
+              icon: Icons.tune_rounded,
+              tooltip: '音质 ${player.quality.label}',
+              active: qualityOn,
+              onTap: () => PlayerPage._showQualitySheet(context, player),
+            ),
+          ),
+          Expanded(
+            child: _IconAction(
+              icon: PlayerPage._modeIcon(player.mode),
+              tooltip: '播放顺序：${player.mode.label}',
+              active: modeOn,
+              onTap: () => player.setMode(PlayerPage.nextMode(player.mode)),
+            ),
+          ),
+          Expanded(
+            child: _FavoriteAction(album: album),
+          ),
+          Expanded(
+            child: _IconAction(
+              icon: Icons.toc_rounded,
+              tooltip: '章节目录（${player.chapters.length}）',
+              onTap: () => PlayerPage._showChapterSheet(context, player),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 图标功能项：48×48 点击热区 + tooltip 语义 + 可选状态点。
+class _IconAction extends StatelessWidget {
+  const _IconAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.active = false,
+    this.showBadge = true,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  /// 非默认状态：图标着主色（可选加状态点）
+  final bool active;
+
+  /// 是否在右上角渲染 6dp 状态点
+  final bool showBadge;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = active ? scheme.primary : scheme.onSurfaceVariant;
+    return IconButton(
+      onPressed: onTap,
+      tooltip: tooltip,
+      iconSize: 22,
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+      color: color,
+      icon: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          Icon(icon, size: 22, color: color),
+          if (active && showBadge)
+            Positioned(
+              top: -2,
+              right: -4,
+              child: Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: scheme.primary,
+                ),
               ),
             ),
-          ],
-        ),
+        ],
       ),
+    );
+  }
+}
+
+/// 收藏（书架）入口：实心/描边心形即时表达状态，点击弹 Snackbar 确认。
+class _FavoriteAction extends StatelessWidget {
+  const _FavoriteAction({required this.album});
+
+  final Album? album;
+
+  @override
+  Widget build(BuildContext context) {
+    // watch：收藏状态实时反映（加入/取消书架）
+    final shelf = context.watch<ShelfController>();
+    final a = album;
+    final inShelf = a != null && shelf.has(a.id);
+    return _IconAction(
+      icon: inShelf ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+      tooltip: inShelf ? '已收藏' : '加入书架',
+      active: inShelf,
+      showBadge: false, // 实心心形已足够表达状态
+      onTap: () async {
+        if (a == null) return;
+        final wasIn = shelf.has(a.id);
+        await shelf.toggle(a.id);
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text(wasIn ? '已移出书架：${a.title}' : '已加入书架：${a.title}'),
+            // 悬浮避让底部拇指区控制簇，不遮挡进度条/传输控件
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 240),
+          ));
+      },
     );
   }
 }
