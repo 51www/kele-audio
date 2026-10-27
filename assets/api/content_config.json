@@ -63,6 +63,31 @@
         { "source": "search", "keyword": "音乐合集", "scope": "video" }
       ],
       "blacklist_up_mids": []
+    },
+    {
+      "category_id": "boke",
+      "name": "播客",
+      "mode": "adult",
+      "filter": "plain",
+      "min_duration_sec": 300,
+      "queries": [
+        { "source": "search", "keyword": "播客", "order": "click", "scope": "video" },
+        { "source": "search", "keyword": "播客 电台", "scope": "video" }
+      ],
+      "blacklist_up_mids": []
+    },
+    {
+      "category_id": "yingyu",
+      "name": "英语听力",
+      "mode": "adult",
+      "filter": "plain",
+      "min_duration_sec": 180,
+      "queries": [
+        { "source": "search", "keyword": "英语听力", "order": "click", "scope": "video" },
+        { "source": "search", "keyword": "VOA 慢速英语", "scope": "video" },
+        { "source": "search", "keyword": "BBC 英语", "scope": "video" }
+      ],
+      "blacklist_up_mids": []
     }
   ],
   "featured": [

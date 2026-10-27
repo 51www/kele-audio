@@ -99,7 +99,7 @@ class ContentQuery {
 /// - [CategoryConfig.filterAudio]：听书信号判定 —— 标题/标签含听书特征词、
 ///   195 听书分区、或搜索词本身是听书题材词，且满足时长门槛；
 /// - [CategoryConfig.filterPlain]：只按时长门槛 + 轻噪音词过滤
-///   （讲书/音乐等不能被「解说/解读」这类正向词误杀的分类）。
+///   （讲书/音乐/播客/英语听力等不能被「解说/解读」这类正向词误杀的分类）。
 class CategoryConfig {
   CategoryConfig({
     required this.id,
@@ -225,7 +225,7 @@ class ContentConfig {
   /// 编辑精选专题（M8：Banner 轮播 + 专题横滑；空 = 不展示该区块）。
   final List<FeaturedTopic> featured;
 
-  /// 发现页可见分类：成人 5 类（儿童分类 M6 儿童模式下再启用）。
+  /// 发现页可见分类：成人 7 类（儿童分类 M6 儿童模式下再启用）。
   List<CategoryConfig> get adultCategories =>
       categories.where((c) => c.mode != 'children').toList();
 
@@ -312,6 +312,35 @@ class ContentConfig {
                 order: 'click',
               ),
               ContentQuery(source: QuerySource.search, keyword: '音乐合集'),
+            ],
+          ),
+          CategoryConfig(
+            id: 'boke',
+            name: '播客',
+            filter: CategoryConfig.filterPlain,
+            minDurationSec: 300,
+            queries: const [
+              ContentQuery(
+                source: QuerySource.search,
+                keyword: '播客',
+                order: 'click',
+              ),
+              ContentQuery(source: QuerySource.search, keyword: '播客 电台'),
+            ],
+          ),
+          CategoryConfig(
+            id: 'yingyu',
+            name: '英语听力',
+            filter: CategoryConfig.filterPlain,
+            minDurationSec: 180,
+            queries: const [
+              ContentQuery(
+                source: QuerySource.search,
+                keyword: '英语听力',
+                order: 'click',
+              ),
+              ContentQuery(source: QuerySource.search, keyword: 'VOA 慢速英语'),
+              ContentQuery(source: QuerySource.search, keyword: 'BBC 英语'),
             ],
           ),
         ],

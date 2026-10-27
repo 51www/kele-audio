@@ -406,7 +406,7 @@ class DiscoverSource {
 
   /// 内容过滤（PRD §7.2，基于真实搜索数据调校）：
   ///
-  /// - [CategoryConfig.filterPlain]（讲书/音乐）：时长 ≥ 门槛 + 轻噪音词；
+  /// - [CategoryConfig.filterPlain]（讲书/音乐/播客/英语听力）：时长 ≥ 门槛 + 轻噪音词；
   /// - [CategoryConfig.filterAudio]（推荐/有声书/相声曲艺）：噪音词一票否决，
   ///   然后听书信号判定 —— 标题含听书特征词（≥300s）、195 听书分区
   ///   （≥600s）、UP 名/标签含听书特征词（≥1800s），满足其一即收。

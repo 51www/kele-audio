@@ -52,7 +52,7 @@ void main() {
     expect(find.byType(MiniPlayer), findsNothing); // 无播放内容 → 不显示播放条
 
     // M3：分类 chips 来自内容配置（assets/api/content_config.json）
-    for (final label in ['推荐', '有声书', '相声曲艺', '讲书', '音乐']) {
+    for (final label in ['推荐', '有声书', '相声曲艺', '讲书', '音乐', '播客', '英语听力']) {
       expect(find.text(label), findsOneWidget);
     }
 

@@ -247,75 +247,92 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                     ),
                   ],
                   SizedBox(height: tokens.spaceMd),
+                  // 操作区（1 主 + 2 次）：主行动全宽置顶获得最大点击区，
+                  // 次行动等宽并排保持对称；层级与微信读书/Apple Books
+                  // 详情页一致（播放为主，收藏/缓存为辅）。
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: FilledButton.icon(
+                      // 「播放全部」是播放按钮：播放并直达播放页
+                      onPressed: _chapters.isEmpty
+                          ? null
+                          : () async {
+                              await player.playAlbum(album,
+                                  chapters: _chapters);
+                              if (!context.mounted) return;
+                              context.push('/player');
+                            },
+                      icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                      label: const Text('播放全部'),
+                    ),
+                  ),
+                  SizedBox(height: tokens.spaceSm),
                   Row(
                     children: [
                       Expanded(
-                        child: FilledButton.icon(
-                          // 「播放全部」是播放按钮：播放并直达播放页
-                          onPressed: _chapters.isEmpty
-                              ? null
-                              : () async {
-                                  await player.playAlbum(album,
-                                      chapters: _chapters);
-                                  if (!context.mounted) return;
-                                  context.push('/player');
-                                },
-                          icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                          label: const Text('播放全部'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final wasIn = shelf.has(album.id);
-                          await shelf.toggle(album.id);
-                          if (!context.mounted) return;
-                          ScaffoldMessenger.of(context)
-                            ..hideCurrentSnackBar()
-                            ..showSnackBar(SnackBar(
-                              content: Text(wasIn
-                                  ? '已移出书架：${album.title}'
-                                  : '已加入书架：${album.title}'),
-                              // M7 修复遗留：收藏/播放钮在页首操作区，
-                              // Snackbar 悬浮避让不遮挡页面内容
-                              margin: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-                            ));
-                        },
-                        icon: Icon(
-                          shelf.has(album.id)
-                              ? Icons.favorite_rounded
-                              : Icons.favorite_border_rounded,
-                          size: 18,
-                        ),
-                        label: Text(shelf.has(album.id) ? '已收藏' : '收藏'),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: tokens.spaceSm),
-                  // M8 离线缓存：整本入队（状态进度见 我的 → 离线缓存）
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _chapters.isEmpty
-                          ? null
-                          : () {
-                              context.read<OfflineCacheService>().cacheAlbum(
-                                    album,
-                                    _chapters,
-                                  );
+                        child: SizedBox(
+                          height: 48,
+                          child: OutlinedButton.icon(
+                            onPressed: () async {
+                              final wasIn = shelf.has(album.id);
+                              await shelf.toggle(album.id);
+                              if (!context.mounted) return;
                               ScaffoldMessenger.of(context)
                                 ..hideCurrentSnackBar()
                                 ..showSnackBar(SnackBar(
-                                  content: Text(
-                                      '已加入缓存队列：${album.title}（${_chapters.length} 章）'),
+                                  content: Text(wasIn
+                                      ? '已移出书架：${album.title}'
+                                      : '已加入书架：${album.title}'),
+                                  // M7 修复遗留：收藏/播放钮在页首操作区，
+                                  // Snackbar 悬浮避让不遮挡页面内容
                                   margin:
                                       const EdgeInsets.fromLTRB(16, 0, 16, 96),
                                 ));
                             },
-                      icon: const Icon(Icons.download_for_offline_outlined,
-                          size: 18),
-                      label: const Text('整本缓存'),
-                    ),
+                            icon: Icon(
+                              shelf.has(album.id)
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              size: 18,
+                            ),
+                            label:
+                                Text(shelf.has(album.id) ? '已收藏' : '收藏'),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: tokens.spaceSm),
+                      Expanded(
+                        child: SizedBox(
+                          height: 48,
+                          child: OutlinedButton.icon(
+                            // M8 离线缓存：整本入队（状态进度见 我的 → 离线缓存）
+                            onPressed: _chapters.isEmpty
+                                ? null
+                                : () {
+                                    context
+                                        .read<OfflineCacheService>()
+                                        .cacheAlbum(
+                                          album,
+                                          _chapters,
+                                        );
+                                    ScaffoldMessenger.of(context)
+                                      ..hideCurrentSnackBar()
+                                      ..showSnackBar(SnackBar(
+                                        content: Text(
+                                            '已加入缓存队列：${album.title}（${_chapters.length} 章）'),
+                                        margin: const EdgeInsets.fromLTRB(
+                                            16, 0, 16, 96),
+                                      ));
+                                  },
+                            icon: const Icon(
+                                Icons.download_for_offline_outlined,
+                                size: 18),
+                            label: const Text('整本缓存'),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

@@ -41,7 +41,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
     }
   }
 
-  /// 当前模式下的分类：儿童模式 → 儿童白名单五类，否则成人 5 类。
+  /// 当前模式下的分类：儿童模式 → 儿童白名单五类，否则成人 7 类。
   List<CategoryConfig> _categoriesOf(BuildContext context) {
     final services = context.read<AppServices>();
     final kids = context.read<ThemeController>().children;

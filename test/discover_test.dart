@@ -243,11 +243,11 @@ void main() {
   });
 
   group('内容配置', () {
-    test('内置兜底：5 个成人分类', () {
+    test('内置兜底：7 个成人分类', () {
       final config = ContentConfig.builtIn();
       final cats = config.adultCategories;
       expect(cats.map((c) => c.id).toList(),
-          ['rec', 'xiaoshuo', 'xiangsheng', 'jiangshu', 'music']);
+          ['rec', 'xiaoshuo', 'xiangsheng', 'jiangshu', 'music', 'boke', 'yingyu']);
       expect(config.byId('music')!.minDurationSec, 180);
       expect(config.byId('xiangshu'), isNull);
     });
@@ -276,13 +276,13 @@ void main() {
         bundledJson: () async =>
             File('assets/api/content_config.json').readAsStringSync(),
       );
-      expect(ok.adultCategories.length, 5);
+      expect(ok.adultCategories.length, 7);
 
       final broken = await ContentConfigLoader.load(
         store: kv,
         bundledJson: () async => '{broken',
       );
-      expect(broken.adultCategories.length, 5); // 回退内置
+      expect(broken.adultCategories.length, 7); // 回退内置
     });
   });
 
