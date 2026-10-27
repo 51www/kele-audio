@@ -3,14 +3,14 @@ import 'package:flutter/material.dart';
 import 'app_palette.dart';
 import 'app_tokens.dart';
 
-/// 全局主题：五套自定义皮肤（`docs/theme.md` 主题 1~5）。
+/// 全局主题：七套自定义皮肤（`docs/theme.md` 主题 1~7）。
 ///
 /// 主题选择：**儿童模式主题 > 一般模式主题**（PRD §5.5）——
 /// 一般模式默认主题1「暖纸书卷」，儿童模式默认主题4「春日活力」，
 /// 由 [ThemeController] 决定生效预设，这里只负责把预设渲染成 [ThemeData]。
 ///
-/// 一致性约束：五套主题共用同一套结构 token（圆角/间距/字阶），
-/// 仅颜色不同；深色预设（主题3）与亮色预设文字对比度均由测试守卫。
+/// 一致性约束：七套主题共用同一套结构 token（圆角/间距/字阶），
+/// 仅颜色不同；深色预设（主题3/6/7）与亮色预设文字对比度均由测试守卫。
 class AppTheme {
   AppTheme._();
 

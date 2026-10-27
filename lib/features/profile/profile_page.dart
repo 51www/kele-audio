@@ -18,7 +18,7 @@ const String appVersion = '1.0.0';
 
 /// Tab 3 我的（PRD §5.6）。
 ///
-/// M1 范围：页面骨架 + 二级页入口 + **全局主题切换**（五套自定义皮肤）
+/// M1 范围：页面骨架 + 二级页入口 + **全局主题切换**（七套自定义皮肤）
 /// + 工程自检；统计与设置项在 M5 完善。
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});

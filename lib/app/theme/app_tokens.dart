@@ -8,7 +8,7 @@ import 'app_palette.dart';
 /// 颜色一律取 `Theme.of(context).colorScheme` / [AppTokens] 的角色槽位，
 /// 这里补齐 Material 没有的**结构性 token**（圆角/间距/渐变/字阶）。
 ///
-/// 一致性约束：五个主题皮肤只换颜色（[ThemePalette]），
+/// 一致性约束：七个主题皮肤只换颜色（[ThemePalette]），
 /// 本类的圆角/间距/字阶**全主题共用同一套**——字体、字号、行高、间距、
 /// 组件形状在各页面与各状态之间保持统一。
 class AppTokens extends ThemeExtension<AppTokens> {

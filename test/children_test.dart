@@ -233,7 +233,7 @@ void main() {
       expect(reloaded.preset, AppThemePreset.mintSpring);
     });
 
-    test('五个主题预设均可构建；主题3 为深色，其余为亮色', () {
+    test('七个主题预设均可构建；主题3/6/7 为深色，其余为亮色', () {
       for (final preset in AppThemePreset.values) {
         final theme = AppTheme.of(preset);
         expect(theme.extension<AppTokens>(), isA<AppTokens>());

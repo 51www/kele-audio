@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 /// 调色板 —— 全项目唯一允许出现色值的地方（widget 内禁止硬编码颜色，见 M1 约束）。
 ///
-/// 五个主题皮肤（`docs/theme.md`）：主题色只换**颜色**，
+/// 七个主题皮肤（`docs/theme.md` 主题 1~7）：主题色只换**颜色**，
 /// 圆角/间距/字阶等结构 token 全主题共用（见 `app_tokens.dart`），
 /// 保证配色、字体、间距、组件样式在各页面/状态间一致。
 ///
@@ -13,7 +13,9 @@ enum AppThemePreset {
   bronzeLibrary(2, '青铜暖知'),
   darkGold(3, '暗夜金橙'),
   springPromo(4, '春日活力'),
-  mintSpring(5, '薄荷春芽');
+  mintSpring(5, '薄荷春芽'),
+  inkNight(6, '静夜墨灰'),
+  mochaNight(7, '暖夜摩卡');
 
   const AppThemePreset(this.id, this.label);
 
@@ -26,8 +28,11 @@ enum AppThemePreset {
   /// 完整名（如「主题1 · 暖纸书卷」）
   String get title => '主题$id · $label';
 
-  /// 主题3 为唯一深色预设
-  bool get isDark => this == AppThemePreset.darkGold;
+  /// 主题3/6/7 为深色预设
+  bool get isDark =>
+      this == AppThemePreset.darkGold ||
+      this == AppThemePreset.inkNight ||
+      this == AppThemePreset.mochaNight;
 
   /// 自检卡片按顺序循环
   AppThemePreset get next => values[(index + 1) % values.length];
@@ -38,6 +43,8 @@ enum AppThemePreset {
         AppThemePreset.darkGold => ThemePalette.darkGold,
         AppThemePreset.springPromo => ThemePalette.springPromo,
         AppThemePreset.mintSpring => ThemePalette.mintSpring,
+        AppThemePreset.inkNight => ThemePalette.inkNight,
+        AppThemePreset.mochaNight => ThemePalette.mochaNight,
       };
 
   static AppThemePreset? fromId(int? id) {
@@ -149,7 +156,7 @@ class ThemePalette {
   );
 
   // ── 主题3：暗夜金橙·国潮（Dark & Gold）───────────────────────────
-  // 唯一深色主题：炭黑底 + 深灰卡片，橙金强调，暖白文字。
+  // 深色主题（主题3）：炭黑底 + 深灰卡片，橙金强调，暖白文字。
   static const ThemePalette darkGold = ThemePalette(
     isDark: true,
     page: Color(0xFF141414), // 炭黑
@@ -212,5 +219,49 @@ class ThemePalette {
     onAccent: Color(0xFF14523F),
     error: Color(0xFFB3261E),
     onError: Color(0xFFFFFFFF),
+  );
+
+  // ── 主题6：静夜墨灰·极简夜用（Graphite Night）────────────────────
+  // 石墨深灰近单色，纯靠明度分层；雾感鼠尾草绿 + 藕粉微点缀，克制安静。
+  static const ThemePalette inkNight = ThemePalette(
+    isDark: true,
+    page: Color(0xFF2F3133), // 石墨深灰
+    cardTop: Color(0xFF3D4043), // 中性灰面板
+    cardBottom: Color(0xFF36393B),
+    hairline: Color(0xFF4C5053),
+    ink: Color(0xFFF1F3F4), // 冷白
+    inkSoft: Color(0xFFC3C8CB),
+    inkWeak: Color(0xFFABB2B6),
+    primary: Color(0xFF8FBFA3), // 雾感鼠尾草绿
+    onPrimary: Color(0xFF14261C),
+    secondary: Color(0xFFD6A3AC), // 藕粉
+    onSecondary: Color(0xFF2B1518),
+    accentTop: Color(0xFFA8D0B8), // 鼠尾草绿渐变
+    accentBottom: Color(0xFF7FAE93),
+    onAccent: Color(0xFF14261C),
+    error: Color(0xFFFF8C82), // 深底上的珊瑚红（提亮保可读）
+    onError: Color(0xFF2A0F0C),
+  );
+
+  // ── 主题7：暖夜摩卡·可可夜读（Mocha Night）───────────────────────
+  // 深可可棕暖黑，奶油暖白文字，焦糖琥珀渐变点缀，夜读陪伴感。
+  static const ThemePalette mochaNight = ThemePalette(
+    isDark: true,
+    page: Color(0xFF3A2B23), // 深可可棕
+    cardTop: Color(0xFF4B3A30), // 暖棕面板
+    cardBottom: Color(0xFF43322A),
+    hairline: Color(0xFF5D493D),
+    ink: Color(0xFFF7EADC), // 奶油暖白
+    inkSoft: Color(0xFFDCC7B4),
+    inkWeak: Color(0xFFC4A78F),
+    primary: Color(0xFFE8A35C), // 焦糖琥珀
+    onPrimary: Color(0xFF2B1A0E),
+    secondary: Color(0xFFE59A8C), // 陶土玫瑰
+    onSecondary: Color(0xFF2B120E),
+    accentTop: Color(0xFFF0B06A), // 琥珀金渐变
+    accentBottom: Color(0xFFC97F3D),
+    onAccent: Color(0xFF2B1A0E),
+    error: Color(0xFFFF8A7A), // 深底上的暖珊瑚（提亮保可读）
+    onError: Color(0xFF2A0F0C),
   );
 }

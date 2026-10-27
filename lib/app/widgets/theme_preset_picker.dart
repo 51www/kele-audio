@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_palette.dart';
 import '../theme/app_tokens.dart';
 
-/// 主题皮肤选择器：五张「色卡」（`docs/theme.md` 主题 1~5）。
+/// 主题皮肤选择器：七张「色卡」（`docs/theme.md` 主题 1~7）。
 ///
 /// 每张色卡用**该主题自己的配色**绘制（页底 / 描边 / 文字取自预设调色板），
 /// 选择前后文字均保持可读，也直观预览换肤效果；

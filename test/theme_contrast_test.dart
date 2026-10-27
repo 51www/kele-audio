@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:kele_audio/app/theme/app_palette.dart';
 
-/// 主题可读性守卫：五套皮肤的文字/底色组合按 WCAG AA（≥4.5:1）断言。
+/// 主题可读性守卫：七套皮肤的文字/底色组合按 WCAG AA（≥4.5:1）断言。
 ///
 /// 覆盖：主/次/弱文字 × 页面/卡片底、按钮文字 × 按钮底、
 /// 渐变点缀上的文字 × 渐变两端、主色/警示色作文字 × 页面/卡片底。
@@ -32,7 +32,7 @@ void main() {
     );
   }
 
-  group('五套主题文字对比度（WCAG AA）', () {
+  group('七套主题文字对比度（WCAG AA）', () {
     for (final preset in AppThemePreset.values) {
       test('${preset.title} 文字与底色全部可读', () {
         final p = preset.palette;
@@ -68,10 +68,10 @@ void main() {
   });
 
   group('主题结构不变式', () {
-    test('主题3 为深色，其余为亮色；深色主题文字为浅色', () {
+    test('主题3/6/7 为深色，其余为亮色；深色主题文字为浅色', () {
       for (final preset in AppThemePreset.values) {
         final p = preset.palette;
-        expect(p.isDark, preset == AppThemePreset.darkGold);
+        expect(p.isDark, preset.isDark);
         expect(
           p.ink.computeLuminance() > 0.5,
           p.isDark,
