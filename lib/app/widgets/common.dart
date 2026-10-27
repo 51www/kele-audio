@@ -46,16 +46,20 @@ class KeleCard extends StatelessWidget {
 
 /// 分区标题：左侧短竖条 + 标题（`docs/theme.md` 的结构语言）。
 class SectionTitle extends StatelessWidget {
-  const SectionTitle(this.title, {super.key, this.trailing});
+  const SectionTitle(this.title, {super.key, this.trailing, this.padding});
 
   final String title;
   final Widget? trailing;
+
+  /// 覆盖默认内边距。默认为（上 [AppTokens.spaceLg] / 下 [AppTokens.spaceSm]）；
+  /// 页面需要自行拼装精确间距（如统一四周留白）时传入。
+  final EdgeInsetsGeometry? padding;
 
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
     return Padding(
-      padding: EdgeInsets.fromLTRB(0, tokens.spaceLg, 0, tokens.spaceSm),
+      padding: padding ?? EdgeInsets.fromLTRB(0, tokens.spaceLg, 0, tokens.spaceSm),
       child: Row(
         children: [
           Container(

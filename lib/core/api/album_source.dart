@@ -77,7 +77,7 @@ class AlbumSource {
       id: bvid,
       sourceType: SourceType.multiPart,
       title: _stripHtml('${data['title'] ?? ''}'),
-      coverUrl: '${data['pic'] ?? ''}',
+      coverUrl: Album.normalizeCover('${data['pic'] ?? ''}'),
       upName: owner is Map ? _stripHtml('${owner['name'] ?? ''}') : '',
       chapterCount: list.length,
       categoryId: categoryId,
@@ -186,7 +186,8 @@ class AlbumSource {
       title: meta is Map
           ? _stripHtml('${meta['title'] ?? meta['name'] ?? ''}')
           : '合集 $seasonId',
-      coverUrl: meta is Map ? '${meta['cover'] ?? ''}' : '',
+      coverUrl:
+          meta is Map ? Album.normalizeCover('${meta['cover'] ?? ''}') : '',
       upName: meta is Map ? _stripHtml('${meta['up_name'] ?? ''}') : '',
       chapterCount:
           meta is Map ? (meta['total'] as num?)?.toInt() ?? list.length : list.length,

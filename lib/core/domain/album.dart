@@ -65,11 +65,21 @@ class Album {
         'created_at': createdAt,
       };
 
+  /// 封面地址归一：兼容历史数据里的协议相对地址（`//`）与明文 HTTP。
+  /// 见 `core/api/discover_source.dart` 的 `normalizePic`（入库前同口径）。
+  static String normalizeCover(String raw) {
+    final p = raw.trim();
+    if (p.isEmpty) return '';
+    if (p.startsWith('//')) return 'https:$p';
+    if (p.startsWith('http://')) return p.replaceFirst('http://', 'https://');
+    return p;
+  }
+
   factory Album.fromJson(Map<String, dynamic> j) => Album(
         id: '${j['id'] ?? ''}',
         sourceType: SourceTypeX.fromWire('${j['source_type'] ?? ''}'),
         title: '${j['title'] ?? ''}',
-        coverUrl: '${j['cover_url'] ?? ''}',
+        coverUrl: normalizeCover('${j['cover_url'] ?? ''}'),
         upName: '${j['up_name'] ?? ''}',
         chapterCount: (j['chapter_count'] as num?)?.toInt() ?? 0,
         categoryId: '${j['category_id'] ?? ''}',

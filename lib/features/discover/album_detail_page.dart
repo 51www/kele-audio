@@ -158,9 +158,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         slivers: [
           SliverToBoxAdapter(
             child: Padding(
+              // 四周留白统一：左右 spaceMd，与章节列表行对齐
               padding: EdgeInsets.fromLTRB(
                 tokens.spaceMd,
-                tokens.spaceSm,
+                tokens.spaceMd,
                 tokens.spaceMd,
                 0,
               ),
@@ -181,7 +182,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 14),
+                      SizedBox(width: tokens.spaceMd),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -190,12 +191,12 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                 style: tokens.titleStyle,
                                 maxLines: 3,
                                 overflow: TextOverflow.ellipsis),
-                            const SizedBox(height: 8),
+                            SizedBox(height: tokens.spaceSm),
                             Text(
                               album.upName.isEmpty ? 'UP 主未知' : album.upName,
                               style: tokens.bodyStyle,
                             ),
-                            const SizedBox(height: 4),
+                            SizedBox(height: tokens.spaceSm),
                             Text(
                               [
                                 if (_chapters.isNotEmpty)
@@ -207,7 +208,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                               style: tokens.captionStyle,
                             ),
                             if (last != null) ...[
-                              const SizedBox(height: 8),
+                              SizedBox(height: tokens.spaceSm),
                               InfoChip(
                                 '上次听到：${last.chapterTitle} '
                                 '${fmtClock(Duration(seconds: last.positionSec))}',
@@ -220,22 +221,20 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                     ],
                   ),
                   if (album.intro.isNotEmpty) ...[
-                    SizedBox(height: tokens.spaceSm),
+                    SizedBox(height: tokens.spaceMd),
                     InkWell(
                       borderRadius: BorderRadius.circular(tokens.radiusSm),
                       onTap: () =>
                           setState(() => _introExpanded = !_introExpanded),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Text(
-                          album.intro,
-                          maxLines: _introExpanded ? null : 3,
-                          overflow:
-                              _introExpanded ? null : TextOverflow.ellipsis,
-                          style: tokens.captionStyle,
-                        ),
+                      child: Text(
+                        album.intro,
+                        maxLines: _introExpanded ? null : 3,
+                        overflow:
+                            _introExpanded ? null : TextOverflow.ellipsis,
+                        style: tokens.captionStyle,
                       ),
                     ),
+                    SizedBox(height: tokens.spaceSm),
                     Center(
                       child: Text(
                         _introExpanded ? '收起简介' : '展开简介',
@@ -339,14 +338,18 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             ),
           ),
           SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(0, tokens.spaceSm, 0, 0),
-              child: SectionTitle(
-                '章节目录',
-                trailing: Text(
-                  '已听 ${_finishedCount(byChapter)}/${_chapters.length}',
-                  style: tokens.captionStyle,
-                ),
+            // 与页内其他区块同一条 16px 左右基准线，标题行不贴边
+            child: SectionTitle(
+              '章节目录',
+              padding: EdgeInsets.fromLTRB(
+                tokens.spaceMd,
+                tokens.spaceMd,
+                tokens.spaceMd,
+                tokens.spaceSm,
+              ),
+              trailing: Text(
+                '已听 ${_finishedCount(byChapter)}/${_chapters.length}',
+                style: tokens.captionStyle,
               ),
             ),
           ),
@@ -364,7 +367,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
               childCount: _chapters.length,
             ),
           ),
-          SliverToBoxAdapter(child: SizedBox(height: tokens.spaceLg)),
+          // 列表尾部留白：与四周 spaceMd 边距一致
+          SliverToBoxAdapter(child: SizedBox(height: tokens.spaceMd)),
         ],
       ),
     );
@@ -393,9 +397,15 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     return Column(
       children: [
         if (i > 0)
-          Divider(indent: 16, endIndent: 16, color: tokens.hairlineColor),
+          Divider(
+            indent: tokens.spaceMd,
+            endIndent: tokens.spaceMd,
+            color: tokens.hairlineColor,
+          ),
         ListTile(
           dense: true,
+          // 与页内其他区块同一条 spaceMd 左右基准线
+          contentPadding: EdgeInsets.symmetric(horizontal: tokens.spaceMd),
           leading: Text(
             (i + 1).toString().padLeft(2, '0'),
             style: tokens.numStyle.copyWith(

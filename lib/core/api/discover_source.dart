@@ -512,7 +512,7 @@ class DiscoverSource {
       id: isSeason ? 'season:$idNum' : 'series:$idNum',
       sourceType: SourceType.series,
       title: title.isEmpty ? (isSeason ? '合集 $idNum' : '系列 $idNum') : title,
-      coverUrl: '${meta['cover'] ?? ''}',
+      coverUrl: normalizePic('${meta['cover'] ?? ''}'),
       upName: _stripHtml('${meta['up_name'] ?? ''}'),
       chapterCount: _toInt(meta['total']),
       categoryId: categoryId,
@@ -524,10 +524,14 @@ class DiscoverSource {
     );
   }
 
-  /// 封面地址归一：`//i1.hdslb.com/...` → `https://...`。
+  /// 封面地址归一：
+  /// - `//i1.hdslb.com/...`（协议相对）→ `https://...`（`Image.network` 无法解析协议相对地址）
+  /// - `http://...` → `https://...`（Android 9+ 默认禁明文 HTTP，会直接加载失败）
   static String normalizePic(String pic) {
     final p = pic.trim();
+    if (p.isEmpty) return '';
     if (p.startsWith('//')) return 'https:$p';
+    if (p.startsWith('http://')) return p.replaceFirst('http://', 'https://');
     return p;
   }
 

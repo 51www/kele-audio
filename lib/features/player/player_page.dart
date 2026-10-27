@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -562,6 +563,12 @@ class _IdleView extends StatelessWidget {
   }
 }
 
+/// 播放页封面。
+///
+/// 视觉语言（沿用当前主题配色，仅移植提示词的光影/质感/构图/氛围）：
+/// 米白大圆角卡片承载核心视觉（封面图），柔光弥漫无硬阴影、边缘柔和不割裂；
+/// 封面缺失时以「纸感卡片 + 琥珀→焦糖渐变插画（羽毛意象）+ 同色系虚化书本」
+/// 营造纵深与治愈纸质人文氛围，渐变插画为全画面唯一高饱和焦点。
 class _Cover extends StatelessWidget {
   const _Cover({required this.coverUrl, this.size = 230});
 
@@ -571,51 +578,252 @@ class _Cover extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final placeholder = Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            scheme.primary.withValues(alpha: 0.92),
-            scheme.secondary.withValues(alpha: 0.7),
-          ],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: scheme.primary.withValues(alpha: 0.28),
-            blurRadius: 40,
-            offset: const Offset(0, 16),
+    final tokens = AppTokens.of(context);
+    final radius = tokens.radiusLg; // 大圆角
+
+    // 柔光弥漫：无硬偏移、低浓度暖色弥散投影
+    final softGlow = BoxShadow(
+      color: scheme.primary.withValues(alpha: 0.20),
+      blurRadius: 40,
+      spreadRadius: -8,
+      offset: Offset.zero,
+    );
+
+    // 核心视觉：封面图或纸感插画占位
+    // 地址归一兜底：历史/系列专辑可能是 `//` 协议相对或明文 HTTP（Android 会拒绝加载）
+    final url = Album.normalizeCover(coverUrl);
+    final Widget visual;
+    if (url.isEmpty) {
+      visual = _CoverPlaceholder(size: size, scheme: scheme, tokens: tokens);
+    } else {
+      final decodeWidth =
+          (size * MediaQuery.devicePixelRatioOf(context)).round();
+      visual = Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.network(
+            url,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            cacheWidth: decodeWidth,
+            errorBuilder: (_, _, _) =>
+                _CoverPlaceholder(size: size, scheme: scheme, tokens: tokens),
+          ),
+          // 底部同色系虚化书本：纵深与场景沉浸
+          Align(
+            alignment: const Alignment(0.92, 0.96),
+            child: Transform.rotate(
+              angle: 0.1,
+              child: ImageFiltered(
+                imageFilter: ui.ImageFilter.blur(sigmaX: 9, sigmaY: 9),
+                child: _buildBookStack(size, radius, scheme, tokens),
+              ),
+            ),
+          ),
+          // 卡片微微泛暖光：顶光 + 底晕，边缘柔和不割裂
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  scheme.primary.withValues(alpha: 0.12),
+                  Colors.transparent,
+                  scheme.secondary.withValues(alpha: 0.14),
+                ],
+                stops: const [0.0, 0.5, 1.0],
+              ),
+            ),
           ),
         ],
-      ),
-      child: Center(
-        child: Container(
-          width: size * 0.32,
-          height: size * 0.32,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: scheme.surface.withValues(alpha: 0.92),
-          ),
-          child: Icon(Icons.headphones_rounded,
-              color: scheme.primary, size: size * 0.15),
+      );
+    }
+
+    // 米白大圆角卡片承载核心视觉
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(radius),
+          boxShadow: [softGlow],
         ),
-      ),
-    );
-    if (coverUrl.isEmpty) return placeholder;
-    return ClipOval(
-      child: Image.network(
-        coverUrl,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => placeholder,
+        foregroundDecoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(radius),
+          // 极浅暖光描边，避免边缘割裂
+          border: Border.all(
+            color: scheme.primary.withValues(alpha: 0.14),
+            width: 1.5,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(radius),
+          child: visual,
+        ),
       ),
     );
   }
+}
+
+/// 封面缺失时的纸感插画占位：暖奶油米白卡片 + 琥珀→焦糖渐变羽毛意象 +
+/// 同色系虚化书本，营造温暖沉静的纸质人文氛围。
+class _CoverPlaceholder extends StatelessWidget {
+  const _CoverPlaceholder({
+    required this.size,
+    required this.scheme,
+    required this.tokens,
+  });
+
+  final double size;
+  final ColorScheme scheme;
+  final AppTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = tokens.radiusLg;
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        gradient: tokens.cardGradient, // 米白纸感微渐变
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 纸感暖光：柔和顶光，无硬阴影
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: const Alignment(0.2, -0.35),
+                radius: 1.15,
+                colors: [
+                  scheme.primary.withValues(alpha: 0.10),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+          // 虚化衬托物：堆叠书本（同色系），营造纵深
+          Align(
+            alignment: const Alignment(0.95, 0.98),
+            child: Transform.rotate(
+              angle: 0.12,
+              child: ImageFiltered(
+                imageFilter: ui.ImageFilter.blur(sigmaX: 7, sigmaY: 7),
+                child: _buildBookStack(size, radius, scheme, tokens),
+              ),
+            ),
+          ),
+          // 核心元素：琥珀橙/焦糖棕渐变插画（羽毛意象）唯一的焦点
+          Center(child: _buildFeather(size, scheme, tokens)),
+          // 顶部柔光弥漫，画面干净通透
+          DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(radius),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.white.withValues(alpha: 0.20),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 同色系虚化「堆叠书本」衬托物，低浓度营造纵深。
+Widget _buildBookStack(
+    double size, double radius, ColorScheme scheme, AppTokens tokens) {
+  final book = (double w, double h, Color c) => Container(
+        width: w,
+        height: h,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(radius * 0.4),
+          color: c,
+        ),
+      );
+  return SizedBox(
+    width: size * 0.52,
+    height: size * 0.52,
+    child: Stack(
+      alignment: Alignment.bottomCenter,
+      children: [
+        Positioned(
+          bottom: 0,
+          left: size * 0.03,
+          child: book(size * 0.44, size * 0.11,
+              scheme.secondary.withValues(alpha: 0.16)),
+        ),
+        Positioned(
+          bottom: size * 0.06,
+          left: size * 0.07,
+          child: book(size * 0.38, size * 0.10,
+              scheme.primary.withValues(alpha: 0.14)),
+        ),
+      ],
+    ),
+  );
+}
+
+/// 核心插画：琥珀→焦糖渐变「羽毛」意象（羽片 + 羽轴 + 顶部柔光高光），
+/// 为全画面唯一高饱和焦点；羽轴用深棕炭灰细线点缀，克制不抢戏。
+Widget _buildFeather(double size, ColorScheme scheme, AppTokens tokens) {
+  final h = size * 0.52;
+  final w = size * 0.17;
+  return SizedBox(
+    height: h,
+    width: w,
+    child: Stack(
+      alignment: Alignment.center,
+      children: [
+        // 羽片：渐变胶囊，微微倾斜
+        Transform.rotate(
+          angle: -0.16,
+          child: Container(
+            width: w,
+            height: h,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(w),
+              gradient: tokens.accentGradient, // 琥珀橙 → 焦糖棕
+              boxShadow: [
+                BoxShadow(
+                  color: scheme.primary.withValues(alpha: 0.28),
+                  blurRadius: 20,
+                  spreadRadius: -4,
+                ),
+              ],
+            ),
+          ),
+        ),
+        // 羽轴：深棕炭灰细线
+        Container(
+          width: 2,
+          height: h * 0.9,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(2),
+            color: scheme.onSurface.withValues(alpha: 0.5),
+          ),
+        ),
+        // 顶部柔光高光
+        Positioned(
+          top: h * 0.07,
+          child: Container(
+            width: w * 0.5,
+            height: h * 0.28,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(w),
+              color: Colors.white.withValues(alpha: 0.4),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _PlayButton extends StatelessWidget {
