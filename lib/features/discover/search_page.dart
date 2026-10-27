@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../player/mini_player.dart';
+
 import '../../app/di.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../app/widgets/common.dart';
@@ -169,6 +171,7 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ),
       ),
+      bottomNavigationBar: const MiniPlayerSlot(),
       body: _keyword.isEmpty ? _buildIdle(tokens, scheme) : _buildResults(tokens),
     );
   }

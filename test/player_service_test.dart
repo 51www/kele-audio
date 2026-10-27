@@ -340,6 +340,29 @@ void main() {
     await h.dispose();
   });
 
+  test('播放条关闭后，新播放任务自动重新显示（需求2）', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    expect(await p.playAlbum(makeAlbum(), chapters: chapters), isTrue);
+    await settle();
+    expect(h.mini.visible, isTrue); // 有播放任务 → 显示
+
+    // 点 ✕ 关闭播放条（模拟：正在播先暂停 + 收起）
+    await p.pause();
+    h.mini.close();
+    expect(h.mini.visible, isFalse);
+
+    // 点某一集 / 切章 = 新播放任务 → 播放条回来
+    await p.playChapterAt(1);
+    await settle();
+    expect(h.mini.visible, isTrue);
+    expect(h.mini.state.chapterTitle, '第2章');
+
+    await h.dispose();
+  });
+
   test('P-04 跨章续播：重进专辑定位到最后听的章节与进度', () async {
     final h = makeHarness();
     final p = await h.start();

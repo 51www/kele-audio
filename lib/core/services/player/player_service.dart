@@ -331,6 +331,8 @@ class PlayerService extends ChangeNotifier
     final mySession = ++_session;
     _loading = true;
     _error = null;
+    // 新播放任务：播放条若曾被手动关闭，此时重新显示
+    miniPlayer.reopen();
     notifyListeners();
 
     final chapter = targetChapters[index];

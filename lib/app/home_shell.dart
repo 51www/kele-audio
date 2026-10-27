@@ -3,7 +3,8 @@ import 'package:go_router/go_router.dart';
 
 import '../features/player/mini_player.dart';
 
-/// 三 Tab 壳：Bottom Navigation + 悬浮 MiniPlayer（PRD §4.1）。
+/// 三 Tab 壳：Bottom Navigation（PRD §4.1）。
+/// 播放条（[MiniPlayerSlot]）浮于底栏之上，无播放内容/已关闭时自动塌缩。
 ///
 /// `StatefulNavigationShell` 由 [StatefulShellRoute.indexedStack] 提供，
 /// 每个分支用 IndexedStack 保持状态 —— 三 Tab 切换**保留滚动位置**。
@@ -37,8 +38,8 @@ class HomeShell extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 全局播放条（M1 占位，M2 接真实状态）
-            const MiniPlayer(),
+            // 播放条浮于底栏之上；无内容/已关闭时塌缩为 0 高度。
+            const MiniPlayerSlot(),
             NavigationBar(
               selectedIndex: navigationShell.currentIndex,
               onDestinationSelected: (i) => _go(context, i),

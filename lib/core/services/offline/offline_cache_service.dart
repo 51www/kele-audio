@@ -132,6 +132,22 @@ class OfflineCacheService extends ChangeNotifier {
     unawaited(_drain());
   }
 
+  /// 缓存单章（播放页缓存面板「缓存本章」；已 done 的幂等跳过）。
+  Future<void> cacheChapter(Album album, Chapter chapter) async {
+    if (daos.downloads.get(chapter.id)?.status == DownloadStatus.done) return;
+    await daos.downloads.upsert(DownloadTask(
+      chapterId: chapter.id,
+      albumId: album.id,
+      filePath: '',
+      sizeBytes: 0,
+      status: DownloadStatus.queued,
+      updatedAt: DateTime.now().millisecondsSinceEpoch,
+    ));
+    _pausedAlbums.remove(album.id);
+    notifyListeners();
+    unawaited(_drain());
+  }
+
   /// 暂停一个专辑（取消进行中的请求，剩余 queued 任务原地等待）。
   Future<void> pauseAlbum(String albumId) async {
     _pausedAlbums.add(albumId);

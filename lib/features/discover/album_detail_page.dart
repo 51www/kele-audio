@@ -11,12 +11,16 @@ import '../../core/domain/records.dart';
 import '../../core/services/offline/offline_cache_service.dart';
 import '../../core/services/player/player_service.dart';
 import '../../core/services/shelf_controller.dart';
+import '../player/mini_player.dart';
 import '../player/player_page.dart';
 import 'album_card.dart';
 
-/// 专辑详情页（PRD §5.2，M3）：
+/// 专辑详情页（PRD §5.2，M3，二级页）：
 /// 播放全部 + 章节目录（长列表懒加载）+ 进度标记（读 `play_history`：
 /// 未听 / 在听 x% / 已听完 ✓）+ 简介展开。
+///
+/// 交互（PRD §4.1）：点「播放全部」跳转播放页；点某一集只显示播放条并开始
+/// 播放，留在本页继续挑选。底部挂 [MiniPlayerSlot]（点播放条可进播放页）。
 ///
 /// 数据来源（按优先级）：
 /// 1. 本地 `album` / `chapter` 表（播放过/发现页卡片落库即有缓存，秒开）；
@@ -149,6 +153,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
     return Scaffold(
       appBar: AppBar(title: Text(album.title, maxLines: 1)),
+      bottomNavigationBar: const MiniPlayerSlot(),
       body: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
@@ -246,10 +251,15 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                     children: [
                       Expanded(
                         child: FilledButton.icon(
+                          // 「播放全部」是播放按钮：播放并直达播放页
                           onPressed: _chapters.isEmpty
                               ? null
-                              : () => player.playAlbum(album,
-                                  chapters: _chapters),
+                              : () async {
+                                  await player.playAlbum(album,
+                                      chapters: _chapters);
+                                  if (!context.mounted) return;
+                                  context.push('/player');
+                                },
                           icon: const Icon(Icons.play_arrow_rounded, size: 18),
                           label: const Text('播放全部'),
                         ),
@@ -390,9 +400,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             style: tokens.captionStyle,
           ),
           onTap: () {
+            // 点某一集：就地开始播放并显示播放条，留在详情页继续浏览，
+            // 不跳转播放页（跳播放页是「播放按钮」的语义）
             final player = context.read<PlayerService>();
             player.playAlbum(album, chapters: _chapters, startIndex: i);
-            context.push('/player');
           },
         ),
       ],

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kele_audio/app/app.dart';
 import 'package:kele_audio/app/dev_flags.dart';
 import 'package:kele_audio/app/di.dart';
+import 'package:kele_audio/features/player/mini_player.dart';
 
 /// M1 准出冒烟测试：三 Tab 状态保留、主题切换、路由、二级页返回。
 void main() {
@@ -46,7 +47,7 @@ void main() {
     // ── Tab 1 发现：分类 chips + 加载态/错误态（flutter_test 无网络） ──
     expect(find.text('可乐听书'), findsOneWidget);
     expect(find.text('按类型找内容'), findsOneWidget);
-    expect(find.text('未在播放'), findsOneWidget); // MiniPlayer 占位
+    expect(find.byType(MiniPlayer), findsNothing); // 无播放内容 → 不显示播放条
 
     // M3：分类 chips 来自内容配置（assets/api/content_config.json）
     for (final label in ['推荐', '有声书', '相声曲艺', '讲书', '音乐']) {
@@ -91,7 +92,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(services.theme.mode, ThemeMode.light);
 
-    // ── 二级页：可达 + 返回 + MiniPlayer 不丢 ────────────────────────
+    // ── 二级页：可达 + 返回 + 播放条显隐稳定 ────────────────────────
     await scrollTo(tester, find.text('关于 / 版本'));
     await tester.tap(find.text('关于 / 版本'));
     await tester.pumpAndSettle();
@@ -103,6 +104,6 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.text('工程自检 · M1 骨架'), findsOneWidget);
-    expect(find.text('未在播放'), findsOneWidget);
+    expect(find.byType(MiniPlayer), findsNothing); // 无播放内容 → 仍不显示
   });
 }

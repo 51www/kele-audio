@@ -8,14 +8,16 @@ import 'package:provider/provider.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../core/domain/album.dart';
 import '../../core/domain/playback.dart';
+import '../../core/services/offline/offline_cache_service.dart';
 import '../../core/services/player/player_service.dart';
 import '../../core/services/shelf_controller.dart';
 
 /// 播放页（PRD §5.4）—— M2：真实播放控制。
 ///
 /// 布局（拇指区重构）：上区封面 + 标题（弹性高度，短屏自动压缩封面）；
-/// 页面下部拇指区自上而下为——功能图标带（倍速/定时/音质/播放顺序/收藏/章节，
-/// 图标-only，语义进 tooltip，非默认状态用主色 + 状态点提示）→ 进度条 → 传输控件。
+/// 页面下部拇指区自上而下为——功能图标带（收藏/定时/音质/播放顺序/缓存，
+/// 无背景图标-only，语义进 tooltip，非默认状态用主色 + 状态点提示）→
+/// 进度条 → 传输控件（倍速文字居左、章节目录居右，参考同类产品播放页）。
 /// 状态一律来自 [PlayerService]（唯一事实源）。
 class PlayerPage extends StatelessWidget {
   const PlayerPage({super.key});
@@ -138,22 +140,38 @@ class PlayerPage extends StatelessWidget {
                     _ProgressBar(player: player),
                     SizedBox(height: tokens.spaceSm),
 
-                    // 传输控件
+                    // 传输控件：倍速（左）| 上一章/播放/下一章 | 章节（右），
+                    // 参考同类产品播放页，常用功能贴拇指区两侧
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        IconButton(
-                          onPressed: player.hasPrev ? player.previous : null,
-                          icon: const Icon(Icons.skip_previous_rounded),
-                          iconSize: 34,
+                        _SpeedLabel(player: player),
+                        Expanded(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              IconButton(
+                                onPressed:
+                                    player.hasPrev ? player.previous : null,
+                                icon: const Icon(Icons.skip_previous_rounded),
+                                iconSize: 34,
+                              ),
+                              const SizedBox(width: 8),
+                              _PlayButton(player: player),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                onPressed:
+                                    player.hasNext ? player.next : null,
+                                icon: const Icon(Icons.skip_next_rounded),
+                                iconSize: 34,
+                              ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(width: 8),
-                        _PlayButton(player: player),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          onPressed: player.hasNext ? player.next : null,
-                          icon: const Icon(Icons.skip_next_rounded),
-                          iconSize: 34,
+                        _IconAction(
+                          icon: Icons.toc_rounded,
+                          tooltip: '章节目录（${player.chapters.length}）',
+                          onTap: () =>
+                              PlayerPage._showChapterSheet(context, player),
                         ),
                       ],
                     ),
@@ -340,6 +358,97 @@ class PlayerPage extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  /// 缓存面板：缓存本章 / 整本缓存（PRD §5.8；下载图标即入口语义）。
+  static void _showCacheSheet(
+    BuildContext context,
+    PlayerService player,
+    OfflineCacheService offline,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final tokens = AppTokens.of(sheetContext);
+        final album = player.album;
+        final chapter = player.currentChapter;
+        final done = chapter != null && offline.isDone(chapter.id);
+        final remaining =
+            player.chapters.where((c) => !offline.isDone(c.id)).length;
+
+        Future<void> run(Future<void> Function() task, String toast) async {
+          await task();
+          if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(SnackBar(
+              content: Text(toast),
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 240),
+            ));
+        }
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('缓存', style: tokens.sectionStyle),
+                ),
+              ),
+              ListTile(
+                dense: true,
+                leading: Icon(
+                  done
+                      ? Icons.download_done_rounded
+                      : Icons.download_rounded,
+                  color: done
+                      ? Theme.of(sheetContext).colorScheme.primary
+                      : null,
+                ),
+                title: Text(
+                  done ? '本章已缓存' : '缓存本章',
+                  style: tokens.bodyStyle,
+                ),
+                subtitle: chapter == null
+                    ? null
+                    : Text(
+                        chapter.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tokens.captionStyle,
+                      ),
+                onTap: done || album == null || chapter == null
+                    ? null
+                    : () => run(
+                          () => offline.cacheChapter(album, chapter),
+                          '已加入缓存队列：${chapter.title}',
+                        ),
+              ),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.download_for_offline_outlined),
+                title: Text(
+                  remaining > 0 ? '整本缓存（$remaining 章待缓存）' : '整本已缓存',
+                  style: tokens.bodyStyle,
+                ),
+                onTap: album == null || remaining == 0
+                    ? null
+                    : () => run(
+                          () => offline.cacheAlbum(album, player.chapters),
+                          '已加入缓存队列：${album.title}（$remaining 章）',
+                        ),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -591,10 +700,10 @@ class _ProgressBar extends StatelessWidget {
   }
 }
 
-/// 功能图标带（进度条上方，拇指区上沿）：
-/// 倍速 / 定时 / 音质 / 播放顺序 / 收藏 / 章节 —— 仅保留图标，
-/// 文字信息收进 tooltip（长按可见并供无障碍朗读），
-/// 「非默认值」以主色 + 6dp 状态点提示，替代原文字标签的提示职责。
+/// 功能图标带（进度条上方，拇指区上沿）：收藏 / 定时 / 音质 / 播放顺序 /
+/// 缓存 —— 无背景、仅保留图标，文字信息收进 tooltip（长按可见并供无障碍
+/// 朗读），「非默认值」以主色 + 6dp 状态点提示。倍速（文字）、章节分居
+/// 传输行两侧。
 class _ControlBand extends StatelessWidget {
   const _ControlBand({required this.player, required this.album});
 
@@ -603,68 +712,103 @@ class _ControlBand extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tokens = AppTokens.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final rateOn = (player.rate - 1.0).abs() > 0.001;
     final sleepOn = player.hasSleepTimer || player.stopAtChapterEnd;
     final qualityOn = player.quality != AudioQuality.q132k;
     final modeOn = player.mode != PlayMode.sequential;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(tokens.radiusPill),
-        border: Border.all(color: tokens.hairlineColor),
-        color: scheme.surfaceContainer,
+    return Row(
+      children: [
+        Expanded(
+          child: _FavoriteAction(album: album),
+        ),
+        Expanded(
+          child: _IconAction(
+            icon: Icons.alarm_rounded,
+            tooltip: sleepOn
+                ? '定时 ${PlayerPage._sleepLabel(player)}'
+                : '定时关闭',
+            active: sleepOn,
+            onTap: () => PlayerPage._showSleepSheet(context, player),
+          ),
+        ),
+        Expanded(
+          child: _IconAction(
+            icon: Icons.high_quality_rounded,
+            tooltip: '音质 ${player.quality.label}',
+            active: qualityOn,
+            onTap: () => PlayerPage._showQualitySheet(context, player),
+          ),
+        ),
+        Expanded(
+          child: _IconAction(
+            icon: PlayerPage._modeIcon(player.mode),
+            tooltip: '播放顺序：${player.mode.label}',
+            active: modeOn,
+            onTap: () => player.setMode(PlayerPage.nextMode(player.mode)),
+          ),
+        ),
+        Expanded(
+          child: _CacheAction(player: player),
+        ),
+      ],
+    );
+  }
+}
+
+/// 倍速入口（传输行左侧）：直接显示当前倍速文字（同类产品惯例），
+/// 一眼可读当前值，点按弹倍速面板。
+class _SpeedLabel extends StatelessWidget {
+  const _SpeedLabel({required this.player});
+
+  final PlayerService player;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final on = (player.rate - 1.0).abs() > 0.001;
+    return Tooltip(
+      message: '倍速 ${player.rateLabel}',
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: () => PlayerPage._showSpeedSheet(context, player),
+        child: SizedBox(
+          width: 56,
+          height: 48,
+          child: Center(
+            child: Text(
+              player.rateLabel,
+              style: tokens.captionStyle.copyWith(
+                color: on ? scheme.primary : scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _IconAction(
-              icon: Icons.speed_rounded,
-              tooltip: '倍速 ${player.rateLabel}',
-              active: rateOn,
-              onTap: () => PlayerPage._showSpeedSheet(context, player),
-            ),
-          ),
-          Expanded(
-            child: _IconAction(
-              icon: sleepOn ? Icons.bedtime_rounded : Icons.bedtime_outlined,
-              tooltip: sleepOn
-                  ? '定时 ${PlayerPage._sleepLabel(player)}'
-                  : '定时关闭',
-              active: sleepOn,
-              onTap: () => PlayerPage._showSleepSheet(context, player),
-            ),
-          ),
-          Expanded(
-            child: _IconAction(
-              icon: Icons.tune_rounded,
-              tooltip: '音质 ${player.quality.label}',
-              active: qualityOn,
-              onTap: () => PlayerPage._showQualitySheet(context, player),
-            ),
-          ),
-          Expanded(
-            child: _IconAction(
-              icon: PlayerPage._modeIcon(player.mode),
-              tooltip: '播放顺序：${player.mode.label}',
-              active: modeOn,
-              onTap: () => player.setMode(PlayerPage.nextMode(player.mode)),
-            ),
-          ),
-          Expanded(
-            child: _FavoriteAction(album: album),
-          ),
-          Expanded(
-            child: _IconAction(
-              icon: Icons.toc_rounded,
-              tooltip: '章节目录（${player.chapters.length}）',
-              onTap: () => PlayerPage._showChapterSheet(context, player),
-            ),
-          ),
-        ],
-      ),
+    );
+  }
+}
+
+/// 缓存入口：下载图标；当前章节已缓存后变 ✓ 并着主色（状态即语义）。
+/// 点按弹「缓存本章 / 整本缓存」面板（PRD §5.8 离线缓存）。
+class _CacheAction extends StatelessWidget {
+  const _CacheAction({required this.player});
+
+  final PlayerService player;
+
+  @override
+  Widget build(BuildContext context) {
+    final offline = context.watch<OfflineCacheService>();
+    final chapter = player.currentChapter;
+    final done = chapter != null && offline.isDone(chapter.id);
+    return _IconAction(
+      icon: done ? Icons.download_done_rounded : Icons.download_rounded,
+      tooltip: done ? '本章已缓存' : '缓存',
+      active: done,
+      showBadge: false, // ✓ 图标本身已表达完成态
+      onTap: () => PlayerPage._showCacheSheet(context, player, offline),
     );
   }
 }
