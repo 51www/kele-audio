@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/dev_flags.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../app/widgets/common.dart';
 import '../../core/data/dao_demo.dart';
@@ -33,10 +34,10 @@ enum _SortMode { recent, collected, title }
 
 extension _SortModeX on _SortMode {
   String get label => switch (this) {
-        _SortMode.recent => '最近收听',
-        _SortMode.collected => '收藏时间',
-        _SortMode.title => '标题',
-      };
+    _SortMode.recent => '最近收听',
+    _SortMode.collected => '收藏时间',
+    _SortMode.title => '标题',
+  };
 }
 
 class _ShelfPageState extends State<ShelfPage> {
@@ -72,9 +73,7 @@ class _ShelfPageState extends State<ShelfPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(
-          content: Text('这本需要先播放过，本地还没有章节数据'),
-        ));
+        ..showSnackBar(const SnackBar(content: Text('这本需要先播放过，本地还没有章节数据')));
       return;
     }
     final player = context.read<PlayerService>();
@@ -91,13 +90,15 @@ class _ShelfPageState extends State<ShelfPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text('已移除「${view.title}」'),
-        action: SnackBarAction(
-          label: '撤销',
-          onPressed: () => shelf.restore(removed),
+      ..showSnackBar(
+        SnackBar(
+          content: Text('已移除「${view.title}」'),
+          action: SnackBarAction(
+            label: '撤销',
+            onPressed: () => shelf.restore(removed),
+          ),
         ),
-      ));
+      );
   }
 
   Future<void> _deleteSelected() async {
@@ -179,8 +180,11 @@ class _ShelfPageState extends State<ShelfPage> {
                             child: Row(
                               children: [
                                 if (_sort == m)
-                                  Icon(Icons.check_rounded,
-                                      size: 18, color: scheme.primary)
+                                  Icon(
+                                    Icons.check_rounded,
+                                    size: 18,
+                                    color: scheme.primary,
+                                  )
                                 else
                                   const SizedBox(width: 18),
                                 const SizedBox(width: 8),
@@ -197,9 +201,16 @@ class _ShelfPageState extends State<ShelfPage> {
           if (_selecting)
             Padding(
               padding: EdgeInsets.fromLTRB(
-                  tokens.spaceMd, 0, tokens.spaceMd, tokens.spaceSm),
+                tokens.spaceMd,
+                0,
+                tokens.spaceMd,
+                tokens.spaceSm,
+              ),
               child: KeleCard(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 child: Row(
                   children: [
                     Text('已选 ${_selected.length} 本', style: tokens.bodyStyle),
@@ -214,9 +225,9 @@ class _ShelfPageState extends State<ShelfPage> {
                             ..addAll(views.map((v) => v.item.albumId));
                         }
                       }),
-                      child: Text(_selected.length == views.length
-                          ? '取消全选'
-                          : '全选'),
+                      child: Text(
+                        _selected.length == views.length ? '取消全选' : '全选',
+                      ),
                     ),
                     const SizedBox(width: 8),
                     FilledButton.tonal(
@@ -232,10 +243,18 @@ class _ShelfPageState extends State<ShelfPage> {
           if (listening.isNotEmpty) ...[
             Padding(
               padding: EdgeInsets.fromLTRB(
-                  tokens.spaceMd, tokens.spaceLg, tokens.spaceMd, 0),
+                tokens.spaceMd,
+                tokens.spaceLg,
+                tokens.spaceMd,
+                0,
+              ),
               child: Row(
                 children: [
-                  Icon(Icons.graphic_eq_rounded, color: scheme.primary, size: 18),
+                  Icon(
+                    Icons.graphic_eq_rounded,
+                    color: scheme.primary,
+                    size: 18,
+                  ),
                   const SizedBox(width: 8),
                   Text('在听', style: tokens.sectionStyle),
                   const SizedBox(width: 8),
@@ -260,13 +279,14 @@ class _ShelfPageState extends State<ShelfPage> {
           // ── 收藏列表 ─────────────────────────────────────────────
           Padding(
             padding: EdgeInsets.fromLTRB(
-                tokens.spaceMd, tokens.spaceLg, tokens.spaceMd, 0),
+              tokens.spaceMd,
+              tokens.spaceLg,
+              tokens.spaceMd,
+              0,
+            ),
             child: SectionTitle(
               '收藏列表',
-              trailing: Text(
-                '排序 · ${_sort.label}',
-                style: tokens.captionStyle,
-              ),
+              trailing: Text('排序 · ${_sort.label}', style: tokens.captionStyle),
             ),
           ),
           if (sorted.isEmpty)
@@ -303,112 +323,119 @@ class _ShelfPageState extends State<ShelfPage> {
                 onDelete: () => _deleteOne(v),
               ),
 
-          // ── 本地数据层自检（M1 准出，保留） ──────────────────────
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              tokens.spaceMd,
-              tokens.spaceLg,
-              tokens.spaceMd,
-              0,
-            ),
-            child: KeleCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.storage_rounded,
-                          size: 18, color: scheme.primary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text('本地数据层 · core/data',
-                            style: tokens.sectionStyle),
-                      ),
-                      const StageTag('M1 准出', tone: StageTone.accent),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '六张表（PRD §7.5）：${LocalDatabase.tableNames.join(' · ')}',
-                    style: tokens.captionStyle,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    db.createResult?.describe ?? '表尚未创建',
-                    style: tokens.numStyle,
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.tonal(
-                    onPressed: _running ? null : _runDemo,
-                    child: Text(_running ? '运行中…' : '运行建表 + DAO 读写 Demo'),
-                  ),
-                  if (_report != null) ...[
+          // ── 本地数据层自检（M1 准出证据；DevFlags 开启才渲染） ────
+          if (DevFlags.showPanels)
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                tokens.spaceMd,
+                tokens.spaceLg,
+                tokens.spaceMd,
+                0,
+              ),
+              child: KeleCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.storage_rounded,
+                          size: 18,
+                          color: scheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '本地数据层 · core/data',
+                            style: tokens.sectionStyle,
+                          ),
+                        ),
+                        const StageTag('M1 准出', tone: StageTone.accent),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '六张表（PRD §7.5）：${LocalDatabase.tableNames.join(' · ')}',
+                      style: tokens.captionStyle,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      db.createResult?.describe ?? '表尚未创建',
+                      style: tokens.numStyle,
+                    ),
                     const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: scheme.onSurface.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(tokens.radiusSm),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                _report!.ok
-                                    ? Icons.check_circle_rounded
-                                    : Icons.error_rounded,
-                                size: 16,
-                                color: _report!.ok
-                                    ? scheme.secondary
-                                    : scheme.error,
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
+                    FilledButton.tonal(
+                      onPressed: _running ? null : _runDemo,
+                      child: Text(_running ? '运行中…' : '运行建表 + DAO 读写 Demo'),
+                    ),
+                    if (_report != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: scheme.onSurface.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(tokens.radiusSm),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  _report!.ok
+                                      ? Icons.check_circle_rounded
+                                      : Icons.error_rounded,
+                                  size: 16,
+                                  color: _report!.ok
+                                      ? scheme.secondary
+                                      : scheme.error,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    _report!.summary,
+                                    style: tokens.numStyle.copyWith(
+                                      color: _report!.ok
+                                          ? scheme.secondary
+                                          : scheme.error,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            for (final s in _report!.steps)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 2,
+                                ),
                                 child: Text(
-                                  _report!.summary,
-                                  style: tokens.numStyle.copyWith(
-                                    color: _report!.ok
-                                        ? scheme.secondary
-                                        : scheme.error,
+                                  '· $s',
+                                  style: tokens.captionStyle.copyWith(
+                                    fontFamily: 'monospace',
+                                    fontSize: 11.5,
                                   ),
                                 ),
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          for (final s in _report!.steps)
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 2),
-                              child: Text(
-                                '· $s',
+                            if (_counts.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                '表行数：${_counts.entries.map((e) => '${e.key}=${e.value}').join('  ')}',
                                 style: tokens.captionStyle.copyWith(
                                   fontFamily: 'monospace',
                                   fontSize: 11.5,
                                 ),
                               ),
-                            ),
-                          if (_counts.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              '表行数：${_counts.entries.map((e) => '${e.key}=${e.value}').join('  ')}',
-                              style: tokens.captionStyle.copyWith(
-                                fontFamily: 'monospace',
-                                fontSize: 11.5,
-                              ),
-                            ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -514,7 +541,9 @@ class _ShelfRow extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(right: 12),
                   child: Icon(
-                    selected ? Icons.check_circle_rounded : Icons.circle_outlined,
+                    selected
+                        ? Icons.check_circle_rounded
+                        : Icons.circle_outlined,
                     color: selected ? scheme.primary : tokens.onHairline,
                   ),
                 ),

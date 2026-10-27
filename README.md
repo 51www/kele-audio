@@ -21,6 +21,60 @@ kele-audio 是一款**免登录、无广告、专注收听**的第三方听书�
 - 内容源：B 站公开 Web 接口（WBI 签名、DASH 音频流），**不自建后端**
 - 播放内核：`media_kit` + `audio_service`
 
+## 运行方式
+
+环境要求：Flutter 3.38.x（Dart 3.10+）、JDK 17、Android SDK。
+
+```bash
+# 安装依赖
+flutter pub get
+
+# 连接 Android 设备/模拟器后运行
+flutter run
+
+# 以 Web（Chrome）方式运行，便于快速调试预览
+flutter run -d chrome
+
+# 构建 release APK
+flutter build apk --release
+```
+
+> 注：项目平台范围仅 Android（API 26+），Web/Chrome 仅用于开发调试预览。
+
+### Web 预览（浏览器调试）
+
+浏览器有 CORS 限制且禁止设置 UA/Referer 等「禁止头」，无法直连 B 站接口，必须走本地反代 `tool/dev_proxy.mjs`（静态托管 `build/web` + 反代 `/api/*`、`/audio`、`/img`）。
+
+**启动步骤：**
+
+1. 启动反代（首次需要，之后可保持常驻）：
+
+   ```powershell
+   node tool/dev_proxy.mjs          # 默认 http://localhost:8088
+   ```
+
+   想换端口：`$env:PORT=9000; node tool/dev_proxy.mjs`
+
+   判断是否已在运行：访问 `http://localhost:8088/__health`，返回 `ok` 即已启动，跳过此步。
+
+2. 改过 `lib/` 代码后重新构建（反代无需重启，它按请求实时读 `build/web`）：
+
+   ```powershell
+   flutter build web --release
+   ```
+
+3. 浏览器访问 **http://localhost:8088**。
+
+**常见问题：**
+
+| 现象 | 原因 | 解决 |
+|---|---|---|
+| 「加载失败 / WBI 密钥获取失败」 | 用 `flutter run -d chrome` 启动，页面跑在 Flutter 自带端口，绕过了反代 | 改走 `http://localhost:8088`（见上方启动步骤） |
+| 接口 502 / 请求失败 | 网络问题，反代转发不到 B 站 | 查看 dev_proxy 终端的 `[api] FAIL` 日志，检查本机网络 |
+| 页面仍是旧内容 | `build/web` 未重新构建 | `flutter build web --release` 后刷新浏览器 |
+
+日常预览不要用 `flutter run -d chrome`；`flutter run -d windows` 调试原生逻辑可以（原生端直连，不走反代）。
+
 ## 文档
 
 | 文档 | 说明 |

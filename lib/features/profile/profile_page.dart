@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/dev_flags.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../app/theme/theme_controller.dart';
 import '../../app/widgets/common.dart';
@@ -38,10 +39,7 @@ class ProfilePage extends StatelessWidget {
       child: ListView(
         padding: EdgeInsets.only(bottom: tokens.spaceLg),
         children: [
-          PageHeader(
-            title: '我的',
-            subtitle: '未登录 · 收藏与进度只存这台设备',
-          ),
+          PageHeader(title: '我的', subtitle: '未登录 · 收藏与进度只存这台设备'),
 
           // ── 收听摘要（M5：play_log 聚合；完整统计 M8） ──────────────
           Padding(
@@ -130,68 +128,71 @@ class ProfilePage extends StatelessWidget {
             ),
           ),
 
-          // ── 工程自检（M1 准出：主题切换） ──────────────────────────
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              tokens.spaceMd,
-              tokens.spaceLg,
-              tokens.spaceMd,
-              0,
-            ),
-            child: KeleCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.tune_rounded, size: 18, color: scheme.primary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child:
-                            Text('工程自检 · M1 骨架', style: tokens.sectionStyle),
-                      ),
-                      const StageTag('M1 准出', tone: StageTone.accent),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text('主题模式', style: tokens.captionStyle),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: SegmentedButton<ThemeMode>(
-                      segments: [
-                        for (final m in const [
-                          ThemeMode.system,
-                          ThemeMode.light,
-                          ThemeMode.dark,
-                        ])
-                          ButtonSegment(
-                            value: m,
-                            label: Text(ThemeController.labelOf(m)),
+          // ── 工程自检（M1 准出证据；DevFlags 开启才渲染） ──────────
+          if (DevFlags.showPanels)
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                tokens.spaceMd,
+                tokens.spaceLg,
+                tokens.spaceMd,
+                0,
+              ),
+              child: KeleCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.tune_rounded,
+                          size: 18,
+                          color: scheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '工程自检 · M1 骨架',
+                            style: tokens.sectionStyle,
                           ),
+                        ),
+                        const StageTag('M1 准出', tone: StageTone.accent),
                       ],
-                      selected: {theme.mode},
-                      showSelectedIcon: false,
-                      onSelectionChanged: (s) => theme.setMode(s.first),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  _kvLine(tokens, '接口配置', config.describe()),
-                  _kvLine(
-                    tokens,
-                    '数据库',
-                    db.createResult?.describe ?? '未创建',
-                  ),
-                  _kvLine(tokens, '应用', 'com.kele.audio · v$appVersion'),
-                  const SizedBox(height: 6),
-                  Text(
-                    '主题 token 化：页面不写死任何颜色，M6 儿童模式直接换一套 token。',
-                    style: tokens.captionStyle,
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                    Text('主题模式', style: tokens.captionStyle),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<ThemeMode>(
+                        segments: [
+                          for (final m in const [
+                            ThemeMode.system,
+                            ThemeMode.light,
+                            ThemeMode.dark,
+                          ])
+                            ButtonSegment(
+                              value: m,
+                              label: Text(ThemeController.labelOf(m)),
+                            ),
+                        ],
+                        selected: {theme.mode},
+                        showSelectedIcon: false,
+                        onSelectionChanged: (s) => theme.setMode(s.first),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    _kvLine(tokens, '接口配置', config.describe()),
+                    _kvLine(tokens, '数据库', db.createResult?.describe ?? '未创建'),
+                    _kvLine(tokens, '应用', 'com.kele.audio · v$appVersion'),
+                    const SizedBox(height: 6),
+                    Text(
+                      '主题 token 化：页面不写死任何颜色，M6 儿童模式直接换一套 token。',
+                      style: tokens.captionStyle,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
 
           // ── 免责声明（R3 必留） ────────────────────────────────────
           Padding(
@@ -217,27 +218,24 @@ class ProfilePage extends StatelessWidget {
       Divider(indent: 16, endIndent: 16, color: tokens.hairlineColor);
 
   Widget _kvLine(AppTokens tokens, String k, String v) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 62,
-              child: Text(k, style: tokens.captionStyle),
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(width: 62, child: Text(k, style: tokens.captionStyle)),
+        Expanded(
+          child: Text(
+            v,
+            style: tokens.captionStyle.copyWith(
+              fontFamily: 'monospace',
+              fontSize: 11.5,
+              color: tokens.onHairline,
             ),
-            Expanded(
-              child: Text(
-                v,
-                style: tokens.captionStyle.copyWith(
-                  fontFamily: 'monospace',
-                  fontSize: 11.5,
-                  color: tokens.onHairline,
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
-      );
+      ],
+    ),
+  );
 }
 
 class _EntryTile extends StatelessWidget {

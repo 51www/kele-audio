@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../dev_flags.dart';
 import '../theme/app_tokens.dart';
 
 /// 通用视觉件：卡片 / 标题 / 里程碑标签 / 空态。
@@ -74,9 +75,36 @@ class SectionTitle extends StatelessWidget {
   }
 }
 
-/// 里程碑 / 阶段标签（如「M3 接入」）。
+/// 里程碑 / 阶段标签（如「M3 接入」）—— 开发标注，与用户功能无关，
+/// 默认不渲染，[DevFlags.showPanels] 开启才显示。
 class StageTag extends StatelessWidget {
   const StageTag(this.label, {super.key, this.tone = StageTone.quiet});
+
+  final String label;
+  final StageTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!DevFlags.showPanels) return const SizedBox.shrink();
+    return _Badge(label: label, tone: tone);
+  }
+}
+
+/// 功能性信息徽标（如「上次听到」进度提示），属于用户功能，始终展示。
+class InfoChip extends StatelessWidget {
+  const InfoChip(this.label, {super.key, this.tone = StageTone.quiet});
+
+  final String label;
+  final StageTone tone;
+
+  @override
+  Widget build(BuildContext context) => _Badge(label: label, tone: tone);
+}
+
+enum StageTone { quiet, accent, done }
+
+class _Badge extends StatelessWidget {
+  const _Badge({required this.label, required this.tone});
 
   final String label;
   final StageTone tone;
@@ -103,8 +131,6 @@ class StageTag extends StatelessWidget {
     );
   }
 }
-
-enum StageTone { quiet, accent, done }
 
 /// 页面头：大标题 + 一句话说明。
 class PageHeader extends StatelessWidget {

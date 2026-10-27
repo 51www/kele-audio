@@ -203,7 +203,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                             ),
                             if (last != null) ...[
                               const SizedBox(height: 8),
-                              StageTag(
+                              InfoChip(
                                 '上次听到：${last.chapterTitle} '
                                 '${fmtClock(Duration(seconds: last.positionSec))}',
                                 tone: StageTone.accent,

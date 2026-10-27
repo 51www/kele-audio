@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:kele_audio/app/app.dart';
+import 'package:kele_audio/app/dev_flags.dart';
 import 'package:kele_audio/app/di.dart';
 
 /// M1 准出冒烟测试：三 Tab 状态保留、主题切换、路由、二级页返回。
@@ -34,6 +35,7 @@ void main() {
 
   testWidgets('M1 准出冒烟：三 Tab 壳 + 主题切换 + 二级页返回', (tester) async {
     SharedPreferences.setMockInitialValues({});
+    DevFlags.showPanels = true; // App 内默认隐藏开发调试面板，测试里打开保冒烟链路
 
     final services = await AppServices.bootstrap(isWeb: false);
     addTearDown(services.player.dispose); // M2：测试结束释放 watchdog Timer/观察者
@@ -60,10 +62,7 @@ void main() {
     await pumpThroughLoad(tester);
     expect(find.text('加载失败'), findsOneWidget); // 当前可见的分类
     // 访问过的两个分类都保活（含隐藏的推荐 feed）
-    expect(
-      find.text('加载失败', skipOffstage: false).evaluate().length,
-      2,
-    );
+    expect(find.text('加载失败', skipOffstage: false).evaluate().length, 2);
 
     // ── Tab 2 书架：空态 + 建表/DAO 读写 Demo ───────────────────────
     await tester.tap(find.text('书架'));
@@ -98,8 +97,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('免责声明'), findsOneWidget);
 
-    await scrollTo(tester, find.textContaining('阿B听书'));
-    expect(find.textContaining('阿B听书'), findsOneWidget);
+    await scrollTo(tester, find.text('版本与反馈'));
+    expect(find.text('版本与反馈'), findsOneWidget);
 
     await tester.pageBack();
     await tester.pumpAndSettle();
