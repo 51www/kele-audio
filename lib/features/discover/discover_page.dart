@@ -11,7 +11,8 @@ import 'category_feed.dart';
 
 /// Tab 1 发现页（PRD §5.1，M3 接入真实内容源；M6 接入儿童模式联动）。
 ///
-/// 结构：顶部栏（含儿童模式开关）→ 横向分类 Tab → [IndexedStack] 信息流。
+/// 结构：搜索入口（同类产品惯例：内容流顶部一条搜索胶囊）→ 横向分类 Tab
+/// → [IndexedStack] 信息流。原顶部品牌栏已按需求隐藏（品牌信息收敛到「我的-关于」）。
 /// 每个分类一个 [CategoryFeed]：**访问过才创建，创建后保留滚动位置与页码**；
 /// 成人分类来自 `assets/api/content_config.json`，儿童五类来自
 /// `assets/api/children_config.json`（白名单，PRD §7.3）。
@@ -77,7 +78,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
       bottom: false,
       child: Column(
         children: [
-          _buildHeader(context, tokens, scheme),
+          if (!kids) _buildSearchEntry(context, tokens, scheme),
           if (!kids && activeConfig.featured.isNotEmpty)
             _buildFeatured(context, tokens, scheme, activeConfig.featured),
           Padding(
@@ -109,12 +110,13 @@ class _DiscoverPageState extends State<DiscoverPage> {
     );
   }
 
-  Widget _buildHeader(
+  /// 搜索入口（同类产品惯例：内容流顶部一条不可输入的搜索胶囊，
+  /// 点击整条跳搜索页）。儿童模式不展示（白名单内不需要搜索）。
+  Widget _buildSearchEntry(
     BuildContext context,
     AppTokens tokens,
     ColorScheme scheme,
   ) {
-    final kids = context.watch<ThemeController>().children;
     return Padding(
       padding: EdgeInsets.fromLTRB(
         tokens.spaceMd,
@@ -122,59 +124,35 @@ class _DiscoverPageState extends State<DiscoverPage> {
         tokens.spaceMd,
         0,
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
+      child: Material(
+        color: scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(tokens.radiusPill),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(tokens.radiusPill),
+          onTap: () => context.push('/search'),
+          child: Container(
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
-              gradient: tokens.accentGradient,
-              borderRadius: BorderRadius.circular(tokens.radiusMd),
+              borderRadius: BorderRadius.circular(tokens.radiusPill),
+              border: Border.all(color: tokens.hairlineColor),
             ),
-            alignment: Alignment.center,
-            child: Text(
-              '可',
-              style: TextStyle(
-                color: tokens.onAccent,
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Text('可乐听书', style: tokens.titleStyle),
-                Text(
-                  kids ? '儿童模式已开启 · 只看白名单内容' : '免登录 · 无广告 · 专注收听',
-                  style: tokens.captionStyle,
+                Icon(Icons.search_rounded, size: 22, color: tokens.onHairline),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '搜索有声书、相声、播单…',
+                    style: tokens.captionStyle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
           ),
-          // 搜索（M8）：成人模式显示，儿童模式收起（白名单内不需要搜索）
-          if (!kids)
-            IconButton(
-              tooltip: '搜索',
-              onPressed: () => context.push('/search'),
-              icon: const Icon(Icons.search_rounded),
-            ),
-          // 儿童模式开关（PRD §5.5）：开启直接切，关闭走二次确认防误触
-          IconButton(
-            tooltip: kids ? '退出儿童模式' : '进入儿童模式',
-            style: IconButton.styleFrom(
-              backgroundColor:
-                  kids ? scheme.primary.withValues(alpha: 0.14) : null,
-            ),
-            onPressed: () => _toggleKids(context, kids),
-            icon: Icon(
-              kids ? Icons.child_care : Icons.child_care_outlined,
-              color: kids ? scheme.primary : null,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -254,31 +232,6 @@ class _DiscoverPageState extends State<DiscoverPage> {
         ],
       ),
     );
-  }
-
-  Future<void> _toggleKids(BuildContext context, bool current) async {
-    if (current) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('退出儿童模式？'),
-          content: const Text('退出后将恢复成人分类与常规内容，主题保持当前选择。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('退出'),
-            ),
-          ],
-        ),
-      );
-      if (ok != true) return;
-    }
-    if (!context.mounted) return;
-    await context.read<ThemeController>().setChildren(!current);
   }
 
   Widget _buildChips(

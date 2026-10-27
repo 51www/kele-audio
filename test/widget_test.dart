@@ -45,8 +45,9 @@ void main() {
     await tester.pumpAndSettle();
     await pumpThroughLoad(tester);
 
-    // ── Tab 1 发现：分类 chips + 加载态/错误态（flutter_test 无网络） ──
-    expect(find.text('可乐听书'), findsOneWidget);
+    // ── Tab 1 发现：搜索入口 + 分类 chips + 加载态/错误态（flutter_test 无网络） ──
+    // 顶部品牌栏已隐藏（搜索功能收敛为内容流顶部的搜索胶囊）
+    expect(find.text('搜索有声书、相声、播单…'), findsOneWidget);
     expect(find.text('按类型找内容'), findsOneWidget);
     expect(find.byType(MiniPlayer), findsNothing); // 无播放内容 → 不显示播放条
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自适应图标（API 26+）：前景顶满 108dp 画布（全出血 logo），掩膜由启动器裁切，
+     消除旧版单 PNG 被启动器缩进白圈导致的「留白过多」。 -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+</adaptive-icon>

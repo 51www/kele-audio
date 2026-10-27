@@ -81,6 +81,8 @@ flutter:
     - assets/api/content_config.json
     # 儿童白名单配置（M6 / PRD §7.3，内置默认 + 远端覆盖）
     - assets/api/children_config.json
+    # 品牌 logo（docs/images/icon.png 的 256px 切图，KeleLogo 组件统一引用）
+    - docs/images/icon_app.png
   #   - images/a_dot_ham.jpeg
 
   # An image asset can refer to one or more resolution-specific "variants", see

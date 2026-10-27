@@ -12,6 +12,8 @@ import '../../../core/services/settings_store.dart';
 
 /// 设置页（PRD §5.6.4，M5 接线）。
 ///
+/// - 儿童模式：开关入口收拢到这里（原发现页顶部开关已移除），
+///   开启直接生效（自动套儿童默认主题），关闭走二次确认防误触；
 /// - 主题：一般模式 / 儿童模式各一套皮肤（五个预设，默认主题1 / 主题4，立即生效 + 重启保留）；
 /// - 默认音质 / 默认播放模式 / 后台自动播放下一章：接入 M2 播放参数
 ///   （同一套 PlayerPrefs key，播放页临时切换与这里共享持久化）；
@@ -37,6 +39,29 @@ class SettingsPage extends StatelessWidget {
           tokens.spaceLg,
         ),
         children: [
+          _SectionCard(
+            icon: Icons.child_care_rounded,
+            title: '儿童模式',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('开启儿童模式'),
+                  subtitle: const Text('只展示儿童白名单内容，并自动套用儿童主题'),
+                  value: theme.children,
+                  onChanged: (v) => _toggleKids(context, theme.children),
+                ),
+                Text(
+                  theme.children
+                      ? '儿童模式已开启：发现页只保留儿童分类，搜索入口收起。'
+                      : '开启后内容按儿童白名单过滤（PRD §5.5），不做操作限制。',
+                  style: tokens.captionStyle,
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: tokens.spaceMd),
           _SectionCard(
             icon: Icons.palette_outlined,
             title: '外观',
@@ -146,6 +171,33 @@ class SettingsPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 儿童模式开关（原发现页顶部入口迁入）：开启直接切，
+  /// 关闭走二次确认弹层防误触（ThemeController.setChildren 约定）。
+  Future<void> _toggleKids(BuildContext context, bool current) async {
+    if (current) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('退出儿童模式？'),
+          content: const Text('退出后将恢复成人分类与常规内容，主题保持当前选择。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('退出'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    if (!context.mounted) return;
+    await context.read<ThemeController>().setChildren(!current);
   }
 
   Future<void> _confirmClearImages(BuildContext context) async {

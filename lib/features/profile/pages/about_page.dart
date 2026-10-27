@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../../app/theme/app_tokens.dart';
 import '../../../app/widgets/common.dart';
+import '../../../app/widgets/kele_logo.dart';
 import '../profile_page.dart' show appVersion;
 
 /// 关于 / 版本页（PRD §5.6.5）。
@@ -45,23 +46,7 @@ class AboutPage extends StatelessWidget {
           KeleCard(
             child: Row(
               children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    gradient: tokens.accentGradient,
-                    borderRadius: BorderRadius.circular(tokens.radiusMd),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    '可',
-                    style: TextStyle(
-                      color: tokens.onAccent,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
+                const KeleLogo(size: 56),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
