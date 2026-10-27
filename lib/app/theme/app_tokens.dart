@@ -5,9 +5,12 @@ import 'app_palette.dart';
 /// 主题 token（ThemeExtension）：圆角、间距、渐变、发丝线、字阶。
 ///
 /// M1 约束「禁止硬编码颜色」的落地方式：
-/// 颜色一律取 `Theme.of(context).colorScheme` / `cardColor` 等标准槽位，
-/// 这里补齐 Material 没有的**结构性 token**（圆角/间距/渐变/字阶），
-/// M6 儿童模式只需要换一套 [AppTokens] + [ColorScheme]，页面不用动。
+/// 颜色一律取 `Theme.of(context).colorScheme` / [AppTokens] 的角色槽位，
+/// 这里补齐 Material 没有的**结构性 token**（圆角/间距/渐变/字阶）。
+///
+/// 一致性约束：五个主题皮肤只换颜色（[ThemePalette]），
+/// 本类的圆角/间距/字阶**全主题共用同一套**——字体、字号、行高、间距、
+/// 组件形状在各页面与各状态之间保持统一。
 class AppTokens extends ThemeExtension<AppTokens> {
   const AppTokens({
     required this.radiusSm,
@@ -22,6 +25,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
     required this.accentGradient,
     required this.hairlineColor,
     required this.onHairline,
+    required this.onAccent,
     required this.displayStyle,
     required this.titleStyle,
     required this.sectionStyle,
@@ -44,10 +48,13 @@ class AppTokens extends ThemeExtension<AppTokens> {
 
   // 渐变
   final Gradient cardGradient; // 卡片微渐变
-  final Gradient accentGradient; // 主行动（琥珀）
+  final Gradient accentGradient; // 品牌点缀（Logo 徽标 / 分区竖条）
 
   final Color hairlineColor;
   final Color onHairline;
+
+  /// 品牌点缀渐变上的文字色（如「可」字徽标）。
+  final Color onAccent;
 
   // 字阶
   final TextStyle displayStyle;
@@ -57,8 +64,8 @@ class AppTokens extends ThemeExtension<AppTokens> {
   final TextStyle captionStyle;
   final TextStyle numStyle;
 
-  /// 浅色：暖纸书卷
-  factory AppTokens.light() => AppTokens(
+  /// 由一套 [ThemePalette] 构建全主题共用的结构 token。
+  factory AppTokens.ofPalette(ThemePalette p) => AppTokens(
         radiusSm: 8,
         radiusMd: 14,
         radiusLg: 20,
@@ -67,175 +74,59 @@ class AppTokens extends ThemeExtension<AppTokens> {
         spaceSm: 8,
         spaceMd: 16,
         spaceLg: 24,
-        cardGradient: const LinearGradient(
+        cardGradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [AppPalette.paperCard, AppPalette.paperCardDeep],
-          stops: [0.0, 1.0],
+          colors: [p.cardTop, p.cardBottom],
+          stops: const [0.0, 1.0],
         ),
-        accentGradient: const LinearGradient(
-          colors: [AppPalette.amber, AppPalette.amberDeep],
+        accentGradient: LinearGradient(
+          colors: [p.accentTop, p.accentBottom],
         ),
-        hairlineColor: AppPalette.paperHairline,
-        onHairline: AppPalette.warmGrey,
-        displayStyle: const TextStyle(
+        hairlineColor: p.hairline,
+        onHairline: p.inkWeak,
+        onAccent: p.onAccent,
+        displayStyle: TextStyle(
           fontSize: 28,
           height: 1.2,
           fontWeight: FontWeight.w800,
           letterSpacing: 0.5,
-          color: AppPalette.ink,
+          color: p.ink,
         ),
-        titleStyle: const TextStyle(
+        titleStyle: TextStyle(
           fontSize: 20,
           height: 1.3,
           fontWeight: FontWeight.w700,
-          color: AppPalette.ink,
+          color: p.ink,
         ),
-        sectionStyle: const TextStyle(
+        sectionStyle: TextStyle(
           fontSize: 15,
           height: 1.4,
           fontWeight: FontWeight.w700,
-          color: AppPalette.ink,
+          color: p.ink,
         ),
-        bodyStyle: const TextStyle(
+        bodyStyle: TextStyle(
           fontSize: 14,
           height: 1.55,
-          color: AppPalette.inkSoft,
+          color: p.inkSoft,
         ),
-        captionStyle: const TextStyle(
+        captionStyle: TextStyle(
           fontSize: 12,
           height: 1.4,
-          color: AppPalette.warmGrey,
+          color: p.inkWeak,
         ),
-        numStyle: const TextStyle(
+        numStyle: TextStyle(
           fontSize: 13,
           height: 1.3,
           fontWeight: FontWeight.w600,
-          color: AppPalette.inkSoft,
-          fontFeatures: [FontFeature.tabularFigures()],
-        ),
-      );
-
-  /// 深色：暗夜金橙
-  factory AppTokens.dark() => AppTokens(
-        radiusSm: 8,
-        radiusMd: 14,
-        radiusLg: 20,
-        radiusPill: 999,
-        spaceXs: 4,
-        spaceSm: 8,
-        spaceMd: 16,
-        spaceLg: 24,
-        cardGradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [AppPalette.nightCard, AppPalette.nightCardDeep],
-        ),
-        accentGradient: const LinearGradient(
-          colors: [AppPalette.orange, AppPalette.goldDeep],
-        ),
-        hairlineColor: AppPalette.nightHairline,
-        onHairline: AppPalette.nightWarmGrey,
-        displayStyle: const TextStyle(
-          fontSize: 28,
-          height: 1.2,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.5,
-          color: AppPalette.nightInk,
-        ),
-        titleStyle: const TextStyle(
-          fontSize: 20,
-          height: 1.3,
-          fontWeight: FontWeight.w700,
-          color: AppPalette.nightInk,
-        ),
-        sectionStyle: const TextStyle(
-          fontSize: 15,
-          height: 1.4,
-          fontWeight: FontWeight.w700,
-          color: AppPalette.nightInk,
-        ),
-        bodyStyle: const TextStyle(
-          fontSize: 14,
-          height: 1.55,
-          color: AppPalette.nightInkSoft,
-        ),
-        captionStyle: const TextStyle(
-          fontSize: 12,
-          height: 1.4,
-          color: AppPalette.nightWarmGrey,
-        ),
-        numStyle: const TextStyle(
-          fontSize: 13,
-          height: 1.3,
-          fontWeight: FontWeight.w600,
-          color: AppPalette.nightInkSoft,
-          fontFeatures: [FontFeature.tabularFigures()],
-        ),
-      );
-
-  /// 儿童：薄荷春芽（M6 儿童模式）—— 高饱和低刺激、大圆角卡片、
-  /// 字号整体 +1、间距放宽（PRD §5.5「大图标、插画风」）。
-  factory AppTokens.children() => AppTokens(
-        radiusSm: 12,
-        radiusMd: 18,
-        radiusLg: 24,
-        radiusPill: 999,
-        spaceXs: 4,
-        spaceSm: 10,
-        spaceMd: 18,
-        spaceLg: 26,
-        cardGradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [AppPalette.kidCard, AppPalette.kidCardDeep],
-          stops: [0.0, 1.0],
-        ),
-        accentGradient: const LinearGradient(
-          colors: [AppPalette.mintMid, AppPalette.kidGreen],
-        ),
-        hairlineColor: AppPalette.kidHairline,
-        onHairline: AppPalette.kidGrey,
-        displayStyle: const TextStyle(
-          fontSize: 30,
-          height: 1.2,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.5,
-          color: AppPalette.kidInk,
-        ),
-        titleStyle: const TextStyle(
-          fontSize: 21,
-          height: 1.3,
-          fontWeight: FontWeight.w700,
-          color: AppPalette.kidInk,
-        ),
-        sectionStyle: const TextStyle(
-          fontSize: 16,
-          height: 1.4,
-          fontWeight: FontWeight.w700,
-          color: AppPalette.kidInk,
-        ),
-        bodyStyle: const TextStyle(
-          fontSize: 15,
-          height: 1.55,
-          color: AppPalette.kidInkSoft,
-        ),
-        captionStyle: const TextStyle(
-          fontSize: 13,
-          height: 1.4,
-          color: AppPalette.kidGrey,
-        ),
-        numStyle: const TextStyle(
-          fontSize: 14,
-          height: 1.3,
-          fontWeight: FontWeight.w600,
-          color: AppPalette.kidInkSoft,
-          fontFeatures: [FontFeature.tabularFigures()],
+          color: p.inkSoft,
+          fontFeatures: const [FontFeature.tabularFigures()],
         ),
       );
 
   static AppTokens of(BuildContext context) =>
-      Theme.of(context).extension<AppTokens>() ?? AppTokens.light();
+      Theme.of(context).extension<AppTokens>() ??
+      AppTokens.ofPalette(ThemePalette.warmPaper);
 
   @override
   AppTokens copyWith({
@@ -251,6 +142,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
     Gradient? accentGradient,
     Color? hairlineColor,
     Color? onHairline,
+    Color? onAccent,
     TextStyle? displayStyle,
     TextStyle? titleStyle,
     TextStyle? sectionStyle,
@@ -271,6 +163,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
         accentGradient: accentGradient ?? this.accentGradient,
         hairlineColor: hairlineColor ?? this.hairlineColor,
         onHairline: onHairline ?? this.onHairline,
+        onAccent: onAccent ?? this.onAccent,
         displayStyle: displayStyle ?? this.displayStyle,
         titleStyle: titleStyle ?? this.titleStyle,
         sectionStyle: sectionStyle ?? this.sectionStyle,
@@ -296,6 +189,7 @@ class AppTokens extends ThemeExtension<AppTokens> {
           Gradient.lerp(accentGradient, other.accentGradient, t)!,
       hairlineColor: Color.lerp(hairlineColor, other.hairlineColor, t)!,
       onHairline: Color.lerp(onHairline, other.onHairline, t)!,
+      onAccent: Color.lerp(onAccent, other.onAccent, t)!,
       displayStyle: TextStyle.lerp(displayStyle, other.displayStyle, t)!,
       titleStyle: TextStyle.lerp(titleStyle, other.titleStyle, t)!,
       sectionStyle: TextStyle.lerp(sectionStyle, other.sectionStyle, t)!,

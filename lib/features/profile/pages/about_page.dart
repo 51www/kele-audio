@@ -31,7 +31,6 @@ class AboutPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
-    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(title: const Text('关于 / 版本')),
@@ -57,7 +56,7 @@ class AboutPage extends StatelessWidget {
                   child: Text(
                     '可',
                     style: TextStyle(
-                      color: scheme.onPrimary,
+                      color: tokens.onAccent,
                       fontSize: 28,
                       fontWeight: FontWeight.w800,
                     ),

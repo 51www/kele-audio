@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:kele_audio/app/app.dart';
+import 'package:kele_audio/app/theme/app_palette.dart';
 import 'package:kele_audio/app/dev_flags.dart';
 import 'package:kele_audio/app/di.dart';
 import 'package:kele_audio/features/player/mini_player.dart';
@@ -84,13 +85,13 @@ void main() {
     await scrollTo(tester, find.text('工程自检 · M1 骨架'));
     expect(find.text('工程自检 · M1 骨架'), findsOneWidget);
 
-    await tester.tap(find.text('深色'));
+    await tester.tap(find.text('暗夜金橙'));
     await tester.pumpAndSettle();
-    expect(services.theme.mode, ThemeMode.dark);
+    expect(services.theme.preset, AppThemePreset.darkGold);
 
-    await tester.tap(find.text('浅色'));
+    await tester.tap(find.text('暖纸书卷'));
     await tester.pumpAndSettle();
-    expect(services.theme.mode, ThemeMode.light);
+    expect(services.theme.preset, AppThemePreset.warmPaper);
 
     // ── 二级页：可达 + 返回 + 播放条显隐稳定 ────────────────────────
     await scrollTo(tester, find.text('关于 / 版本'));

@@ -6,6 +6,7 @@ import '../../app/dev_flags.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../app/theme/theme_controller.dart';
 import '../../app/widgets/common.dart';
+import '../../app/widgets/theme_preset_picker.dart';
 import '../../core/api/api_config.dart';
 import '../../core/data/daos.dart';
 import '../../core/data/local_database.dart';
@@ -17,7 +18,7 @@ const String appVersion = '1.0.0';
 
 /// Tab 3 我的（PRD §5.6）。
 ///
-/// M1 范围：页面骨架 + 二级页入口 + **全局主题切换**（浅/深/跟随系统）
+/// M1 范围：页面骨架 + 二级页入口 + **全局主题切换**（五套自定义皮肤）
 /// + 工程自检；统计与设置项在 M5 完善。
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -159,26 +160,11 @@ class ProfilePage extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    Text('主题模式', style: tokens.captionStyle),
+                    Text('主题皮肤（可自由切换任意预设）', style: tokens.captionStyle),
                     const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: SegmentedButton<ThemeMode>(
-                        segments: [
-                          for (final m in const [
-                            ThemeMode.system,
-                            ThemeMode.light,
-                            ThemeMode.dark,
-                          ])
-                            ButtonSegment(
-                              value: m,
-                              label: Text(ThemeController.labelOf(m)),
-                            ),
-                        ],
-                        selected: {theme.mode},
-                        showSelectedIcon: false,
-                        onSelectionChanged: (s) => theme.setMode(s.first),
-                      ),
+                    ThemePresetPicker(
+                      selected: theme.preset,
+                      onSelected: theme.setPreset,
                     ),
                     const SizedBox(height: 14),
                     _kvLine(tokens, '接口配置', config.describe()),
@@ -186,7 +172,7 @@ class ProfilePage extends StatelessWidget {
                     _kvLine(tokens, '应用', 'com.kele.audio · v$appVersion'),
                     const SizedBox(height: 6),
                     Text(
-                      '主题 token 化：页面不写死任何颜色，M6 儿童模式直接换一套 token。',
+                      '主题 token 化：页面不写死任何颜色，换皮肤只换一套 token。',
                       style: tokens.captionStyle,
                     ),
                   ],

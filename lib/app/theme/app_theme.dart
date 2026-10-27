@@ -3,57 +3,41 @@ import 'package:flutter/material.dart';
 import 'app_palette.dart';
 import 'app_tokens.dart';
 
-/// 全局主题：浅色（暖纸书卷）/ 深色（暗夜金橙）/ 儿童（薄荷春芽）。
+/// 全局主题：五套自定义皮肤（`docs/theme.md` 主题 1~5）。
 ///
-/// 主题优先级：**儿童主题 > 用户浅/深色设置**（PRD §5.5）——
-/// 儿童模式开启时整个 App 固定用 [children]，不看用户的深色设置。
+/// 主题选择：**儿童模式主题 > 一般模式主题**（PRD §5.5）——
+/// 一般模式默认主题1「暖纸书卷」，儿童模式默认主题4「春日活力」，
+/// 由 [ThemeController] 决定生效预设，这里只负责把预设渲染成 [ThemeData]。
+///
+/// 一致性约束：五套主题共用同一套结构 token（圆角/间距/字阶），
+/// 仅颜色不同；深色预设（主题3）与亮色预设文字对比度均由测试守卫。
 class AppTheme {
   AppTheme._();
 
-  static ThemeData get light => build(Brightness.light);
-  static ThemeData get dark => build(Brightness.dark);
+  /// 按预设构建主题（唯一入口）。
+  static ThemeData of(AppThemePreset preset) {
+    final p = preset.palette;
+    final brightness = p.isDark ? Brightness.dark : Brightness.light;
+    final tokens = AppTokens.ofPalette(p);
 
-  /// 儿童主题（M6）：薄荷春芽，固定浅色底。
-  static ThemeData get children => _build(
-        brightness: Brightness.light,
-        tokens: AppTokens.children(),
-        scheme: const ColorScheme.light().copyWith(
-          primary: AppPalette.kidTeal,
-          onPrimary: Colors.white,
-          secondary: AppPalette.kidGreen,
-          onSecondary: Colors.white,
-          surface: AppPalette.kidPage,
-          onSurface: AppPalette.kidInk,
-          onSurfaceVariant: AppPalette.kidInkSoft,
-          outline: AppPalette.kidHairline,
-          outlineVariant: AppPalette.kidHairline,
-          surfaceContainer: AppPalette.kidCard,
-          error: AppPalette.alertRed,
-        ),
-      );
-
-  static ThemeData build(Brightness brightness) {
-    final isLight = brightness == Brightness.light;
-    final tokens = isLight ? AppTokens.light() : AppTokens.dark();
-
+    // seed 取主色，派生 Material 标准槽位后整体覆盖为本主题角色色，
+    // 保证 Switch/Dialog 等未定制组件也落在同一配色内。
     final scheme = ColorScheme.fromSeed(
-      seedColor: isLight ? AppPalette.amberDeep : AppPalette.orange,
+      seedColor: p.primary,
       brightness: brightness,
     ).copyWith(
-      primary: isLight ? AppPalette.amberDeep : AppPalette.orange,
-      onPrimary: isLight ? Colors.white : AppPalette.black,
-      secondary: isLight ? AppPalette.jade : AppPalette.gold,
-      onSecondary: isLight ? Colors.white : AppPalette.black,
-      surface: isLight ? AppPalette.paper : AppPalette.night,
-      onSurface: isLight ? AppPalette.ink : AppPalette.nightInk,
-      onSurfaceVariant:
-          isLight ? AppPalette.warmGrey : AppPalette.nightWarmGrey,
-      outline: isLight ? AppPalette.paperHairline : AppPalette.nightHairline,
-      outlineVariant:
-          isLight ? AppPalette.paperHairline : AppPalette.nightHairline,
-      surfaceContainer:
-          isLight ? AppPalette.paperCard : AppPalette.nightCard,
-      error: isLight ? AppPalette.alertRed : AppPalette.alertRed,
+      primary: p.primary,
+      onPrimary: p.onPrimary,
+      secondary: p.secondary,
+      onSecondary: p.onSecondary,
+      surface: p.page,
+      onSurface: p.ink,
+      onSurfaceVariant: p.inkSoft,
+      outline: p.hairline,
+      outlineVariant: p.hairline,
+      surfaceContainer: p.cardTop,
+      error: p.error,
+      onError: p.onError,
     );
 
     return _build(brightness: brightness, tokens: tokens, scheme: scheme);
@@ -64,8 +48,6 @@ class AppTheme {
     required AppTokens tokens,
     required ColorScheme scheme,
   }) {
-    final isLight = brightness == Brightness.light;
-
     final textTheme = ThemeData(brightness: brightness)
         .textTheme
         .apply(
@@ -78,7 +60,7 @@ class AppTheme {
       brightness: brightness,
       colorScheme: scheme,
       scaffoldBackgroundColor: scheme.surface,
-      cardColor: isLight ? AppPalette.paperCard : AppPalette.nightCard,
+      cardColor: scheme.surfaceContainer,
       dividerColor: tokens.hairlineColor,
       splashFactory: InkSparkle.splashFactory,
       textTheme: textTheme,
@@ -100,9 +82,21 @@ class AppTheme {
           side: BorderSide(color: tokens.hairlineColor),
         ),
       ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: scheme.surfaceContainer,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(tokens.radiusLg),
+          side: BorderSide(color: tokens.hairlineColor),
+        ),
+        titleTextStyle: tokens.titleStyle,
+        contentTextStyle: tokens.bodyStyle,
+      ),
       chipTheme: ChipThemeData(
         backgroundColor: scheme.surfaceContainer,
-        selectedColor: scheme.primary,
+        // 选中态不用实心主色（避免 label 色冲突），用主色淡染 + 主色文字
+        selectedColor: scheme.primary.withValues(alpha: 0.14),
         labelStyle: tokens.bodyStyle.copyWith(fontWeight: FontWeight.w600),
         side: BorderSide(color: tokens.hairlineColor),
         shape: RoundedRectangleBorder(
@@ -155,9 +149,10 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: isLight ? AppPalette.black : AppPalette.nightInk,
+        // 反相胶囊：与 MiniPlayer 同一语言（深字底浅字 / 浅字底深字）
+        backgroundColor: scheme.onSurface,
         contentTextStyle: tokens.bodyStyle.copyWith(
-          color: isLight ? AppPalette.paper : AppPalette.night,
+          color: scheme.surfaceContainer,
         ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(tokens.radiusMd),

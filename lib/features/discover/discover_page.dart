@@ -135,7 +135,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
             child: Text(
               '可',
               style: TextStyle(
-                color: scheme.onPrimary,
+                color: tokens.onAccent,
                 fontSize: 22,
                 fontWeight: FontWeight.w800,
               ),
@@ -262,7 +262,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: const Text('退出儿童模式？'),
-          content: const Text('退出后将恢复成人分类与常规主题。'),
+          content: const Text('退出后将恢复成人分类与常规内容，主题保持当前选择。'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),

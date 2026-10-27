@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:kele_audio/app/theme/app_palette.dart';
 import 'package:kele_audio/app/theme/app_theme.dart';
 import 'package:kele_audio/app/theme/app_tokens.dart';
 import 'package:kele_audio/app/theme/theme_controller.dart';
@@ -187,33 +188,65 @@ void main() {
     });
   });
 
-  group('儿童模式状态与主题优先级（PRD §5.5）', () {
-    test('默认关闭；开启/关闭持久化，重启保留', () async {
+  group('儿童模式状态与主题（PRD §5.5 + 单槽位需求）', () {
+    test('默认关闭；进入儿童模式自动套用主题4，仍可手动切换', () async {
       final kv = MemoryKeyValueStore();
       final controller = ThemeController(kv);
       await controller.load();
       expect(controller.children, isFalse);
-      expect(controller.effectiveThemeMode, ThemeMode.system);
+      expect(controller.preset, AppThemePreset.warmPaper); // 默认主题1
 
       await controller.setChildren(true);
       expect(controller.children, isTrue);
       expect(kv.getString(ThemeController.childrenKey), '1');
+      // 进入儿童模式自动套用主题4「春日活力」
+      expect(controller.preset, AppThemePreset.springPromo);
 
-      // 模拟重启：新实例读回
+      // 儿童模式下仍可手动切换任意主题（不锁定）
+      await controller.setPreset(AppThemePreset.mintSpring);
+      expect(controller.preset, AppThemePreset.mintSpring);
+
+      // 持久化：模拟重启后儿童模式仍在、主题保持用户所选
       final reloaded = ThemeController(kv);
       await reloaded.load();
       expect(reloaded.children, isTrue);
-      // 主题优先级：儿童 > 用户深色设置
-      expect(reloaded.effectiveThemeMode, ThemeMode.light);
+      expect(reloaded.preset, AppThemePreset.mintSpring);
 
+      // 退出儿童模式不强制换肤，保持当前主题
       await reloaded.setChildren(false);
-      expect(reloaded.effectiveThemeMode, ThemeMode.system);
+      expect(reloaded.children, isFalse);
+      expect(reloaded.preset, AppThemePreset.mintSpring);
     });
 
-    test('儿童主题可构建且为浅色（无硬编码穿帮依赖）', () {
-      final theme = AppTheme.children;
-      expect(theme.brightness, Brightness.light);
-      expect(theme.extension<AppTokens>(), isA<AppTokens>());
+    test('旧「深色」设置迁移为主题3；主题可在各预设间自由切换', () async {
+      final kv = MemoryKeyValueStore();
+      await kv.setString(ThemeController.legacyModeKey, 'dark');
+      final migrated = ThemeController(kv);
+      await migrated.load();
+      expect(migrated.preset, AppThemePreset.darkGold);
+
+      // 单槽位：各预设自由切换并持久化
+      await migrated.setPreset(AppThemePreset.bronzeLibrary);
+      await migrated.setPreset(AppThemePreset.mintSpring);
+      final reloaded = ThemeController(kv);
+      await reloaded.load();
+      expect(reloaded.preset, AppThemePreset.mintSpring);
+    });
+
+    test('五个主题预设均可构建；主题3 为深色，其余为亮色', () {
+      for (final preset in AppThemePreset.values) {
+        final theme = AppTheme.of(preset);
+        expect(theme.extension<AppTokens>(), isA<AppTokens>());
+        expect(
+          theme.brightness,
+          preset.isDark ? Brightness.dark : Brightness.light,
+        );
+        // 亮色主题底色为浅、深色主题底色为深（防串色）
+        expect(
+          theme.colorScheme.surface.computeLuminance() > 0.5,
+          !preset.isDark,
+        );
+      }
     });
   });
 }

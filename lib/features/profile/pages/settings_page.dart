@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../app/theme/theme_controller.dart';
 import '../../../app/widgets/common.dart';
+import '../../../app/widgets/theme_preset_picker.dart';
 import '../../../core/domain/playback.dart';
 import '../../../core/services/image_cache_cleaner.dart';
 import '../../../core/services/player/player_service.dart';
@@ -11,7 +12,7 @@ import '../../../core/services/settings_store.dart';
 
 /// 设置页（PRD §5.6.4，M5 接线）。
 ///
-/// - 主题模式：接入 M1 主题体系（立即生效 + 重启保留）；
+/// - 主题：一般模式 / 儿童模式各一套皮肤（五个预设，默认主题1 / 主题4，立即生效 + 重启保留）；
 /// - 默认音质 / 默认播放模式 / 后台自动播放下一章：接入 M2 播放参数
 ///   （同一套 PlayerPrefs key，播放页临时切换与这里共享持久化）；
 /// - 仅 Wi-Fi 下载：开关先占位持久化（下载能力 M8 实现）；
@@ -42,27 +43,16 @@ class SettingsPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('主题模式', style: tokens.captionStyle),
+                Text('主题', style: tokens.captionStyle),
                 const SizedBox(height: 8),
-                SegmentedButton<ThemeMode>(
-                  showSelectedIcon: false,
-                  segments: [
-                    for (final m in const [
-                      ThemeMode.system,
-                      ThemeMode.light,
-                      ThemeMode.dark,
-                    ])
-                      ButtonSegment(
-                        value: m,
-                        label: Text(ThemeController.labelOf(m)),
-                      ),
-                  ],
-                  selected: {theme.mode},
-                  onSelectionChanged: (s) => theme.setMode(s.first),
+                ThemePresetPicker(
+                  selected: theme.preset,
+                  onSelected: theme.setPreset,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '儿童模式优先级高于此项（M6 接入）。',
+                  '五套自定义皮肤可选，默认「主题1 · 暖纸书卷」；'
+                  '进入儿童模式会自动套用「主题4 · 春日活力」，之后仍可手动切换任意主题。',
                   style: tokens.captionStyle,
                 ),
               ],
