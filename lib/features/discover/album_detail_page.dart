@@ -222,26 +222,33 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                   ),
                   if (album.intro.isNotEmpty) ...[
                     SizedBox(height: tokens.spaceMd),
+                    // 简介文本与「展开/收起简介」同属一个点击区域：
+                    // 用户往往直接点这行文案，文案必须一起响应（此前只有正文可点）
                     InkWell(
                       borderRadius: BorderRadius.circular(tokens.radiusSm),
                       onTap: () =>
                           setState(() => _introExpanded = !_introExpanded),
-                      child: Text(
-                        album.intro,
-                        maxLines: _introExpanded ? null : 3,
-                        overflow:
-                            _introExpanded ? null : TextOverflow.ellipsis,
-                        style: tokens.captionStyle,
-                      ),
-                    ),
-                    SizedBox(height: tokens.spaceSm),
-                    Center(
-                      child: Text(
-                        _introExpanded ? '收起简介' : '展开简介',
-                        style: tokens.captionStyle.copyWith(
-                          color: scheme.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            album.intro,
+                            maxLines: _introExpanded ? null : 3,
+                            overflow:
+                                _introExpanded ? null : TextOverflow.ellipsis,
+                            style: tokens.captionStyle,
+                          ),
+                          SizedBox(height: tokens.spaceSm),
+                          Center(
+                            child: Text(
+                              _introExpanded ? '收起简介' : '展开简介',
+                              style: tokens.captionStyle.copyWith(
+                                color: scheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],

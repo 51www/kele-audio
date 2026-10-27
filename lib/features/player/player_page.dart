@@ -211,33 +211,40 @@ class PlayerPage extends StatelessWidget {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      // 根节点必须撑满：Wrap 只按「最宽的一行」定宽，直接当根会用内容宽度
+      // 收窄整张面板（手机上看就是两侧缺一条）。竖排用 Column + 无限宽兜底。
       builder: (context) => SafeArea(
-        child: Wrap(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text('倍速', style: AppTokens.of(context).sectionStyle),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final v in PlayerService.speedSteps)
-                    ChoiceChip(
-                      label: Text('${_rateText(v)}x'),
-                      selected: (v - player.rate).abs() < 0.001,
-                      onSelected: (_) async {
-                        await player.setRate(v);
-                        if (context.mounted) Navigator.of(context).pop();
-                      },
-                    ),
-                ],
+        child: SizedBox(
+          width: double.infinity,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text('倍速', style: AppTokens.of(context).sectionStyle),
               ),
-            ),
-            const SizedBox(height: 20),
-          ],
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final v in PlayerService.speedSteps)
+                      ChoiceChip(
+                        label: Text('${_rateText(v)}x'),
+                        selected: (v - player.rate).abs() < 0.001,
+                        onSelected: (_) async {
+                          await player.setRate(v);
+                          if (context.mounted) Navigator.of(context).pop();
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
         ),
       ),
     );
@@ -324,39 +331,45 @@ class PlayerPage extends StatelessWidget {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      // 与倍速面板同款：根节点撑满，避免 Wrap 按内容宽度收窄整张面板
       builder: (context) => SafeArea(
-        child: Wrap(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
-              child: Text('音质', style: AppTokens.of(context).sectionStyle),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Wrap(
-                spacing: 8,
-                children: [
-                  for (final q in AudioQuality.values)
-                    ChoiceChip(
-                      label: Text(q.label),
-                      selected: q == player.quality,
-                      onSelected: (_) async {
-                        await player.setQuality(q);
-                        if (context.mounted) Navigator.of(context).pop();
-                      },
-                    ),
-                ],
+        child: SizedBox(
+          width: double.infinity,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                child: Text('音质', style: AppTokens.of(context).sectionStyle),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
-              child: Text(
-                '切换音质会重新取址并从当前进度续播；'
-                'B 站并非每条内容都有全部档位，缺失时自动退到最接近的一档。',
-                style: AppTokens.of(context).captionStyle,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final q in AudioQuality.values)
+                      ChoiceChip(
+                        label: Text(q.label),
+                        selected: q == player.quality,
+                        onSelected: (_) async {
+                          await player.setQuality(q);
+                          if (context.mounted) Navigator.of(context).pop();
+                        },
+                      ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+                child: Text(
+                  '切换音质会重新取址并从当前进度续播；'
+                  'B 站并非每条内容都有全部档位，缺失时自动退到最接近的一档。',
+                  style: AppTokens.of(context).captionStyle,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
