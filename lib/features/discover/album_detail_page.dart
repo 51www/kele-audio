@@ -41,7 +41,12 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   List<PlayHistory> _history = const [];
   bool _loading = true;
   bool _introExpanded = false;
+  bool _descending = false;
   String? _error;
+
+  /// 章节展示/播放顺序：倒序时整体反转（影响目录显示与播放队列）。
+  List<Chapter> get _orderedChapters =>
+      _descending ? _chapters.reversed.toList() : _chapters;
 
   @override
   void initState() {
@@ -262,11 +267,11 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                     height: 48,
                     child: FilledButton.icon(
                       // 「播放全部」是播放按钮：播放并直达播放页
-                      onPressed: _chapters.isEmpty
+                      onPressed: _orderedChapters.isEmpty
                           ? null
                           : () async {
                               await player.playAlbum(album,
-                                  chapters: _chapters);
+                                  chapters: _orderedChapters);
                               if (!context.mounted) return;
                               context.push('/player');
                             },
@@ -355,9 +360,29 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                 tokens.spaceMd,
                 tokens.spaceSm,
               ),
-              trailing: Text(
-                '已听 ${_finishedCount(byChapter)}/${_chapters.length}',
-                style: tokens.captionStyle,
+              trailing: InkWell(
+                onTap: () => setState(() => _descending = !_descending),
+                borderRadius: BorderRadius.circular(tokens.radiusSm),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _descending
+                          ? Icons.arrow_downward_rounded
+                          : Icons.arrow_upward_rounded,
+                      size: 16,
+                      color: scheme.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _descending ? '倒序' : '正序',
+                      style: tokens.captionStyle.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -369,10 +394,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                 tokens,
                 album,
                 i,
-                byChapter[_chapters[i].id],
+                byChapter[_orderedChapters[i].id],
                 playingChapterId,
               ),
-              childCount: _chapters.length,
+              childCount: _orderedChapters.length,
             ),
           ),
           // 列表尾部留白：与四周 spaceMd 边距一致
@@ -391,7 +416,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     String playingChapterId,
   ) {
     final scheme = Theme.of(context).colorScheme;
-    final chapter = _chapters[i];
+    final chapter = _orderedChapters[i];
     final playing = chapter.id == playingChapterId;
     final percent = history?.percent ?? 0;
     final done = percent >= 90;
@@ -415,7 +440,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
           // 与页内其他区块同一条 spaceMd 左右基准线
           contentPadding: EdgeInsets.symmetric(horizontal: tokens.spaceMd),
           leading: Text(
-            (i + 1).toString().padLeft(2, '0'),
+            // 章节号取原始序号：倒序时显示 72,71,... 而非重新编号
+            (chapter.index + 1).toString().padLeft(2, '0'),
             style: tokens.numStyle.copyWith(
               color: playing || done ? scheme.primary : null,
             ),
@@ -436,21 +462,15 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
           ),
           onTap: () {
             // 点某一集：就地开始播放并显示播放条，留在详情页继续浏览，
-            // 不跳转播放页（跳播放页是「播放按钮」的语义）
+            // 不跳转播放页（跳播放页是「播放按钮」的语义）；
+            // 按当前排序（正/倒序）作为播放队列起点。
             final player = context.read<PlayerService>();
-            player.playAlbum(album, chapters: _chapters, startIndex: i);
+            player.playAlbum(album,
+                chapters: _orderedChapters, startIndex: i);
           },
         ),
       ],
     );
-  }
-
-  int _finishedCount(Map<String, PlayHistory> byChapter) {
-    var n = 0;
-    for (final c in _chapters) {
-      if ((byChapter[c.id]?.percent ?? 0) >= 90) n++;
-    }
-    return n;
   }
 
   static String _fmtDur(int sec) {
