@@ -83,7 +83,17 @@ class ProfilePage extends StatelessWidget {
             ),
           ),
 
-          const SectionTitle('功能'),
+          // 与其他页面一致：分区标题与下方卡片共用 spaceMd 左右边距
+          // （SectionTitle 默认左右为 0，页面需自行补齐，否则竖条会贴屏边）
+          SectionTitle(
+            '功能',
+            padding: EdgeInsets.fromLTRB(
+              tokens.spaceMd,
+              tokens.spaceLg,
+              tokens.spaceMd,
+              tokens.spaceSm,
+            ),
+          ),
           Padding(
             padding: EdgeInsets.symmetric(horizontal: tokens.spaceMd),
             child: KeleCard(
