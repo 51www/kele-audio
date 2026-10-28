@@ -175,18 +175,12 @@ class SettingsPage extends StatelessWidget {
               children: [
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('显示编辑精选'),
-                  subtitle: const Text('控制发现页「编辑精选」一行的显示'),
+                  title: const Text('显示编辑精选'), 
                   value: settings.featuredVisible,
                   onChanged: settings.setFeaturedVisible,
                 ),
                 const SizedBox(height: 6),
                 Text('发现页类型显示', style: tokens.captionStyle),
-                const SizedBox(height: 4),
-                Text(
-                  '控制发现页「按类型找内容」中各类别的显隐；「推荐」固定显示。',
-                  style: tokens.captionStyle,
-                ),
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
@@ -209,12 +203,7 @@ class SettingsPage extends StatelessWidget {
             title: '账号绑定',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '绑定第三方账号解锁进阶能力，功能陆续上线。',
-                  style: tokens.captionStyle,
-                ),
-                const SizedBox(height: 4),
+              children: [  
                 _BindingRow(
                   icon: Icons.smart_display_outlined,
                   title: 'B 站账号',
