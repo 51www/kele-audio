@@ -58,7 +58,7 @@ class SettingsPage extends StatelessWidget {
                 Text(
                   theme.children
                       ? '儿童模式已开启：发现页只保留儿童分类，搜索入口收起。'
-                      : '开启后内容按儿童白名单过滤（PRD §5.5），不做操作限制。',
+                      : '开启后内容按儿童白名单过滤，不做操作限制。',
                   style: tokens.captionStyle,
                 ),
               ],
@@ -134,8 +134,7 @@ class SettingsPage extends StatelessWidget {
               children: [
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('仅 Wi-Fi 下载'),
-                  subtitle: const Text('开关先记住选择，下载功能 M8 上线'),
+                  title: const Text('仅 Wi-Fi 下载'), 
                   value: settings.wifiOnlyDownload,
                   onChanged: (v) => settings.setWifiOnlyDownload(v),
                 ),

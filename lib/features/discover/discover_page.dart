@@ -91,7 +91,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
       bottom: false,
       child: Column(
         children: [
-          if (!kids) _buildSearchEntry(context, tokens, scheme),
+          _buildSearchEntry(context, tokens, scheme),
           if (!kids && settings.featuredVisible && activeConfig.featured.isNotEmpty)
             _buildFeatured(context, tokens, scheme, activeConfig.featured),
           Padding(
