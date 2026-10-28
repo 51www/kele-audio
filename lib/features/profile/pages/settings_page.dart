@@ -10,6 +10,7 @@ import '../../../app/widgets/theme_preset_picker.dart';
 import '../../../core/domain/playback.dart';
 import '../../../core/services/bili_account_service.dart';
 import '../../../core/services/image_cache_cleaner.dart';
+import '../../../core/services/webdav_sync_service.dart';
 import '../../../core/services/player/player_service.dart';
 import '../../../core/services/settings_store.dart';
 
@@ -24,7 +25,7 @@ import '../../../core/services/settings_store.dart';
 /// - 清除图片缓存：内存 + 磁盘（Web 端仅内存）；
 /// - 高级设置：发现页「编辑精选」行显隐 + 分类显隐（「推荐」固定显示）；
 /// - 账号绑定：B 站扫码登录（绑定/解绑 + 资料展示，绑定后解锁高音质音源）、
-///   WebDAV 占位入口（暂未实现）。
+///   WebDAV 云同步（手动备份/同步设置、收藏、历史与进度、统计，整体覆盖）。
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
@@ -35,6 +36,7 @@ class SettingsPage extends StatelessWidget {
     final player = context.watch<PlayerService>();
     final settings = context.watch<SettingsStore>();
     final account = context.watch<BiliAccountService>();
+    final webdav = context.watch<WebdavSyncService>();
 
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
@@ -215,9 +217,10 @@ class SettingsPage extends StatelessWidget {
                 _BindingRow(
                   icon: Icons.cloud_sync_outlined,
                   title: 'WebDAV',
-                  subtitle: '绑定后同步书架与收听进度',
-                  status: '未绑定',
-                  onTap: () => _notifyPlanned(context),
+                  subtitle: '备份/同步设置、收藏、历史与统计',
+                  status: webdav.bound ? '已绑定' : '未绑定',
+                  bound: webdav.bound,
+                  onTap: () => context.push('/profile/webdav'),
                 ),
               ],
             ),
@@ -234,13 +237,6 @@ class SettingsPage extends StatelessWidget {
       for (final c in cats)
         if (c.id != SettingsStore.pinnedCategoryId) (id: c.id, name: c.name),
     ];
-  }
-
-  /// 账号绑定占位入口的统一反馈（本期不实现）。
-  void _notifyPlanned(BuildContext context) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('绑定功能开发中，敬请期待')));
   }
 
   /// 儿童模式开关（原发现页顶部入口迁入）：开启直接切，
@@ -308,8 +304,7 @@ class SettingsPage extends StatelessWidget {
       );
 }
 
-/// 账号绑定入口行：图标 + 标题/副标题 + 绑定状态，点击进入绑定页
-///（WebDAV 暂未实现，点击给开发中提示）。
+/// 账号绑定入口行：图标 + 标题/副标题 + 绑定状态，点击进入对应绑定页。
 class _BindingRow extends StatelessWidget {
   const _BindingRow({
     required this.icon,

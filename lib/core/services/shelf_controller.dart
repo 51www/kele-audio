@@ -31,6 +31,13 @@ class ShelfController extends ChangeNotifier {
     _loaded = true;
   }
 
+  /// 同步恢复后强制重载（[ensure] 幂等不会自动重读）。
+  Future<void> reload() async {
+    _loaded = false;
+    await ensure();
+    notifyListeners();
+  }
+
   /// 是否已收藏（UI 直接读，无需 async）。
   bool has(String albumId) => _ids.contains(albumId);
 

@@ -16,6 +16,7 @@ import '../core/services/offline/offline_cache_service.dart';
 import '../core/services/player/player_service.dart';
 import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
+import '../core/services/webdav_sync_service.dart';
 import 'di.dart';
 import 'router.dart';
 import 'theme/app_theme.dart';
@@ -40,6 +41,9 @@ class KeleApp extends StatelessWidget {
         ChangeNotifierProvider<SettingsStore>.value(value: services.settings),
         ChangeNotifierProvider<BiliAccountService>.value(
           value: services.account,
+        ),
+        ChangeNotifierProvider<WebdavSyncService>.value(
+          value: services.webdav,
         ),
         Provider<AppServices>.value(value: services),
         Provider<BiliClient>.value(value: services.client),

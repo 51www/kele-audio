@@ -22,6 +22,7 @@ import '../core/services/player/player_service.dart';
 import '../core/services/player/progress_store.dart';
 import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
+import '../core/services/webdav_sync_service.dart';
 import 'theme/theme_controller.dart';
 
 /// 应用级服务集合（DI）：一次性启动装配，页面用 `context.read` 取用。
@@ -47,6 +48,7 @@ class AppServices {
     required this.settings,
     required this.offline,
     required this.account,
+    required this.webdav,
   });
 
   final KeyValueStore kv;
@@ -95,6 +97,9 @@ class AppServices {
 
   /// B 站账号绑定（M5）：扫码登录状态机 + 绑定态/账号档案
   final BiliAccountService account;
+
+  /// WebDAV 云同步（M5 账号绑定）：手动备份/同步四件套（整体覆盖）
+  final WebdavSyncService webdav;
 
   /// 启动装配：**不发任何网络请求**（PRD 冷启动 ≤ 3s）。
   ///
@@ -188,6 +193,19 @@ class AppServices {
     // 零网络、零引擎：只挂生命周期/焦点/系统桥 + 读持久化参数
     await player.init();
 
+    // WebDAV 同步：恢复落库后重载各处内存缓存（主题/书架/播放参数/开关）
+    final webdav = WebdavSyncService(
+      kv: kv,
+      db: db,
+      afterRestore: () async {
+        await theme.load();
+        await shelf.reload();
+        player.reloadPrefs();
+        settings.notifyChanged();
+        await offline.initFlags(kv);
+      },
+    );
+
     return AppServices._(
       kv: kv,
       config: config,
@@ -209,6 +227,7 @@ class AppServices {
       settings: settings,
       offline: offline,
       account: account,
+      webdav: webdav,
     );
   }
 

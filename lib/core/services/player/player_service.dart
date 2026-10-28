@@ -607,6 +607,16 @@ class PlayerService extends ChangeNotifier
     notifyListeners();
   }
 
+  /// WebDAV 同步恢复后重读持久化参数（只更新默认值，不打断当前播放）。
+  void reloadPrefs() {
+    _rate = prefs.rate;
+    _mode = prefs.mode;
+    _quality = prefs.quality;
+    _stopAtChapterEnd = prefs.stopAtChapterEnd;
+    _autoNext = prefs.autoNext;
+    notifyListeners();
+  }
+
   // ================================================================ 睡眠定时
 
   /// 定时关闭：[minutes] 为 null 表示关闭；0 表示「本章结束」。

@@ -10,6 +10,7 @@ import '../features/profile/pages/downloads_page.dart';
 import '../features/profile/pages/history_page.dart';
 import '../features/profile/pages/settings_page.dart';
 import '../features/profile/pages/stats_page.dart';
+import '../features/profile/pages/webdav_page.dart';
 import '../features/profile/profile_page.dart';
 import '../features/player/player_page.dart';
 import '../features/shelf/shelf_page.dart';
@@ -77,6 +78,12 @@ class AppRouter {
                   path: 'bili-account',
                   name: 'profile-bili-account',
                   builder: (context, state) => const BiliAccountPage(),
+                ),
+                // 13. WebDAV 云同步（设置 → 账号绑定）
+                GoRoute(
+                  path: 'webdav',
+                  name: 'profile-webdav',
+                  builder: (context, state) => const WebdavPage(),
                 ),
                 // 9. 关于/版本
                 GoRoute(
