@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 自适应图标背景色：作为图标底色，前景 logo 居中浮于其上 -->
 <resources>
-    <color name="ic_launcher_background">#F98E5F</color>
+    <color name="ic_launcher_background">#3A2B23</color>
 </resources>

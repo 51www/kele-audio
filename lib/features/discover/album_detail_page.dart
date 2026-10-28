@@ -153,7 +153,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
     return Scaffold(
       appBar: AppBar(title: Text(album.title, maxLines: 1)),
-      bottomNavigationBar: const MiniPlayerSlot(),
+      // 与首页（含底部导航栏）对齐：播放条距屏幕底部高度一致
+      bottomNavigationBar: const MiniPlayerSlot(alignToHomeBar: true),
       body: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(

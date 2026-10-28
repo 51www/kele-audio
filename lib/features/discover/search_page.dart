@@ -171,7 +171,8 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ),
       ),
-      bottomNavigationBar: const MiniPlayerSlot(),
+      // 与首页（含底部导航栏）对齐：播放条距屏幕底部高度一致
+      bottomNavigationBar: const MiniPlayerSlot(alignToHomeBar: true),
       body: _keyword.isEmpty ? _buildIdle(tokens, scheme) : _buildResults(tokens),
     );
   }
