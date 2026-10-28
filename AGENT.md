@@ -12,9 +12,6 @@
 
 | 文档 | 内容 | 何时读 |
 |---|---|---|
-| `docs/PRD.md` | 产品需求全量文档：风险清单（R1~R8）、页面/功能详述（§5.4 P-01~P-08 播放硬性要求）、数据模型（§7.5）、验收标准（§10） | 做任何功能前必读对应章节 |
-| `docs/milestones.md` | 里程碑 M0~M8：每个里程碑的准入条件、任务清单、准出条件 | 开始新里程碑时必读该里程碑章节 |
-| `docs/reference-abts.md` | **abts（阿B听书）参考答案对照表**：PRD 风险 ↔ abts 实现位置、技术栈决策、移植清单、工期修订 | 写任何核心逻辑前先查这里，优先移植而非自写 |
 | `docs/theme.md` | 六套 UI 主题的风格提示词与调色参考（含儿童模式选型） | 涉及任何 UI/主题工作时读 |
 | `docs/shortscreen/` | 风格参考截图（theme.md 的源图） | 需要视觉参考时 |
 
@@ -29,15 +26,6 @@
 - **播放地址**：URL 只存内存（90 分钟有效），**永不落库**；持久化层只存 bvid/cid
 - 本地仓库结构参照 abts 的 `core/network`（bili_client / wbi_signer / api_config 三件套）
 
-## 参考项目（abts）
-
-- 仓库：https://github.com/fengqiao57/abts.git （MIT 协议）
-- 本地克隆：`C:\Users\EDY\AppData\Local\Temp\opencode\abts`（临时目录，可能被清理；失效时重新 `git clone --depth 1`）
-- **使用规则**：
-  1. 逻辑/数据层优先移植 abts 实现，先查 `docs/reference-abts.md` 定位文件与行号；
-  2. **布局与主题自主设计**（按 `docs/theme.md`），不抄 abts 的 UI；
-  3. **不抄**：友盟统计（`umeng_*`）、全部埋点、Windows 目标、内部调试打印；
-  4. 关于页不展示 MIT 开源声明与对 abts 的致谢（用户已明确移除，勿恢复）。
 
 ## 开发顺序与硬性约束
 
