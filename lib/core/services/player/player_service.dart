@@ -528,12 +528,21 @@ class PlayerService extends ChangeNotifier
     }
   }
 
-  /// 跳到指定章节（章节抽屉 / 详情页点击）
-  Future<void> playChapterAt(int index, {Duration startAt = Duration.zero}) async {
+  /// 跳到指定章节（章节抽屉 / 详情页点击 / 播完自动连播）。
+  ///
+  /// [autoPlay] 为 null 时沿用旧的「保真」逻辑：
+  /// 当前在播或尚未就绪则继续播，否则保持暂停（手动切章友好）。
+  /// 自然播完的连播路径必须显式传 `autoPlay: true`，否则章节结束时
+  /// 引擎已 emit `playing=false` 会让 [keepPlaying] 误判成 false → 切章不续播。
+  Future<void> playChapterAt(
+    int index, {
+    Duration startAt = Duration.zero,
+    bool? autoPlay,
+  }) async {
     if (index < 0 || index >= _chapters.length) return;
-    final keepPlaying = _playing || !_mediaReady;
+    final shouldPlay = autoPlay ?? (_playing || !_mediaReady);
     if (_mediaReady) unawaited(_saveNow());
-    await _openChapter(index, startAt: startAt, autoPlay: keepPlaying);
+    await _openChapter(index, startAt: startAt, autoPlay: shouldPlay);
   }
 
   // ================================================================ 倍速/模式
@@ -874,11 +883,11 @@ class PlayerService extends ChangeNotifier
     }
 
     if (hasNext) {
-      await playChapterAt(_index + 1);
+      await playChapterAt(_index + 1, autoPlay: true);
       return;
     }
     if (_mode == PlayMode.loopAll && _chapters.isNotEmpty) {
-      await playChapterAt(0);
+      await playChapterAt(0, autoPlay: true);
       return;
     }
     await _rewindTail();
