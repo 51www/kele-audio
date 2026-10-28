@@ -20,10 +20,10 @@ class AboutPage extends StatelessWidget {
     '使用本应用产生的后果由使用者自行承担。',
   ];
 
-  /// MVP 静态文案 + 更新链接（PRD §5.6.5：检查更新可为静态文本）。
-  /// 正式发布后可换成 GitHub Releases 比对（abts 同款 `app_update` 思路）。
+  /// 版本说明 + 更新链接（PRD §5.6.5：检查更新可为静态文本）。
+  /// 后续可换成 GitHub Releases 比对（abts 同款 `app_update` 思路）。
   static const _releaseNotes =
-      '当前版本 $appVersion 为 MVP 预览版，无自动更新通道。'
+      '当前版本 $appVersion 已发布，无自动更新通道。'
       '新版本发布后请到项目仓库 Releases 页面获取。';
 
   static const _repoUrl = 'https://github.com/kele-audio/kele-audio';
@@ -66,7 +66,7 @@ class AboutPage extends StatelessWidget {
                     ],
                   ),
                 ),
-                const StageTag('MVP 前', tone: StageTone.accent),
+                const StageTag('正式版', tone: StageTone.accent),
               ],
             ),
           ),
@@ -109,7 +109,7 @@ class AboutPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'MVP 阶段更新与反馈走仓库链接，点击可复制。',
+                  '更新与反馈走仓库链接，点击可复制。',
                   style: tokens.captionStyle,
                 ),
               ],
