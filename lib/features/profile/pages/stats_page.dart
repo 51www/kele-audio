@@ -52,11 +52,10 @@ class StatsPage extends StatelessWidget {
       body: ListView(
         padding: EdgeInsets.all(tokens.spaceMd),
         children: [
-          // ── KPI 四卡 ─────────────────────────────────────────────
+          // ── KPI 三卡（今日卡已移除，小屏完整显示不出省略号）──────
           Row(
             children: [
               for (final (i, kpi) in [
-                ('今日', ListenStats.formatDuration(stats.todaySec)),
                 ('本周', ListenStats.formatDuration(stats.weekSec)),
                 ('本月', ListenStats.formatDuration(monthSec)),
                 ('累计', ListenStats.formatDuration(stats.totalSec)),
@@ -71,11 +70,14 @@ class StatsPage extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          kpi.$2,
-                          style: tokens.titleStyle.copyWith(fontSize: 16),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            kpi.$2,
+                            style: tokens.titleStyle.copyWith(fontSize: 16),
+                            maxLines: 1,
+                          ),
                         ),
                         const SizedBox(height: 4),
                         Text(kpi.$1, style: tokens.captionStyle),

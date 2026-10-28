@@ -78,6 +78,10 @@ class PlayerPage extends StatelessWidget {
                 padding: EdgeInsets.symmetric(horizontal: tokens.spaceLg),
                 child: Column(
                   children: [
+                    // ── 睡眠定时：开启倒计时停止时顶部居中显示剩余时间 ──
+                    if (player.hasSleepTimer || player.stopAtChapterEnd)
+                      _SleepCountdown(player: player),
+
                     // ── 上区：封面 + 标题（弹性高度，短屏自动压缩） ──
                     Expanded(
                       child: LayoutBuilder(
@@ -570,6 +574,51 @@ class _IdleView extends StatelessWidget {
               label: const Text('去发现页'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 睡眠定时剩余时间徽标（播放页顶部居中）：定时关闭开启倒计时停止时，
+/// 显示「剩余 m:ss」随秒递减（数据源 [PlayerService.sleepRemaining]，每秒
+/// notifyListeners 自动刷新）；「本章结束」模式显示模式文案。
+class _SleepCountdown extends StatelessWidget {
+  const _SleepCountdown({required this.player});
+
+  final PlayerService player;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final remaining = player.sleepRemaining;
+    final label = player.stopAtChapterEnd
+        ? '本章结束'
+        : '剩余 ${remaining.inMinutes}:${(remaining.inSeconds % 60).toString().padLeft(2, '0')}';
+    return Padding(
+      padding: EdgeInsets.only(top: tokens.spaceXs, bottom: tokens.spaceXs),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(tokens.radiusPill),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.alarm_rounded, size: 14, color: scheme.primary),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: tokens.numStyle.copyWith(
+                  color: scheme.primary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

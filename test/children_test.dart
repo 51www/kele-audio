@@ -226,14 +226,14 @@ void main() {
       expect(migrated.preset, AppThemePreset.darkGold);
 
       // 单槽位：各预设自由切换并持久化
-      await migrated.setPreset(AppThemePreset.bronzeLibrary);
+      await migrated.setPreset(AppThemePreset.mochaNight);
       await migrated.setPreset(AppThemePreset.mintSpring);
       final reloaded = ThemeController(kv);
       await reloaded.load();
       expect(reloaded.preset, AppThemePreset.mintSpring);
     });
 
-    test('七个主题预设均可构建；主题3/6/7 为深色，其余为亮色', () {
+    test('六个主题预设均可构建；主题3/6/7 为深色，其余为亮色', () {
       for (final preset in AppThemePreset.values) {
         final theme = AppTheme.of(preset);
         expect(theme.extension<AppTokens>(), isA<AppTokens>());

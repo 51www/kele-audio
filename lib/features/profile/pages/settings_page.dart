@@ -14,7 +14,7 @@ import '../../../core/services/settings_store.dart';
 ///
 /// - 儿童模式：开关入口收拢到这里（原发现页顶部开关已移除），
 ///   开启直接生效（自动套儿童默认主题），关闭走二次确认防误触；
-/// - 主题：一般模式 / 儿童模式各一套皮肤（七个预设，默认主题1 / 主题4，立即生效 + 重启保留）；
+/// - 主题：一般模式 / 儿童模式各一套皮肤（六个预设，默认主题1 / 主题4，立即生效 + 重启保留）；
 /// - 默认音质 / 默认播放模式 / 后台自动播放下一章：接入 M2 播放参数
 ///   （同一套 PlayerPrefs key，播放页临时切换与这里共享持久化）；
 /// - 仅 Wi-Fi 下载：开关先占位持久化（下载能力 M8 实现）；
@@ -68,17 +68,9 @@ class SettingsPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('主题', style: tokens.captionStyle),
-                const SizedBox(height: 8),
                 ThemePresetPicker(
                   selected: theme.preset,
                   onSelected: theme.setPreset,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '七套自定义皮肤可选，默认「主题1 · 暖纸书卷」；'
-                  '进入儿童模式会自动套用「主题4 · 春日活力」，之后仍可手动切换任意主题。',
-                  style: tokens.captionStyle,
                 ),
               ],
             ),

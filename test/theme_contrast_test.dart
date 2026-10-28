@@ -32,7 +32,7 @@ void main() {
     );
   }
 
-  group('七套主题文字对比度（WCAG AA）', () {
+  group('六套主题文字对比度（WCAG AA）', () {
     for (final preset in AppThemePreset.values) {
       test('${preset.title} 文字与底色全部可读', () {
         final p = preset.palette;

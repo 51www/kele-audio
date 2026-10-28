@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 /// 调色板 —— 全项目唯一允许出现色值的地方（widget 内禁止硬编码颜色，见 M1 约束）。
 ///
-/// 七个主题皮肤（`docs/theme.md` 主题 1~7）：主题色只换**颜色**，
+/// 六个主题皮肤（`docs/theme.md` 主题 1、3~7；主题2 已移除，id 2 保留空位）：主题色只换**颜色**，
 /// 圆角/间距/字阶等结构 token 全主题共用（见 `app_tokens.dart`），
 /// 保证配色、字体、间距、组件样式在各页面/状态间一致。
 ///
@@ -10,7 +10,6 @@ import 'package:flutter/material.dart';
 /// 由 `test/theme_contrast_test.dart` 断言守卫；亮色/深色主题均可读。
 enum AppThemePreset {
   warmPaper(1, '暖纸书卷'),
-  bronzeLibrary(2, '青铜暖知'),
   darkGold(3, '暗夜金橙'),
   springPromo(4, '春日活力'),
   mintSpring(5, '薄荷春芽'),
@@ -39,7 +38,6 @@ enum AppThemePreset {
 
   ThemePalette get palette => switch (this) {
         AppThemePreset.warmPaper => ThemePalette.warmPaper,
-        AppThemePreset.bronzeLibrary => ThemePalette.bronzeLibrary,
         AppThemePreset.darkGold => ThemePalette.darkGold,
         AppThemePreset.springPromo => ThemePalette.springPromo,
         AppThemePreset.mintSpring => ThemePalette.mintSpring,
@@ -130,28 +128,6 @@ class ThemePalette {
     accentBottom: Color(0xFFD98E28),
     onAccent: Color(0xFF2E2109),
     error: Color(0xFFC62B1F),
-    onError: Color(0xFFFFFFFF),
-  );
-
-  // ── 主题2：青铜书架·暖知（Bronze Library）─────────────────────────
-  // 奶油底 + 纯白卡片，行动点橙红渐变；主色收深保证白字可读。
-  static const ThemePalette bronzeLibrary = ThemePalette(
-    isDark: false,
-    page: Color(0xFFF6F1EA), // 奶油米
-    cardTop: Color(0xFFFFFFFF), // 纯白卡片
-    cardBottom: Color(0xFFFAF6F0),
-    hairline: Color(0xFFE8DFD2),
-    ink: Color(0xFF2C241C), // 深棕黑
-    inkSoft: Color(0xFF57483A),
-    inkWeak: Color(0xFF6B5B4A),
-    primary: Color(0xFFC23F18), // 橙红（收深）
-    onPrimary: Color(0xFFFFFFFF),
-    secondary: Color(0xFF7A5D0E), // 金橙（收深，可作文字）
-    onSecondary: Color(0xFFFFFFFF),
-    accentTop: Color(0xFFFF5B2E), // 橙红渐变
-    accentBottom: Color(0xFFFF8A3D),
-    onAccent: Color(0xFF2A1206),
-    error: Color(0xFFB3261E),
     onError: Color(0xFFFFFFFF),
   );
 

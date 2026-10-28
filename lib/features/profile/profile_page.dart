@@ -18,7 +18,7 @@ const String appVersion = '1.0.0';
 
 /// Tab 3 我的（PRD §5.6）。
 ///
-/// M1 范围：页面骨架 + 二级页入口 + **全局主题切换**（七套自定义皮肤）
+/// M1 范围：页面骨架 + 二级页入口 + **全局主题切换**（六套自定义皮肤）
 /// + 工程自检；统计与设置项在 M5 完善。
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -40,7 +40,7 @@ class ProfilePage extends StatelessWidget {
       child: ListView(
         padding: EdgeInsets.only(bottom: tokens.spaceLg),
         children: [
-          PageHeader(title: '我的', subtitle: '未登录 · 收藏与进度只存这台设备'),
+          PageHeader(title: '我的', subtitle: '收藏与进度只存这台设备'),
 
           // ── 收听摘要（M5：play_log 聚合；完整统计 M8） ──────────────
           Padding(
@@ -199,9 +199,8 @@ class ProfilePage extends StatelessWidget {
               0,
             ),
             child: Text(
-              '本应用为第三方个人开发的播放工具，与哔哩哔哩官方无任何关联。'
-              '内容来自平台公开链接，版权归原作者所有；仅提供在线播放，'
-              '不存储、不修改、不二次分发，仅供个人学习与收听使用。',
+              '本应用为第三方播放工具，与哔哩哔哩官方无关联；内容来自平台公开链接，'
+              '版权归原作者所有，仅供个人学习收听，不存储、不二次分发。',
               style: tokens.captionStyle.copyWith(height: 1.6),
             ),
           ),
