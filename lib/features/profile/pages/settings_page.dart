@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../app/di.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../app/theme/theme_controller.dart';
 import '../../../app/widgets/common.dart';
@@ -18,7 +19,9 @@ import '../../../core/services/settings_store.dart';
 /// - 默认音质 / 默认播放模式 / 后台自动播放下一章：接入 M2 播放参数
 ///   （同一套 PlayerPrefs key，播放页临时切换与这里共享持久化）；
 /// - 仅 Wi-Fi 下载：开关先占位持久化（下载能力 M8 实现）；
-/// - 清除图片缓存：内存 + 磁盘（Web 端仅内存）。
+/// - 清除图片缓存：内存 + 磁盘（Web 端仅内存）；
+/// - 高级设置：发现页「编辑精选」行显隐 + 分类显隐（「推荐」固定显示）；
+/// - 账号绑定：B 站 / WebDAV 占位入口（本期不实现，仅占位）。
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
@@ -160,9 +163,90 @@ class SettingsPage extends StatelessWidget {
               ],
             ),
           ),
+          SizedBox(height: tokens.spaceMd),
+          _SectionCard(
+            icon: Icons.tune_rounded,
+            title: '高级设置',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('显示编辑精选'),
+                  subtitle: const Text('控制发现页「编辑精选」一行的显示'),
+                  value: settings.featuredVisible,
+                  onChanged: settings.setFeaturedVisible,
+                ),
+                const SizedBox(height: 6),
+                Text('发现页类型显示', style: tokens.captionStyle),
+                const SizedBox(height: 4),
+                Text(
+                  '控制发现页「按类型找内容」中各类别的显隐；「推荐」固定显示。',
+                  style: tokens.captionStyle,
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final cat in _controllableCategories(context))
+                      FilterChip(
+                        label: Text(cat.name),
+                        selected: settings.isCategoryVisible(cat.id),
+                        onSelected: (v) => settings.setCategoryVisible(cat.id, v),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: tokens.spaceMd),
+          _SectionCard(
+            icon: Icons.link_rounded,
+            title: '账号绑定',
+            trailing: const InfoChip('敬请期待'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '绑定第三方账号解锁进阶能力，本期仅占位，功能陆续上线。',
+                  style: tokens.captionStyle,
+                ),
+                const SizedBox(height: 4),
+                _BindingRow(
+                  icon: Icons.smart_display_outlined,
+                  title: 'B 站账号',
+                  subtitle: '绑定后解锁高音质音源',
+                  onTap: () => _notifyPlanned(context),
+                ),
+                _BindingRow(
+                  icon: Icons.cloud_sync_outlined,
+                  title: 'WebDAV',
+                  subtitle: '绑定后同步书架与收听进度',
+                  onTap: () => _notifyPlanned(context),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  /// 高级设置里可控制显隐的分类：成人分类去掉固定显示的「推荐」。
+  List<({String id, String name})> _controllableCategories(BuildContext context) {
+    final cats = context.read<AppServices>().content.adultCategories;
+    return [
+      for (final c in cats)
+        if (c.id != SettingsStore.pinnedCategoryId) (id: c.id, name: c.name),
+    ];
+  }
+
+  /// 账号绑定占位入口的统一反馈（本期不实现）。
+  void _notifyPlanned(BuildContext context) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('绑定功能开发中，敬请期待')));
   }
 
   /// 儿童模式开关（原发现页顶部入口迁入）：开启直接切，
@@ -228,6 +312,54 @@ class SettingsPage extends StatelessWidget {
           ],
         ),
       );
+}
+
+/// 账号绑定占位行（本期不实现功能，仅占位）：
+/// 图标 + 标题/副标题 + 「未绑定」状态，点击给统一的开发中提示。
+class _BindingRow extends StatelessWidget {
+  const _BindingRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      borderRadius: BorderRadius.circular(tokens.radiusMd),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: tokens.bodyStyle),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: tokens.captionStyle),
+                ],
+              ),
+            ),
+            Text('未绑定', style: tokens.captionStyle),
+            const SizedBox(width: 4),
+            Icon(Icons.chevron_right_rounded, color: tokens.onHairline),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _SectionCard extends StatelessWidget {

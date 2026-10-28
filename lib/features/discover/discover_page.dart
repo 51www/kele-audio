@@ -7,6 +7,7 @@ import '../../app/theme/app_tokens.dart';
 import '../../app/theme/theme_controller.dart';
 import '../../app/widgets/common.dart';
 import '../../core/api/content_config.dart';
+import '../../core/services/settings_store.dart';
 import 'category_feed.dart';
 
 /// Tab 1 发现页（PRD §5.1，M3 接入真实内容源；M6 接入儿童模式联动）。
@@ -42,12 +43,15 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   /// 当前模式下的分类：儿童模式 → 儿童白名单五类，否则成人 7 类。
+  /// 再按「高级设置」显隐过滤（「推荐」类固定显示，见 [SettingsStore.isCategoryVisible]）。
   List<CategoryConfig> _categoriesOf(BuildContext context) {
     final services = context.read<AppServices>();
     final kids = context.read<ThemeController>().children;
-    return kids
+    final settings = context.read<SettingsStore>();
+    final all = kids
         ? services.childrenContent.childrenCategories
         : services.content.adultCategories;
+    return all.where((c) => settings.isCategoryVisible(c.id)).toList();
   }
 
   @override
@@ -55,6 +59,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
     final tokens = AppTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
     final kids = context.watch<ThemeController>().children;
+    final settings = context.watch<SettingsStore>();
     final services = context.read<AppServices>();
     final activeConfig = kids ? services.childrenContent : services.content;
     final cacheTtl = Duration(minutes: activeConfig.cacheTtlMinutes);
@@ -70,6 +75,14 @@ class _DiscoverPageState extends State<DiscoverPage> {
       _categoryId = categories.isNotEmpty ? categories.first.id : '';
     }
 
+    // 显隐变化兜底：当前分类被隐藏 → 切回第一个可见分类（保活的 feed 不清）。
+    if (categories.isNotEmpty && !categories.any((c) => c.id == _categoryId)) {
+      _categoryId = categories.first.id;
+      if (!_visited.any((c) => c.id == _categoryId)) {
+        _visited.add(categories.first);
+      }
+    }
+
     if (categories.isEmpty) {
       return const Center(child: Text('内容配置为空，请重启应用重试'));
     }
@@ -79,7 +92,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
       child: Column(
         children: [
           if (!kids) _buildSearchEntry(context, tokens, scheme),
-          if (!kids && activeConfig.featured.isNotEmpty)
+          if (!kids && settings.featuredVisible && activeConfig.featured.isNotEmpty)
             _buildFeatured(context, tokens, scheme, activeConfig.featured),
           Padding(
             padding: EdgeInsets.fromLTRB(

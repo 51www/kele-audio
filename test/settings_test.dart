@@ -51,4 +51,43 @@ void main() {
     await store.setWifiOnlyDownload(true);
     expect(notified, 2);
   });
+
+  test('SettingsStore.featuredVisible：默认显示，关闭后重启保留', () {
+    final kv = MemoryKeyValueStore();
+    expect(SettingsStore(kv).featuredVisible, isTrue);
+
+    final store = SettingsStore(kv);
+    store.setFeaturedVisible(false);
+    expect(SettingsStore(kv).featuredVisible, isFalse);
+
+    store.setFeaturedVisible(true);
+    expect(SettingsStore(kv).featuredVisible, isTrue);
+  });
+
+  test('SettingsStore 分类显隐：默认全显，隐藏后重启保留，可再显示', () {
+    final kv = MemoryKeyValueStore();
+    final store = SettingsStore(kv);
+    expect(store.isCategoryVisible('xiaoshuo'), isTrue);
+
+    store.setCategoryVisible('xiaoshuo', false);
+    store.setCategoryVisible('boke', false);
+    expect(SettingsStore(kv).isCategoryVisible('xiaoshuo'), isFalse);
+    expect(SettingsStore(kv).isCategoryVisible('boke'), isFalse);
+    expect(SettingsStore(kv).isCategoryVisible('music'), isTrue);
+
+    store.setCategoryVisible('xiaoshuo', true);
+    expect(SettingsStore(kv).isCategoryVisible('xiaoshuo'), isTrue);
+    expect(SettingsStore(kv).isCategoryVisible('boke'), isFalse);
+  });
+
+  test('「推荐」类固定显示：无法被隐藏', () {
+    final kv = MemoryKeyValueStore();
+    final store = SettingsStore(kv);
+
+    store.setCategoryVisible(SettingsStore.pinnedCategoryId, false);
+    expect(store.isCategoryVisible(SettingsStore.pinnedCategoryId), isTrue);
+    expect(store.hiddenCategoryIds, isEmpty);
+    expect(SettingsStore(kv).isCategoryVisible(SettingsStore.pinnedCategoryId),
+        isTrue);
+  });
 }
