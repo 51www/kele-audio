@@ -10,6 +10,7 @@ import '../core/api/play_url_service.dart';
 import '../core/data/daos.dart';
 import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
+import '../core/services/bili_account_service.dart';
 import '../core/services/mini_player_controller.dart';
 import '../core/services/offline/offline_cache_service.dart';
 import '../core/services/player/player_service.dart';
@@ -37,6 +38,9 @@ class KeleApp extends StatelessWidget {
         ChangeNotifierProvider<PlayerService>.value(value: services.player),
         ChangeNotifierProvider<ShelfController>.value(value: services.shelf),
         ChangeNotifierProvider<SettingsStore>.value(value: services.settings),
+        ChangeNotifierProvider<BiliAccountService>.value(
+          value: services.account,
+        ),
         Provider<AppServices>.value(value: services),
         Provider<BiliClient>.value(value: services.client),
         Provider<ApiConfig>.value(value: services.config),

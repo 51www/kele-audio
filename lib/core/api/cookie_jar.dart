@@ -49,6 +49,12 @@ class CookieJar {
     _hasCookie = true;
   }
 
+  /// 删除一个 Cookie（如解除登录时清 SESSDATA）。
+  void remove(String key) {
+    _cookies.remove(key);
+    _hasCookie = _cookies.isNotEmpty;
+  }
+
   String buildHeader() {
     final buf = StringBuffer();
     final keys = SplayTreeSet<String>.of(_cookies.keys);

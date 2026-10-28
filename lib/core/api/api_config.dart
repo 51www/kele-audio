@@ -42,6 +42,12 @@ class BiliPaths {
   /// buvid 激活（gaia 风控闭环：ExClimbWuzhi）
   static const String activateBuvid =
       '/x/internal/gaia-gateway/ExClimbWuzhi';
+
+  /// 扫码登录：生成二维码（passport 域名，经 [ApiConfig.passportUrl] 拼装）
+  static const String qrGenerate = '/x/passport-login/web/qrcode/generate';
+
+  /// 扫码登录：轮询扫码结果（passport 域名，经 [ApiConfig.passportUrl] 拼装）
+  static const String qrPoll = '/x/passport-login/web/qrcode/poll';
 }
 
 /// 接口配置：域名、UA、节流与退避参数。
@@ -52,6 +58,10 @@ class ApiConfig {
 
   /// 网页站域名，用作 Referer/Origin 与首页预热。
   final String homeBase;
+
+  /// passport 域名（扫码登录 generate/poll）。原生端为
+  /// `https://passport.bilibili.com`；Web 预览为同源前缀 `/pp`（dev_proxy 反代）。
+  final String passportBase;
 
   /// 搜索页域名（搜索类请求的合法来源）。
   final String searchHome;
@@ -73,6 +83,7 @@ class ApiConfig {
   const ApiConfig({
     required this.apiBase,
     required this.homeBase,
+    required this.passportBase,
     required this.searchHome,
     required this.userAgent,
     required this.remoteConfigUrl,
@@ -89,6 +100,7 @@ class ApiConfig {
   factory ApiConfig.defaults({bool isWeb = false}) => ApiConfig(
         apiBase: isWeb ? '/api' : 'https://api.bilibili.com',
         homeBase: 'https://www.bilibili.com',
+        passportBase: isWeb ? '/pp' : 'https://passport.bilibili.com',
         searchHome: 'https://search.bilibili.com',
         userAgent: defaultUserAgent,
         remoteConfigUrl: null,
@@ -103,6 +115,7 @@ class ApiConfig {
     return ApiConfig(
       apiBase: isWeb ? '/api' : '${json['api_base'] ?? defaults.apiBase}',
       homeBase: '${json['home_base'] ?? defaults.homeBase}',
+      passportBase: isWeb ? '/pp' : '${json['passport_base'] ?? defaults.passportBase}',
       searchHome: '${json['search_home'] ?? defaults.searchHome}',
       userAgent: '${json['user_agent'] ?? defaults.userAgent}',
       remoteConfigUrl: json['remote_config_url'] as String?,
@@ -119,6 +132,7 @@ class ApiConfig {
   Map<String, dynamic> toJson() => {
         'api_base': apiBase,
         'home_base': homeBase,
+        'passport_base': passportBase,
         'search_home': searchHome,
         'user_agent': userAgent,
         'remote_config_url': remoteConfigUrl,
@@ -130,6 +144,7 @@ class ApiConfig {
   ApiConfig copyWith({String? apiBase}) => ApiConfig(
         apiBase: apiBase ?? this.apiBase,
         homeBase: homeBase,
+        passportBase: passportBase,
         searchHome: searchHome,
         userAgent: userAgent,
         remoteConfigUrl: remoteConfigUrl,
@@ -143,6 +158,13 @@ class ApiConfig {
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
     if (path.startsWith('/')) return '$apiBase$path';
     return '$apiBase/$path';
+  }
+
+  /// passport 路径 → 完整 URL（扫码登录专用域名）。
+  String passportUrl(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (path.startsWith('/')) return '$passportBase$path';
+    return '$passportBase/$path';
   }
 
   /// 首页预热地址（拿 buvid3 等基础 Cookie）。

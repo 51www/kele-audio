@@ -95,7 +95,7 @@ class MiniPlayer extends StatelessWidget {
           // push 进入播放页（go 会清空导航栈，导致播放页向下按钮无栈可弹）
           onTap: () => AppRouter.router.push('/player'),
           // 高度下限 56（正好容纳 42 的进度环 + 上下 7 内边距）；
-          // 标题折行时由内容撑高，不再把文字压掉。
+          // 标题/副标题均单行省略，条高恒定、不随文本长度变化。
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 56),
             child: Padding(
@@ -138,11 +138,11 @@ class MiniPlayer extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 专辑名最多六行：320 宽 + 大字号下也能读全
-                          // （条高由内容撑开）；只有极端超长才省略。
+                          // 专辑名单行显示，超出省略号截断：标题区高度固定，
+                          // 不同长度文本下播放条布局保持稳定。
                           Text(
                             state.albumTitle,
-                            maxLines: 6,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: tokens.bodyStyle.copyWith(
                               color: fg,

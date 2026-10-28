@@ -22,6 +22,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '../build/web');
 const PORT = Number(process.env.PORT || 8088);
 const API_BASE = process.env.API_BASE || 'https://api.bilibili.com';
+const PASSPORT_BASE = process.env.PASSPORT_BASE || 'https://passport.bilibili.com';
 
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -57,8 +58,9 @@ const HOP_BY_HOP = new Set([
   'content-length',
 ]);
 
-async function proxyApi(req, res, url) {
-  const target = `${API_BASE}${url.pathname.slice(4)}${url.search}`;
+// strip：前缀长度（/api → 4，/pp → 3），base：上游域名（api / passport）
+async function proxyApi(req, res, url, base = API_BASE, strip = 4) {
+  const target = `${base}${url.pathname.slice(strip)}${url.search}`;
 
   const headers = {
     'user-agent': pick(req, 'x-kele-ua', DEFAULT_UA),
@@ -265,7 +267,10 @@ http
   .createServer((req, res) => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
-      void proxyApi(req, res, url);
+      void proxyApi(req, res, url, API_BASE, 4);
+    } else if (url.pathname === '/pp' || url.pathname.startsWith('/pp/')) {
+      // 扫码登录（passport 域名）：ApiConfig.passportBase 的 Web 前缀
+      void proxyApi(req, res, url, PASSPORT_BASE, 3);
     } else if (url.pathname === '/audio') {
       void proxyAudio(req, res, url);
     } else if (url.pathname === '/img') {
@@ -280,6 +285,7 @@ http
     console.log(`kele-audio web preview → http://localhost:${PORT}`);
     console.log(`  static: ${WEB_ROOT}`);
     console.log(`  api   : ${API_BASE}  (via /api/*)`);
+    console.log(`  login : ${PASSPORT_BASE}  (via /pp/*)`);
     console.log('  audio : /audio?u=<url>&ref=<referer>&ua=<ua>  (M2 音频反代)');
     console.log('  img   : /img?u=<url>  (M3 封面图反代)');
   });

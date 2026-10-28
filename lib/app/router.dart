@@ -5,6 +5,7 @@ import '../features/discover/album_detail_page.dart';
 import '../features/discover/discover_page.dart';
 import '../features/discover/search_page.dart';
 import '../features/profile/pages/about_page.dart';
+import '../features/profile/pages/bili_account_page.dart';
 import '../features/profile/pages/downloads_page.dart';
 import '../features/profile/pages/history_page.dart';
 import '../features/profile/pages/settings_page.dart';
@@ -70,6 +71,12 @@ class AppRouter {
                   path: 'settings',
                   name: 'profile-settings',
                   builder: (context, state) => const SettingsPage(),
+                ),
+                // 12. B 站账号绑定（设置 → 账号绑定）
+                GoRoute(
+                  path: 'bili-account',
+                  name: 'profile-bili-account',
+                  builder: (context, state) => const BiliAccountPage(),
                 ),
                 // 9. 关于/版本
                 GoRoute(

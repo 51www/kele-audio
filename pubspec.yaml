@@ -50,6 +50,8 @@ dependencies:
   path_provider: ^2.1.4
   # M8 Web 端 IndexedDB 访问（dart:html 已弃用的官方替代）
   web: ^1.1.0
+  # 扫码登录二维码渲染（M5 账号绑定，abts 同款选型）
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:

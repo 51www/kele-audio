@@ -517,8 +517,27 @@ class BiliClient {
 
   bool get isLoggedIn => (jar.get('SESSDATA') ?? '').isNotEmpty;
 
+  /// 扫码登录成功后写入会话 Cookie（crossDomain URL 参数），并持久化。
+  Future<void> acceptLoginCookies(Map<String, String> cookies) async {
+    if (cookies.isEmpty) return;
+    jar.mergeFromMap(cookies);
+    jar.markSuccess();
+    await _persist();
+  }
+
+  /// 合并响应头 Set-Cookie 并持久化（扫码轮询等 GET 响应用）。
+  Future<void> absorbSetCookies(List<String>? setCookies) async {
+    if (setCookies == null || setCookies.isEmpty) return;
+    jar.mergeFromHeaders(setCookies);
+    await _persist();
+  }
+
+  /// 解除登录：只清会话 Cookie，**保留 buvid 等设备指纹**（R2 风控连续性）。
   Future<void> logout() async {
-    jar.clear();
+    const keep = {'buvid3', 'buvid4', 'b_nut'};
+    for (final key in jar.keys.toList()) {
+      if (!keep.contains(key)) jar.remove(key);
+    }
     await _persist();
   }
 

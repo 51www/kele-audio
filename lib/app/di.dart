@@ -12,6 +12,7 @@ import '../core/api/prefs_kv_store.dart';
 import '../core/data/daos.dart';
 import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
+import '../core/services/bili_account_service.dart';
 import '../core/services/mini_player_controller.dart';
 import '../core/services/offline/dio_audio_fetcher.dart';
 import '../core/services/offline/audio_store.dart';
@@ -45,6 +46,7 @@ class AppServices {
     required this.shelf,
     required this.settings,
     required this.offline,
+    required this.account,
   });
 
   final KeyValueStore kv;
@@ -90,6 +92,9 @@ class AppServices {
 
   /// 离线缓存（M8）：整本缓存队列 + 缓存播放联动
   final OfflineCacheService offline;
+
+  /// B 站账号绑定（M5）：扫码登录状态机 + 绑定态/账号档案
+  final BiliAccountService account;
 
   /// 启动装配：**不发任何网络请求**（PRD 冷启动 ≤ 3s）。
   ///
@@ -155,6 +160,7 @@ class AppServices {
     final progress = ProgressStore(daos);
     final prefs = PlayerPrefs(kv);
     final settings = SettingsStore(kv);
+    final account = BiliAccountService(client: client, kv: kv, log: _log);
     final miniPlayer = MiniPlayerController();
     final offline = OfflineCacheService(
       daos: daos,
@@ -202,6 +208,7 @@ class AppServices {
       shelf: shelf,
       settings: settings,
       offline: offline,
+      account: account,
     );
   }
 

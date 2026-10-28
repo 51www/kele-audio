@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../app/di.dart';
@@ -7,6 +8,7 @@ import '../../../app/theme/theme_controller.dart';
 import '../../../app/widgets/common.dart';
 import '../../../app/widgets/theme_preset_picker.dart';
 import '../../../core/domain/playback.dart';
+import '../../../core/services/bili_account_service.dart';
 import '../../../core/services/image_cache_cleaner.dart';
 import '../../../core/services/player/player_service.dart';
 import '../../../core/services/settings_store.dart';
@@ -21,7 +23,8 @@ import '../../../core/services/settings_store.dart';
 /// - 仅 Wi-Fi 下载：开关先占位持久化（下载能力 M8 实现）；
 /// - 清除图片缓存：内存 + 磁盘（Web 端仅内存）；
 /// - 高级设置：发现页「编辑精选」行显隐 + 分类显隐（「推荐」固定显示）；
-/// - 账号绑定：B 站 / WebDAV 占位入口（本期不实现，仅占位）。
+/// - 账号绑定：B 站扫码登录（绑定/解绑 + 资料展示，绑定后解锁高音质音源）、
+///   WebDAV 占位入口（暂未实现）。
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
@@ -31,6 +34,7 @@ class SettingsPage extends StatelessWidget {
     final theme = context.watch<ThemeController>();
     final player = context.watch<PlayerService>();
     final settings = context.watch<SettingsStore>();
+    final account = context.watch<BiliAccountService>();
 
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
@@ -203,12 +207,11 @@ class SettingsPage extends StatelessWidget {
           _SectionCard(
             icon: Icons.link_rounded,
             title: '账号绑定',
-            trailing: const InfoChip('敬请期待'),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '绑定第三方账号解锁进阶能力，本期仅占位，功能陆续上线。',
+                  '绑定第三方账号解锁进阶能力，功能陆续上线。',
                   style: tokens.captionStyle,
                 ),
                 const SizedBox(height: 4),
@@ -216,12 +219,15 @@ class SettingsPage extends StatelessWidget {
                   icon: Icons.smart_display_outlined,
                   title: 'B 站账号',
                   subtitle: '绑定后解锁高音质音源',
-                  onTap: () => _notifyPlanned(context),
+                  status: account.bound ? '已绑定' : '未绑定',
+                  bound: account.bound,
+                  onTap: () => context.push('/profile/bili-account'),
                 ),
                 _BindingRow(
                   icon: Icons.cloud_sync_outlined,
                   title: 'WebDAV',
                   subtitle: '绑定后同步书架与收听进度',
+                  status: '未绑定',
                   onTap: () => _notifyPlanned(context),
                 ),
               ],
@@ -313,19 +319,23 @@ class SettingsPage extends StatelessWidget {
       );
 }
 
-/// 账号绑定占位行（本期不实现功能，仅占位）：
-/// 图标 + 标题/副标题 + 「未绑定」状态，点击给统一的开发中提示。
+/// 账号绑定入口行：图标 + 标题/副标题 + 绑定状态，点击进入绑定页
+///（WebDAV 暂未实现，点击给开发中提示）。
 class _BindingRow extends StatelessWidget {
   const _BindingRow({
     required this.icon,
     required this.title,
     required this.subtitle,
+    required this.status,
     required this.onTap,
+    this.bound = false,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
+  final String status;
+  final bool bound;
   final VoidCallback onTap;
 
   @override
@@ -351,7 +361,12 @@ class _BindingRow extends StatelessWidget {
                 ],
               ),
             ),
-            Text('未绑定', style: tokens.captionStyle),
+            Text(
+              status,
+              style: tokens.captionStyle.copyWith(
+                color: bound ? scheme.primary : null,
+              ),
+            ),
             const SizedBox(width: 4),
             Icon(Icons.chevron_right_rounded, color: tokens.onHairline),
           ],

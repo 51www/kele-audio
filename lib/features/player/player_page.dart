@@ -16,7 +16,7 @@ import '../../core/services/shelf_controller.dart';
 /// 播放页（PRD §5.4）—— M2：真实播放控制。
 ///
 /// 布局（拇指区重构）：上区封面 + 标题（弹性高度，短屏自动压缩封面）；
-/// 页面下部拇指区自上而下为——功能图标带（收藏/定时/音质/播放顺序/缓存，
+/// 页面下部拇指区自上而下为——功能图标带（收藏/定时/播放顺序/缓存/更多，
 /// 无背景图标-only，语义进 tooltip，非默认状态用主色 + 状态点提示）→
 /// 进度条 → 传输控件（倍速文字居左、章节目录居右，参考同类产品播放页）。
 /// 状态一律来自 [PlayerService]（唯一事实源）。
@@ -57,16 +57,13 @@ class PlayerPage extends StatelessWidget {
                   player.debugExpireCurrentUrl();
                   ScaffoldMessenger.of(context)
                     ..hideCurrentSnackBar()
-                    ..showSnackBar(const SnackBar(
-                      content: Text('P-05 演练：已作废当前地址，观察自动重取续播'),
-                    ));
+                    ..showSnackBar(
+                      const SnackBar(content: Text('P-05 演练：已作废当前地址，观察自动重取续播')),
+                    );
                 }
               },
               itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: 'expire',
-                  child: Text('模拟地址失效（P-05 演练）'),
-                ),
+                PopupMenuItem(value: 'expire', child: Text('模拟地址失效（P-05 演练）')),
               ],
             ),
         ],
@@ -86,13 +83,16 @@ class PlayerPage extends StatelessWidget {
                     Expanded(
                       child: LayoutBuilder(
                         builder: (context, constraints) {
-                          final raw = math.min(constraints.maxWidth * 0.58,
-                              constraints.maxHeight * 0.58);
+                          final raw = math.min(
+                            constraints.maxWidth * 0.58,
+                            constraints.maxHeight * 0.58,
+                          );
                           final coverSize = raw.clamp(140.0, 230.0).toDouble();
                           return SingleChildScrollView(
                             child: ConstrainedBox(
                               constraints: BoxConstraints(
-                                  minHeight: constraints.maxHeight),
+                                minHeight: constraints.maxHeight,
+                              ),
                               child: Center(
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
@@ -121,8 +121,9 @@ class PlayerPage extends StatelessWidget {
                                       const SizedBox(height: 8),
                                       Text(
                                         player.error!,
-                                        style: tokens.captionStyle
-                                            .copyWith(color: scheme.error),
+                                        style: tokens.captionStyle.copyWith(
+                                          color: scheme.error,
+                                        ),
                                         textAlign: TextAlign.center,
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
@@ -155,8 +156,9 @@ class PlayerPage extends StatelessWidget {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               IconButton(
-                                onPressed:
-                                    player.hasPrev ? player.previous : null,
+                                onPressed: player.hasPrev
+                                    ? player.previous
+                                    : null,
                                 icon: const Icon(Icons.skip_previous_rounded),
                                 iconSize: 34,
                               ),
@@ -164,8 +166,7 @@ class PlayerPage extends StatelessWidget {
                               _PlayButton(player: player),
                               const SizedBox(width: 8),
                               IconButton(
-                                onPressed:
-                                    player.hasNext ? player.next : null,
+                                onPressed: player.hasNext ? player.next : null,
                                 icon: const Icon(Icons.skip_next_rounded),
                                 iconSize: 34,
                               ),
@@ -190,16 +191,16 @@ class PlayerPage extends StatelessWidget {
 
   /// 顺序 / 列表循环 / 单曲循环三态图标各不相同，一眼可辨当前模式
   static IconData _modeIcon(PlayMode m) => switch (m) {
-        PlayMode.sequential => Icons.playlist_play_rounded,
-        PlayMode.loopAll => Icons.repeat_rounded,
-        PlayMode.loopOne => Icons.repeat_one_rounded,
-      };
+    PlayMode.sequential => Icons.playlist_play_rounded,
+    PlayMode.loopAll => Icons.repeat_rounded,
+    PlayMode.loopOne => Icons.repeat_one_rounded,
+  };
 
   static PlayMode nextMode(PlayMode m) => switch (m) {
-        PlayMode.sequential => PlayMode.loopAll,
-        PlayMode.loopAll => PlayMode.loopOne,
-        PlayMode.loopOne => PlayMode.sequential,
-      };
+    PlayMode.sequential => PlayMode.loopAll,
+    PlayMode.loopAll => PlayMode.loopOne,
+    PlayMode.loopOne => PlayMode.sequential,
+  };
 
   static String _sleepLabel(PlayerService p) {
     if (p.stopAtChapterEnd) return '本章结束';
@@ -257,9 +258,9 @@ class PlayerPage extends StatelessWidget {
   static String _rateText(double v) => v == v.roundToDouble()
       ? '${v.toInt()}'
       : v
-          .toStringAsFixed(2)
-          .replaceFirst(RegExp(r'0+$'), '')
-          .replaceFirst(RegExp(r'\.$'), '');
+            .toStringAsFixed(2)
+            .replaceFirst(RegExp(r'0+$'), '')
+            .replaceFirst(RegExp(r'\.$'), '');
 
   static void _showSleepSheet(BuildContext context, PlayerService player) {
     showModalBottomSheet<void>(
@@ -273,19 +274,20 @@ class PlayerPage extends StatelessWidget {
               String label,
               bool selected,
               Future<void> Function() onTap,
-            ) =>
-                ListTile(
-                  dense: true,
-                  title: Text(label, style: tokens.bodyStyle),
-                  trailing: selected
-                      ? Icon(Icons.check_rounded,
-                          color: Theme.of(context).colorScheme.primary)
-                      : null,
-                  onTap: () async {
-                    await onTap();
-                    if (context.mounted) Navigator.of(context).pop();
-                  },
-                );
+            ) => ListTile(
+              dense: true,
+              title: Text(label, style: tokens.bodyStyle),
+              trailing: selected
+                  ? Icon(
+                      Icons.check_rounded,
+                      color: Theme.of(context).colorScheme.primary,
+                    )
+                  : null,
+              onTap: () async {
+                await onTap();
+                if (context.mounted) Navigator.of(context).pop();
+              },
+            );
             final none = !player.hasSleepTimer && !player.stopAtChapterEnd;
             return Column(
               mainAxisSize: MainAxisSize.min,
@@ -310,11 +312,17 @@ class PlayerPage extends StatelessWidget {
                   ),
                 ),
                 // PRD §5.4：关闭 / 5 / 10 / 15 / 30 / 45 / 60 分钟 / 本章结束
-                option('本章结束', player.stopAtChapterEnd,
-                    () => player.setSleepTimer(minutes: 0)),
+                option(
+                  '本章结束',
+                  player.stopAtChapterEnd,
+                  () => player.setSleepTimer(minutes: 0),
+                ),
                 for (final m in const [5, 10, 15, 30, 45, 60])
-                  option('$m 分钟', _sel(player, m, none),
-                      () => player.setSleepTimer(minutes: m)),
+                  option(
+                    '$m 分钟',
+                    _sel(player, m, none),
+                    () => player.setSleepTimer(minutes: m),
+                  ),
                 option('关闭', none, () => player.cancelSleepTimer()),
                 const SizedBox(height: 12),
               ],
@@ -331,54 +339,6 @@ class PlayerPage extends StatelessWidget {
     return diff == 0 || diff == -1;
   }
 
-  static void _showQualitySheet(BuildContext context, PlayerService player) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      // 与倍速面板同款：根节点撑满，避免 Wrap 按内容宽度收窄整张面板
-      builder: (context) => SafeArea(
-        child: SizedBox(
-          width: double.infinity,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
-                child: Text('音质', style: AppTokens.of(context).sectionStyle),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final q in AudioQuality.values)
-                      ChoiceChip(
-                        label: Text(q.label),
-                        selected: q == player.quality,
-                        onSelected: (_) async {
-                          await player.setQuality(q);
-                          if (context.mounted) Navigator.of(context).pop();
-                        },
-                      ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
-                child: Text(
-                  '切换音质会重新取址并从当前进度续播；'
-                  'B 站并非每条内容都有全部档位，缺失时自动退到最接近的一档。',
-                  style: AppTokens.of(context).captionStyle,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   /// 缓存面板：缓存本章 / 整本缓存（PRD §5.8；下载图标即入口语义）。
   static void _showCacheSheet(
     BuildContext context,
@@ -393,8 +353,9 @@ class PlayerPage extends StatelessWidget {
         final album = player.album;
         final chapter = player.currentChapter;
         final done = chapter != null && offline.isDone(chapter.id);
-        final remaining =
-            player.chapters.where((c) => !offline.isDone(c.id)).length;
+        final remaining = player.chapters
+            .where((c) => !offline.isDone(c.id))
+            .length;
 
         Future<void> run(Future<void> Function() task, String toast) async {
           await task();
@@ -402,10 +363,12 @@ class PlayerPage extends StatelessWidget {
           if (!context.mounted) return;
           ScaffoldMessenger.of(context)
             ..hideCurrentSnackBar()
-            ..showSnackBar(SnackBar(
-              content: Text(toast),
-              margin: const EdgeInsets.fromLTRB(16, 0, 16, 240),
-            ));
+            ..showSnackBar(
+              SnackBar(
+                content: Text(toast),
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 240),
+              ),
+            );
         }
 
         return SafeArea(
@@ -422,17 +385,12 @@ class PlayerPage extends StatelessWidget {
               ListTile(
                 dense: true,
                 leading: Icon(
-                  done
-                      ? Icons.download_done_rounded
-                      : Icons.download_rounded,
+                  done ? Icons.download_done_rounded : Icons.download_rounded,
                   color: done
                       ? Theme.of(sheetContext).colorScheme.primary
                       : null,
                 ),
-                title: Text(
-                  done ? '本章已缓存' : '缓存本章',
-                  style: tokens.bodyStyle,
-                ),
+                title: Text(done ? '本章已缓存' : '缓存本章', style: tokens.bodyStyle),
                 subtitle: chapter == null
                     ? null
                     : Text(
@@ -444,9 +402,9 @@ class PlayerPage extends StatelessWidget {
                 onTap: done || album == null || chapter == null
                     ? null
                     : () => run(
-                          () => offline.cacheChapter(album, chapter),
-                          '已加入缓存队列：${chapter.title}',
-                        ),
+                        () => offline.cacheChapter(album, chapter),
+                        '已加入缓存队列：${chapter.title}',
+                      ),
               ),
               ListTile(
                 dense: true,
@@ -458,9 +416,9 @@ class PlayerPage extends StatelessWidget {
                 onTap: album == null || remaining == 0
                     ? null
                     : () => run(
-                          () => offline.cacheAlbum(album, player.chapters),
-                          '已加入缓存队列：${album.title}（$remaining 章）',
-                        ),
+                        () => offline.cacheAlbum(album, player.chapters),
+                        '已加入缓存队列：${album.title}（$remaining 章）',
+                      ),
               ),
               const SizedBox(height: 12),
             ],
@@ -492,8 +450,10 @@ class PlayerPage extends StatelessWidget {
               if (i == 0) {
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                  child: Text('章节目录（${chapters.length}）',
-                      style: tokens.sectionStyle),
+                  child: Text(
+                    '章节目录（${chapters.length}）',
+                    style: tokens.sectionStyle,
+                  ),
                 );
               }
               final c = chapters[i - 1];
@@ -519,8 +479,10 @@ class PlayerPage extends StatelessWidget {
                     fontWeight: current ? FontWeight.w700 : null,
                   ),
                 ),
-                trailing: Text(_fmtDur(c.durationSec),
-                    style: tokens.captionStyle),
+                trailing: Text(
+                  _fmtDur(c.durationSec),
+                  style: tokens.captionStyle,
+                ),
                 onTap: () {
                   player.playChapterAt(i - 1);
                   Navigator.of(context).pop();
@@ -556,14 +518,16 @@ class _IdleView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.headphones_rounded,
-                size: 56, color: scheme.onSurfaceVariant),
+            Icon(
+              Icons.headphones_rounded,
+              size: 56,
+              color: scheme.onSurfaceVariant,
+            ),
             SizedBox(height: tokens.spaceMd),
             Text('未选择内容', style: tokens.titleStyle),
             const SizedBox(height: 6),
             Text(
-              player.error ??
-                  '在发现页点开专辑选一章开始收听；听过的专辑会在这里续播',
+              player.error ?? '在发现页点开专辑选一章开始收听；听过的专辑会在这里续播',
               textAlign: TextAlign.center,
               style: tokens.bodyStyle,
             ),
@@ -658,8 +622,8 @@ class _Cover extends StatelessWidget {
     if (url.isEmpty) {
       visual = _CoverPlaceholder(size: size, scheme: scheme, tokens: tokens);
     } else {
-      final decodeWidth =
-          (size * MediaQuery.devicePixelRatioOf(context)).round();
+      final decodeWidth = (size * MediaQuery.devicePixelRatioOf(context))
+          .round();
       visual = Stack(
         fit: StackFit.expand,
         children: [
@@ -800,15 +764,19 @@ class _CoverPlaceholder extends StatelessWidget {
 
 /// 同色系虚化「堆叠书本」衬托物，低浓度营造纵深。
 Widget _buildBookStack(
-    double size, double radius, ColorScheme scheme, AppTokens tokens) {
+  double size,
+  double radius,
+  ColorScheme scheme,
+  AppTokens tokens,
+) {
   final book = (double w, double h, Color c) => Container(
-        width: w,
-        height: h,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(radius * 0.4),
-          color: c,
-        ),
-      );
+    width: w,
+    height: h,
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(radius * 0.4),
+      color: c,
+    ),
+  );
   return SizedBox(
     width: size * 0.52,
     height: size * 0.52,
@@ -818,14 +786,20 @@ Widget _buildBookStack(
         Positioned(
           bottom: 0,
           left: size * 0.03,
-          child: book(size * 0.44, size * 0.11,
-              scheme.secondary.withValues(alpha: 0.16)),
+          child: book(
+            size * 0.44,
+            size * 0.11,
+            scheme.secondary.withValues(alpha: 0.16),
+          ),
         ),
         Positioned(
           bottom: size * 0.06,
           left: size * 0.07,
-          child: book(size * 0.38, size * 0.10,
-              scheme.primary.withValues(alpha: 0.14)),
+          child: book(
+            size * 0.38,
+            size * 0.10,
+            scheme.primary.withValues(alpha: 0.14),
+          ),
         ),
       ],
     ),
@@ -944,9 +918,7 @@ class _ProgressBar extends StatelessWidget {
               onChanged: total <= 0
                   ? null
                   : (v) {
-                      player.seek(
-                        Duration(milliseconds: (v * total).round()),
-                      );
+                      player.seek(Duration(milliseconds: (v * total).round()));
                     },
             );
           },
@@ -970,8 +942,8 @@ class _ProgressBar extends StatelessWidget {
   }
 }
 
-/// 功能图标带（进度条上方，拇指区上沿）：收藏 / 定时 / 音质 / 播放顺序 /
-/// 缓存 —— 无背景、仅保留图标，文字信息收进 tooltip（长按可见并供无障碍
+/// 功能图标带（进度条上方，拇指区上沿）：收藏 / 定时 / 播放顺序 /
+/// 缓存 / 更多 —— 无背景、仅保留图标，文字信息收进 tooltip（长按可见并供无障碍
 /// 朗读），「非默认值」以主色 + 6dp 状态点提示。倍速（文字）、章节分居
 /// 传输行两侧。
 class _ControlBand extends StatelessWidget {
@@ -983,30 +955,17 @@ class _ControlBand extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sleepOn = player.hasSleepTimer || player.stopAtChapterEnd;
-    final qualityOn = player.quality != AudioQuality.q132k;
     final modeOn = player.mode != PlayMode.sequential;
 
     return Row(
       children: [
-        Expanded(
-          child: _FavoriteAction(album: album),
-        ),
+        Expanded(child: _FavoriteAction(album: album)),
         Expanded(
           child: _IconAction(
             icon: Icons.alarm_rounded,
-            tooltip: sleepOn
-                ? '定时 ${PlayerPage._sleepLabel(player)}'
-                : '定时关闭',
+            tooltip: sleepOn ? '定时 ${PlayerPage._sleepLabel(player)}' : '定时关闭',
             active: sleepOn,
             onTap: () => PlayerPage._showSleepSheet(context, player),
-          ),
-        ),
-        Expanded(
-          child: _IconAction(
-            icon: Icons.high_quality_rounded,
-            tooltip: '音质 ${player.quality.label}',
-            active: qualityOn,
-            onTap: () => PlayerPage._showQualitySheet(context, player),
           ),
         ),
         Expanded(
@@ -1017,9 +976,8 @@ class _ControlBand extends StatelessWidget {
             onTap: () => player.setMode(PlayerPage.nextMode(player.mode)),
           ),
         ),
-        Expanded(
-          child: _CacheAction(player: player),
-        ),
+        Expanded(child: _CacheAction(player: player)),
+        Expanded(child: _MoreAction(album: album)),
       ],
     );
   }
@@ -1079,6 +1037,44 @@ class _CacheAction extends StatelessWidget {
       active: done,
       showBadge: false, // ✓ 图标本身已表达完成态
       onTap: () => PlayerPage._showCacheSheet(context, player, offline),
+    );
+  }
+}
+
+/// 更多入口：纵向三点弹出菜单（暂含「查看专辑」）。
+/// 菜单动作不打断播放：[PlayerService] 为全局单例，与路由无关。
+class _MoreAction extends StatelessWidget {
+  const _MoreAction({required this.album});
+
+  final Album? album;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return PopupMenuButton<String>(
+      tooltip: '更多',
+      iconSize: 22,
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+      icon: Icon(
+        Icons.more_vert_rounded,
+        size: 22,
+        color: scheme.onSurfaceVariant,
+      ),
+      onSelected: (v) {
+        if (v != 'album') return;
+        final id = album?.id;
+        if (id == null) return;
+        // push 压栈：看完专辑可返回播放页，播放全程不断
+        context.push('/album/$id');
+      },
+      itemBuilder: (_) => [
+        // 无专辑信息时置灰（Q4），入口位置保持稳定
+        PopupMenuItem(
+          value: 'album',
+          enabled: album != null,
+          child: const Text('查看专辑'),
+        ),
+      ],
     );
   }
 }
@@ -1161,11 +1157,13 @@ class _FavoriteAction extends StatelessWidget {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(
-            content: Text(wasIn ? '已移出书架：${a.title}' : '已加入书架：${a.title}'),
-            // 悬浮避让底部拇指区控制簇，不遮挡进度条/传输控件
-            margin: const EdgeInsets.fromLTRB(16, 0, 16, 240),
-          ));
+          ..showSnackBar(
+            SnackBar(
+              content: Text(wasIn ? '已移出书架：${a.title}' : '已加入书架：${a.title}'),
+              // 悬浮避让底部拇指区控制簇，不遮挡进度条/传输控件
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 240),
+            ),
+          );
       },
     );
   }
