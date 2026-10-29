@@ -67,8 +67,9 @@ class CoverImage extends StatelessWidget {
           );
     return ClipRRect(
       borderRadius: borderRadius ?? BorderRadius.zero,
-      child: image,
-    )._withBackground(scheme);
+      // 底衬必须在裁剪内部：放在外面会以直角矩形垫底，圆角四角露出背景色
+      child: image._withBackground(scheme),
+    );
   }
 }
 
