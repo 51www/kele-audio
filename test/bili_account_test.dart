@@ -2,11 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
+import 'package:kele_audio/core/api/album_source.dart';
 import 'package:kele_audio/core/api/api_config.dart';
 import 'package:kele_audio/core/api/bili_client.dart';
 import 'package:kele_audio/core/api/bili_login_api.dart';
 import 'package:kele_audio/core/api/key_value_store.dart';
+import 'package:kele_audio/core/api/play_url_service.dart';
+import 'package:kele_audio/core/data/daos.dart';
+import 'package:kele_audio/core/data/local_database.dart';
+import 'package:kele_audio/core/domain/playback.dart';
 import 'package:kele_audio/core/services/bili_account_service.dart';
+import 'package:kele_audio/core/services/mini_player_controller.dart';
+import 'package:kele_audio/core/services/player/media_bridge.dart';
+import 'package:kele_audio/core/services/player/player_service.dart';
+import 'package:kele_audio/core/services/player/progress_store.dart';
 import 'package:kele_audio/features/profile/pages/bili_account_page.dart';
 
 /// 脚本化假网关：按序回放 poll 结果，可模拟生成/轮询失败。
@@ -66,6 +75,23 @@ class FakeGateway implements QrLoginGateway {
   return (client: client, service: service, gateway: gateway, kv: store);
 }
 
+/// 冒烟用最小 PlayerService（不 init、不碰引擎；页面只读写音质档位）。
+PlayerService buildPlayer(MemoryKeyValueStore kv) {
+  final config = ApiConfig.defaults();
+  final client = BiliClient(config: config, kv: kv);
+  final db = LocalDatabase(kv);
+  return PlayerService(
+    playUrl: PlayUrlService(client: client, config: config),
+    albumSource: AlbumSource(client: client, config: config),
+    daos: Daos(db),
+    store: ProgressStore(Daos(db)),
+    prefs: PlayerPrefs(kv),
+    miniPlayer: MiniPlayerController(),
+    saveInterval: const Duration(seconds: 15),
+    media: NoopMediaBridge(),
+  );
+}
+
 void main() {
   group('QrPollResult 解析（纯函数）', () {
     test('parseLoginCookies：crossDomain 参数转 Cookie，排除 gourl', () {
@@ -112,6 +138,74 @@ void main() {
       expect(ok.refreshToken, 'r1');
       // 非 success 不带 Cookie
       expect(QrPollResult.parsePollData({'code': 86090}).cookies, isEmpty);
+    });
+  });
+
+  group('BiliAccount.fromNavData（纯函数）', () {
+    test('isLogin != true → null（未绑定）', () {
+      expect(BiliAccount.fromNavData({'isLogin': false, 'mid': 1}), isNull);
+      expect(BiliAccount.fromNavData(const {}), isNull);
+    });
+
+    test('会员字段双形态：vip.{type,status} 优先', () {
+      final a = BiliAccount.fromNavData({
+        'isLogin': true,
+        'mid': 42,
+        'uname': '可乐',
+        'face': 'f.png',
+        'vip': {'type': 2, 'status': 1},
+        'vipType': 0,
+        'vipStatus': 0,
+      })!;
+      expect(a.mid, 42);
+      expect(a.vipType, 2);
+      expect(a.vipStatus, 1);
+      expect(a.isVip, isTrue);
+    });
+
+    test('会员字段双形态：扁平 vipType/vipStatus 回退', () {
+      final a = BiliAccount.fromNavData({
+        'isLogin': true,
+        'mid': 7,
+        'vipType': 1,
+        'vipStatus': 1,
+      })!;
+      expect(a.vipType, 1);
+      expect(a.vipStatus, 1);
+      expect(a.isVip, isTrue);
+    });
+
+    test('无会员字段 → 0/0 视为非会员；status!=1 或 type==0 均非会员', () {
+      final none = BiliAccount.fromNavData({'isLogin': true, 'mid': 1})!;
+      expect(none.isVip, isFalse);
+
+      final expired = BiliAccount.fromNavData({
+        'isLogin': true,
+        'mid': 1,
+        'vip': {'type': 2, 'status': 0},
+      })!;
+      expect(expired.isVip, isFalse);
+
+      final freeUser = BiliAccount.fromNavData({
+        'isLogin': true,
+        'mid': 1,
+        'vip': {'type': 0, 'status': 1},
+      })!;
+      expect(freeUser.isVip, isFalse);
+    });
+
+    test('toJson/fromJson 保留会员字段（档案缓存重启不丢）', () {
+      const a = BiliAccount(
+        mid: 9,
+        uname: 'x',
+        face: '',
+        vipType: 2,
+        vipStatus: 1,
+      );
+      final b = BiliAccount.fromJson(a.toJson());
+      expect(b.vipType, 2);
+      expect(b.vipStatus, 1);
+      expect(b.isVip, isTrue);
     });
   });
 
@@ -247,10 +341,15 @@ void main() {
     testWidgets('未绑定渲染扫码卡；已绑定渲染档案卡与解绑入口', (tester) async {
       final env = buildService();
       addTearDown(env.service.stopQrLogin);
+      final player = buildPlayer(env.kv);
+      addTearDown(player.dispose);
 
       await tester.pumpWidget(
-        ChangeNotifierProvider<BiliAccountService>.value(
-          value: env.service,
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<BiliAccountService>.value(value: env.service),
+            ChangeNotifierProvider<PlayerService>.value(value: player),
+          ],
           child: const MaterialApp(home: BiliAccountPage()),
         ),
       );
@@ -266,9 +365,14 @@ void main() {
       addTearDown(env2.service.stopQrLogin);
       await env2.client.acceptLoginCookies({'SESSDATA': 's'});
       await env2.service.refreshProfile();
+      final player2 = buildPlayer(env2.kv);
+      addTearDown(player2.dispose);
       await tester.pumpWidget(
-        ChangeNotifierProvider<BiliAccountService>.value(
-          value: env2.service,
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<BiliAccountService>.value(value: env2.service),
+            ChangeNotifierProvider<PlayerService>.value(value: player2),
+          ],
           child: const MaterialApp(home: BiliAccountPage()),
         ),
       );
@@ -276,6 +380,40 @@ void main() {
       expect(find.text('可乐'), findsOneWidget);
       expect(find.text('UID 1'), findsOneWidget);
       expect(find.text('解除绑定'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('绑定成功自动升档：132K → 192K（Q2a）', (tester) async {
+      final env = buildService(polls: const [
+        QrPollResult(
+          status: QrScanStatus.success,
+          cookies: {'SESSDATA': 's1', 'bili_jct': 't1', 'DedeUserID': '9'},
+        ),
+      ]);
+      addTearDown(env.service.stopQrLogin);
+      env.gateway.account = const BiliAccount(mid: 9, uname: '新绑定', face: '');
+      final player = buildPlayer(env.kv);
+      addTearDown(player.dispose);
+      expect(player.quality, AudioQuality.q132k); // 默认 132K
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<BiliAccountService>.value(value: env.service),
+            ChangeNotifierProvider<PlayerService>.value(value: player),
+          ],
+          child: const MaterialApp(home: BiliAccountPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await env.service.startQrLogin();
+      await env.service.pollOnce('key-1');
+      await tester.pumpAndSettle();
+
+      expect(env.service.bound, isTrue);
+      expect(player.quality, AudioQuality.q192k); // 132K 自动升档
+      expect(player.prefs.quality, AudioQuality.q192k); // 持久化
       await tester.pumpWidget(const SizedBox.shrink());
     });
   });

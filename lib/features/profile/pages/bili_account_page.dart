@@ -4,13 +4,18 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../app/theme/app_tokens.dart';
 import '../../../app/widgets/common.dart';
+import '../../../core/domain/playback.dart';
 import '../../../core/services/bili_account_service.dart';
+import '../../../core/services/player/player_service.dart';
 import '../../discover/album_card.dart' show CoverImage;
 
 /// B 站账号绑定页（设置 → 账号绑定）。
 ///
 /// 扫码登录（PRD §7.6）：二维码登录链接由 `core/api` 生成并定时轮询，
-/// 确认后 SESSDATA 等登录态仅存本地；绑定后解锁高音质音源。
+/// 确认后 SESSDATA 等登录态仅存本地；绑定后解锁 192K 音质（大会员再解锁 Hi-Res）。
+///
+/// 联动（Q2/Q3）：绑定成功且当前档 132K → 自动升档 192K（显式 64K 不动，
+/// 大会员不自动切 Hi-Res）；解绑 → 档位回落 132K 并提示。
 class BiliAccountPage extends StatefulWidget {
   const BiliAccountPage({super.key});
 
@@ -22,11 +27,16 @@ class _BiliAccountPageState extends State<BiliAccountPage> {
   /// 服务引用在 initState 持有：dispose 时元素树已不稳定，
   /// 不能再做祖先查找（context.read 会断言崩溃）。
   late final BiliAccountService _service;
+  late final PlayerService _player;
+  bool _wasBound = false;
 
   @override
   void initState() {
     super.initState();
     _service = context.read<BiliAccountService>();
+    _player = context.read<PlayerService>();
+    _wasBound = _service.bound;
+    _service.addListener(_onAccountChanged);
     if (_service.bound) {
       _service.refreshProfile();
     } else {
@@ -36,8 +46,38 @@ class _BiliAccountPageState extends State<BiliAccountPage> {
 
   @override
   void dispose() {
+    _service.removeListener(_onAccountChanged);
     _service.stopQrLogin();
     super.dispose();
+  }
+
+  /// 监听未绑定 → 已绑定 翻转：触发自动升档（Q2a）。
+  void _onAccountChanged() {
+    final bound = _service.bound;
+    if (bound && !_wasBound) {
+      _wasBound = bound;
+      _onBoundSuccess();
+    } else {
+      _wasBound = bound;
+    }
+  }
+
+  /// 绑定成功：仅当前档 132K 时自动升档 192K（显式 64K 不动、不自动切 Hi-Res）。
+  Future<void> _onBoundSuccess() async {
+    final upgrade = _player.quality == AudioQuality.q132k;
+    if (upgrade) {
+      await _player.setQuality(AudioQuality.q192k);
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            upgrade ? '绑定成功，已切换到 192K 音质' : '绑定成功，192K 音质已解锁',
+          ),
+        ),
+      );
   }
 
   @override
@@ -79,7 +119,7 @@ class _QrCard extends StatelessWidget {
           Text('扫码绑定', style: tokens.sectionStyle),
           const SizedBox(height: 6),
           Text(
-            '使用哔哩哔哩 App「我的」页扫一扫登录，绑定后解锁高音质音源。',
+            '使用哔哩哔哩 App「我的」页扫一扫登录，绑定后解锁 192K 音质（大会员再解锁 Hi-Res）。',
             style: tokens.captionStyle,
           ),
           const SizedBox(height: 18),
@@ -240,6 +280,7 @@ class _BoundCard extends StatelessWidget {
     final tokens = AppTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
     final account = service.account;
+    final isVip = service.isVip;
     return KeleCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -266,12 +307,18 @@ class _BoundCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (isVip) ...[
+                const InfoChip('大会员', tone: StageTone.accent),
+                const SizedBox(width: 6),
+              ],
               const InfoChip('已绑定', tone: StageTone.done),
             ],
           ),
           const SizedBox(height: 14),
           Text(
-            '已解锁高音质音源。登录态仅保存在本机，可随时解除绑定。',
+            isVip
+                ? '已解锁 192K 与 Hi-Res 音质。登录态仅保存在本机，可随时解除绑定。'
+                : '已解锁 192K 音质，开通大会员可解锁 Hi-Res。登录态仅保存在本机，可随时解除绑定。',
             style: tokens.captionStyle,
           ),
           const SizedBox(height: 16),
@@ -308,7 +355,7 @@ class _BoundCard extends StatelessWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('解除 B 站账号绑定？'),
-        content: const Text('解绑后将退出本机登录态，高音质音源恢复为标准音质。收藏与收听记录不受影响。'),
+        content: const Text('解绑后将退出本机登录态，音质自动回落到 132K（Hi-Res 一并收回）。收藏与收听记录不受影响。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -324,6 +371,12 @@ class _BoundCard extends StatelessWidget {
     if (ok != true) return;
     await service.logout();
     if (!context.mounted) return;
+    // Q3a：解绑 → 132K 回落由 setEntitlement 收口，这里只补一条提示
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('已解绑，音质已回落到 132K')),
+      );
     // 解绑后回到扫码态
     await service.startQrLogin();
   }

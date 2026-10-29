@@ -193,6 +193,24 @@ class AppServices {
     // 零网络、零引擎：只挂生命周期/焦点/系统桥 + 读持久化参数
     await player.init();
 
+    // 下载档位跟随默认音质（封顶 192K 由 OfflineCacheService 收口）
+    offline.qualityProvider = () => player.quality;
+
+    // 权限同步（Q3）：绑定/大会员态变化 → 播放器档位钳制
+    // （解绑→132K、大会员过期→192K 回落，保证「所选即可播」）。
+    // 构造期账号态已从本地 Cookie/档案缓存恢复，可直接同步一次；
+    // 后续 nav 校准（warmup）与扫码登录/解绑都会经 notifyListeners 再触发。
+    void syncEntitlement() {
+      player
+          .setEntitlement(bound: account.bound, isVip: account.isVip)
+          .catchError((Object e) {
+        _log('sync entitlement error: $e');
+      });
+    }
+
+    syncEntitlement();
+    account.addListener(syncEntitlement);
+
     // WebDAV 同步：恢复落库后重载各处内存缓存（主题/书架/播放参数/开关）
     final webdav = WebdavSyncService(
       kv: kv,
@@ -235,6 +253,11 @@ class AppServices {
   void warmupInBackground() {
     client.warmupIfNeeded().catchError((Object e) {
       _log('warmup error: $e');
+    });
+    // 静默校准 nav（Q9b）：刷新绑定/大会员态（失败保持缓存现状），
+    // 成功后经 notifyListeners → syncEntitlement 收口档位钳制。
+    account.refreshProfile().catchError((Object e) {
+      _log('refresh profile error: $e');
     });
     // 同时装载上次的收听会话（**不自动发声**），让 MiniPlayer 一进来就有内容
     player.restoreLastSession().catchError((Object e) {

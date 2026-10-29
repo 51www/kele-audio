@@ -94,6 +94,9 @@ class PlayerPrefs {
   /// M5 设置页「后台自动播放下一章」（PRD §5.6.4）；默认开（连播是听书主场景）。
   static const String keyAutoNext = 'player_auto_next';
 
+  /// 首次选 Hi-Res 的一次性流量提示是否已展示（Q2：只提示一次）。
+  static const String keyHiresHintShown = 'player_hires_hint_shown';
+
   final KeyValueStore _kv;
 
   /// 倍速（0.5~3.0）；缺省 1.0（PRD 开放问题 Q3 采纳：**持久化倍速**）
@@ -124,4 +127,9 @@ class PlayerPrefs {
   bool get autoNext => _kv.getString(keyAutoNext) != '0';
 
   Future<void> saveAutoNext(bool v) => _kv.setString(keyAutoNext, v ? '1' : '0');
+
+  /// 首次选 Hi-Res 的流量提示是否已展示（一次性，Q2a）。
+  bool get hiresHintShown => _kv.getString(keyHiresHintShown) == '1';
+
+  Future<void> saveHiresHintShown() => _kv.setString(keyHiresHintShown, '1');
 }

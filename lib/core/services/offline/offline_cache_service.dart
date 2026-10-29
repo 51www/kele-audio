@@ -8,6 +8,7 @@ import '../../api/key_value_store.dart';
 import '../../api/play_url_service.dart';
 import '../../data/daos.dart';
 import '../../domain/album.dart';
+import '../../domain/playback.dart';
 import '../../domain/records.dart';
 import 'audio_store.dart';
 
@@ -63,6 +64,15 @@ class OfflineCacheService extends ChangeNotifier {
 
   /// Web 预览端走 `/audio` 同源反代拉字节（CDN 直链会被 CORS 拦）。
   bool useAudioProxy = false;
+
+  /// 下载档位来源（DI 注入 `() => prefs.quality`，测试可不注入走 132K）。
+  AudioQuality Function()? qualityProvider;
+
+  /// 下载档位 = 默认音质**封顶 192K**（Q5b：Hi-Res 不整本下载，流量/体积失控）。
+  AudioQuality get _downloadQuality {
+    final q = qualityProvider?.call() ?? AudioQuality.q132k;
+    return q.index > AudioQuality.q192k.index ? AudioQuality.q192k : q;
+  }
 
   /// 「仅播放已缓存」开关（PRD §5.6.3，持久化）。
   bool get onlyCached => _onlyCachedFlag;
@@ -259,7 +269,11 @@ class OfflineCacheService extends ChangeNotifier {
         if (cid == 0) throw BiliApiException(-1, '章节地址解析失败（cid 为空）');
       }
       if (bvid.isEmpty) throw BiliApiException(-1, '章节缺少 bvid，无法取址');
-      final urls = await playUrl.resolve(bvid: bvid, cid: cid);
+      final urls = await playUrl.resolve(
+        bvid: bvid,
+        cid: cid,
+        quality: _downloadQuality,
+      );
       if (_cancelling.remove(task.chapterId)) {
         _log('下载已暂停：${chapter.title}');
         return; // 保持 queued 状态

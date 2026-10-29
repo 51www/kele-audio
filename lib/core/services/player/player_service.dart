@@ -133,6 +133,8 @@ class PlayerService extends ChangeNotifier
   double _rate = 1.0;
   PlayMode _mode = PlayMode.sequential;
   AudioQuality _quality = AudioQuality.q132k;
+  bool _bound = false;
+  bool _isVip = false;
   bool _stopAtChapterEnd = false;
   bool _autoNext = true;
 
@@ -178,6 +180,8 @@ class PlayerService extends ChangeNotifier
   double get rate => _rate;
   PlayMode get mode => _mode;
   AudioQuality get quality => _quality;
+  bool get bound => _bound;
+  bool get isVip => _isVip;
   bool get stopAtChapterEnd => _stopAtChapterEnd;
   bool get autoNext => _autoNext;
   Duration get sleepRemaining => _sleepRemaining;
@@ -399,7 +403,13 @@ class PlayerService extends ChangeNotifier
       _position = startAt;
       _lastKnown = startAt;
       _tallyPos = startAt;
-      _duration = Duration.zero;
+      // 换源后 duration 事件可能在 open() 返回前就已同步派发并更新了
+      // _duration；这里若盲目清零，引擎不会重发同值事件（media_kit 的
+      // duration 只在变化时 emit），播放条时长会卡在 0 且进度条不可拖
+      // （复现：先播单集再点「播放全部」）。改为取引擎当前快照：
+      // 已解析出时长就用它，还没解析（0）则等后续 duration 事件补上。
+      final engineDuration = engine.durationValue;
+      _duration = engineDuration > Duration.zero ? engineDuration : Duration.zero;
       positionTick.value = startAt;
       _recoverTries = 0;
       _recoverFloor = null;
@@ -573,7 +583,7 @@ class PlayerService extends ChangeNotifier
     notifyListeners();
   }
 
-  /// 音质切换（64K / 132K / 192K）：立即用新档位重新取址并续播。
+  /// 音质切换（64K / 132K / 192K / Hi-Res）：立即用新档位重新取址并续播。
   Future<void> setQuality(AudioQuality q) async {
     if (q == _quality) return;
     _quality = q;
@@ -591,6 +601,29 @@ class PlayerService extends ChangeNotifier
     _quality = q;
     await prefs.saveQuality(q);
     notifyListeners();
+  }
+
+  /// 权限同步（绑定/大会员态，Q2/Q3）：
+  /// 1. 当前档位不达标时自动回落到 [AudioQuality.highestUnlocked]
+  ///    （解绑→132K、大会员过期→192K），走 [setQuality] 立即生效，
+  ///    保证「所选即可播」；
+  /// 2. 权限提升**不**自动升档（绑定升档仅 132K→192K 由绑定页显式触发，
+  ///    大会员只解锁 Hi-Res 不自动切换）。
+  ///
+  /// [bound]/[isVip] 必须是**已确认**的账号态（账号加载/刷新后调用），
+  /// 不要在启动早期用默认 false 调用，否则会把已保存的 192K/Hi-Res 误降档。
+  Future<void> setEntitlement({
+    required bool bound,
+    required bool isVip,
+  }) async {
+    final changed = bound != _bound || isVip != _isVip;
+    _bound = bound;
+    _isVip = isVip;
+    if (!_quality.isUnlocked(bound: bound, isVip: isVip)) {
+      await setQuality(AudioQuality.highestUnlocked(bound: bound, isVip: isVip));
+      return;
+    }
+    if (changed) notifyListeners();
   }
 
   Future<void> setStopAtChapterEnd(bool v) async {
@@ -612,6 +645,11 @@ class PlayerService extends ChangeNotifier
     _rate = prefs.rate;
     _mode = prefs.mode;
     _quality = prefs.quality;
+    // 权限钳制（Q3）：恢复出的档位不达标同样回落，保证「所选即可播」；
+    // 这里只改内存值不打断播放，落库由下一次 setQuality/setEntitlement 收口。
+    if (!_quality.isUnlocked(bound: _bound, isVip: _isVip)) {
+      _quality = AudioQuality.highestUnlocked(bound: _bound, isVip: _isVip);
+    }
     _stopAtChapterEnd = prefs.stopAtChapterEnd;
     _autoNext = prefs.autoNext;
     notifyListeners();

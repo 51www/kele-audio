@@ -34,6 +34,12 @@ class FakeEngine implements PlayerEngine {
   /// open 时命中的 URL 会抛错（模拟 403 播不了）
   String? brokenPattern;
 
+  /// 模拟真实 media_kit 的换源时序：duration 事件在 open() 返回前
+  /// 已同步派发，且同值不再重发（回归：先播单集再「播放全部」时长清零）
+  bool emitDurationOnOpen = false;
+  Duration durationOnOpen = const Duration(seconds: 100);
+  Duration _stateDuration = Duration.zero;
+
   final List<({String url, Duration startAt, bool autoplay})> opens = [];
   final List<Duration> seeks = [];
   double appliedRate = 1.0;
@@ -61,7 +67,7 @@ class FakeEngine implements PlayerEngine {
   Duration get positionValue => Duration.zero;
 
   @override
-  Duration get durationValue => Duration.zero;
+  Duration get durationValue => _stateDuration;
 
   @override
   bool get isPlaying => false;
@@ -90,6 +96,10 @@ class FakeEngine implements PlayerEngine {
       throw StateError('打开失败：$url');
     }
     opens.add((url: url, startAt: startAt, autoplay: autoplay));
+    if (emitDurationOnOpen) {
+      _stateDuration = durationOnOpen;
+      durationC.add(durationOnOpen);
+    }
   }
 
   @override
@@ -383,6 +393,31 @@ void main() {
     expect(p2.currentChapter?.title, '第2章');
     // 续播位置：换源瞬间以 startAt 为准
     expect(h.engine.opens.last.startAt, const Duration(seconds: 30));
+
+    await h.dispose();
+  });
+
+  test('换源竞态：先播单集再「播放全部」，时长不得被清零', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+    h.engine.emitDurationOnOpen = true;
+
+    // 先点单独一集：open 返回前 duration 事件已到达
+    await p.playAlbum(makeAlbum(), chapters: chapters, startIndex: 0);
+    await settle();
+    expect(p.duration, const Duration(seconds: 100));
+
+    // 再点「播放全部」：重新 open 换源，open 返回后提交状态时
+    // 不得把引擎刚上报的时长清零（否则播放条时长 0、进度条不可拖）
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    await settle();
+    expect(p.duration, const Duration(seconds: 100),
+        reason: '换源后时长不得被 _openChapter 清零');
+    // 时长恢复后，进度条随位置即可算出比例（>0 可拖动）
+    h.engine.positionC.add(const Duration(seconds: 42));
+    await settle();
+    expect(p.progress, greaterThan(0), reason: '时长恢复后进度条应可拖动');
 
     await h.dispose();
   });
@@ -729,6 +764,79 @@ void main() {
     // 持久化：重启后保留
     final p2 = await h.restart();
     expect(p2.quality, AudioQuality.q64k);
+    await h.dispose();
+  });
+
+  test('Q3 权限回退：解绑 → 192K/Hi-Res 自动回落 132K（所选即可播）', () async {
+    final h = makeHarness();
+    final p = await h.start();
+
+    await p.setEntitlement(bound: true, isVip: true);
+    await p.setQuality(AudioQuality.qHiRes);
+    expect(p.quality, AudioQuality.qHiRes);
+
+    await p.setEntitlement(bound: false, isVip: false);
+    expect(p.quality, AudioQuality.q132k, reason: '解绑回落 132K');
+    expect(p.prefs.quality, AudioQuality.q132k, reason: '回落结果持久化');
+    await h.dispose();
+  });
+
+  test('Q3 权限回退：大会员过期 → Hi-Res 回落 192K，192K 不受影响', () async {
+    final h = makeHarness();
+    final p = await h.start();
+
+    await p.setEntitlement(bound: true, isVip: true);
+    await p.setQuality(AudioQuality.qHiRes);
+    await p.setEntitlement(bound: true, isVip: false);
+    expect(p.quality, AudioQuality.q192k, reason: '会员过期回落 192K');
+
+    // 已在 192K：会员过期不改变（绑定仍在）
+    await p.setEntitlement(bound: true, isVip: true);
+    await p.setQuality(AudioQuality.q192k);
+    await p.setEntitlement(bound: true, isVip: false);
+    expect(p.quality, AudioQuality.q192k);
+    await h.dispose();
+  });
+
+  test('Q2 权限提升不自动升档：绑定/大会员只解锁不切换', () async {
+    final h = makeHarness();
+    final p = await h.start();
+
+    await p.setQuality(AudioQuality.q132k);
+    await p.setEntitlement(bound: true, isVip: true);
+    expect(p.quality, AudioQuality.q132k, reason: '解锁不等于切换，显式档位不动');
+
+    // 显式 64K 同样不动
+    await p.setEntitlement(bound: false, isVip: false);
+    await p.setQuality(AudioQuality.q64k);
+    await p.setEntitlement(bound: true, isVip: true);
+    expect(p.quality, AudioQuality.q64k);
+    await h.dispose();
+  });
+
+  test('Q3 回落走 setQuality 语义：正在播时重取址续播不归零', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+
+    await p.setEntitlement(bound: true, isVip: true);
+    await p.playAlbum(makeAlbum(), chapters: chapters);
+    h.engine.durationC.add(const Duration(seconds: 100));
+    h.engine.positionC.add(const Duration(seconds: 21));
+    await settle();
+    await p.setQuality(AudioQuality.qHiRes);
+    await settle();
+
+    final opensBefore = h.engine.opens.length;
+    await p.setEntitlement(bound: false, isVip: false);
+    await settle(5);
+
+    expect(p.quality, AudioQuality.q132k);
+    expect(h.engine.opens.length, greaterThan(opensBefore),
+        reason: '回落后重取址开流');
+    expect(h.engine.opens.last.startAt, const Duration(seconds: 21),
+        reason: '从原位置续播');
+    expect(p.playing, isTrue);
     await h.dispose();
   });
 }

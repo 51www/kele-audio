@@ -93,19 +93,16 @@ class SettingsPage extends StatelessWidget {
               children: [
                 Text('默认音质', style: tokens.captionStyle),
                 const SizedBox(height: 8),
-                SegmentedButton<AudioQuality>(
-                  showSelectedIcon: false,
-                  segments: [
-                    for (final q in AudioQuality.values)
-                      ButtonSegment(value: q, label: Text(q.label)),
-                  ],
-                  selected: {player.quality},
-                  onSelectionChanged: (s) => player.setDefaultQuality(s.first),
-                ),
-                const SizedBox(height: 6),
+                _QualityPicker(player: player, account: account),
+                const SizedBox(height: 8),
+                Text(_qualityHint(account), style: tokens.captionStyle),
+                const SizedBox(height: 4),
                 Text(
-                  '对之后的取址生效，不会打断正在播放的内容。',
-                  style: tokens.captionStyle,
+                  '切换立即生效并自动续播；Hi-Res 流量约为 192K 的数倍，建议在 Wi-Fi 下使用。',
+                  style: tokens.captionStyle.copyWith(
+                    fontSize: 11,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 14),
                 Text('默认播放模式', style: tokens.captionStyle),
@@ -209,8 +206,10 @@ class SettingsPage extends StatelessWidget {
                 _BindingRow(
                   icon: Icons.smart_display_outlined,
                   title: 'B 站账号',
-                  subtitle: '绑定后解锁高音质音源',
-                  status: account.bound ? '已绑定' : '未绑定',
+                  subtitle: '绑定解锁 192K，大会员解锁 Hi-Res',
+                  status: account.bound
+                      ? (account.isVip ? '已绑定·大会员' : '已绑定')
+                      : '未绑定',
                   bound: account.bound,
                   onTap: () => context.push('/profile/bili-account'),
                 ),
@@ -302,6 +301,156 @@ class SettingsPage extends StatelessWidget {
           ],
         ),
       );
+}
+
+/// 音质档位选择（Q1 锁态控件）：
+///
+/// - 64K / 132K 匿名可选；192K 需绑定；Hi-Res 需大会员（[AudioQuality.isUnlocked]）；
+/// - 锁定档**灰显 + 锁标可见**，点击弹 SnackBar 引导（未绑定时 192K/Hi-Res
+///   带「去绑定」直达绑定页）；
+/// - 选档走 [PlayerService.setQuality]：立即重取址并续播（Q8a）。
+class _QualityPicker extends StatelessWidget {
+  const _QualityPicker({required this.player, required this.account});
+
+  final PlayerService player;
+  final BiliAccountService account;
+
+  @override
+  Widget build(BuildContext context) {
+    final bound = account.bound;
+    final isVip = account.isVip;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final q in AudioQuality.values)
+          _QualityChip(
+            label: q.label,
+            selected: player.quality == q,
+            locked: !q.isUnlocked(bound: bound, isVip: isVip),
+            onTap: () => _pick(context, q, bound: bound, isVip: isVip),
+          ),
+      ],
+    );
+  }
+
+  void _pick(
+    BuildContext context,
+    AudioQuality q, {
+    required bool bound,
+    required bool isVip,
+  }) {
+    if (!q.isUnlocked(bound: bound, isVip: isVip)) {
+      final messenger = ScaffoldMessenger.of(context);
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(_lockHint(q, bound: bound, isVip: isVip)),
+            action: bound
+                ? null
+                : SnackBarAction(
+                    label: '去绑定',
+                    onPressed: () => context.push('/profile/bili-account'),
+                  ),
+          ),
+        );
+      return;
+    }
+    player.setQuality(q);
+    // 首次选 Hi-Res：一次性流量提示（Q2a，提示过不再打扰）
+    if (q == AudioQuality.qHiRes && !player.prefs.hiresHintShown) {
+      player.prefs.saveHiresHintShown();
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Hi-Res 无损音质流量约为 192K 的数倍，建议在 Wi-Fi 下收听。'),
+            duration: Duration(seconds: 5),
+          ),
+        );
+    }
+  }
+}
+
+/// 单个音质档位：选中态 / 锁定态（灰显 + 锁标）均可点。
+class _QualityChip extends StatelessWidget {
+  const _QualityChip({
+    required this.label,
+    required this.selected,
+    required this.locked,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final bool locked;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final fg = switch ((selected, locked)) {
+      (_, true) => scheme.onSurfaceVariant.withValues(alpha: 0.5),
+      (true, false) => scheme.onPrimaryContainer,
+      _ => scheme.onSurface,
+    };
+    final bg = switch ((selected, locked)) {
+      (true, false) => scheme.primaryContainer,
+      _ => scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+    };
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(tokens.radiusPill),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(tokens.radiusPill),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: tokens.captionStyle.copyWith(
+                  color: fg,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+              if (locked) ...[
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.lock_outline_rounded,
+                  size: 13,
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.5),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 音质区动态说明行（随绑定/会员态变化）。
+String _qualityHint(BiliAccountService account) {
+  if (!account.bound) {
+    return '当前可用 64K / 132K；绑定 B 站账号解锁 192K，开通大会员再解锁 Hi-Res。';
+  }
+  if (!account.isVip) {
+    return '已解锁 192K；开通大会员可解锁 Hi-Res 无损音质。';
+  }
+  return '全部音质已解锁，可播放 Hi-Res 无损。';
+}
+
+/// 锁定档位点击引导文案。
+String _lockHint(AudioQuality q, {required bool bound, required bool isVip}) {
+  if (bound && !isVip && q == AudioQuality.qHiRes) {
+    return 'Hi-Res 需要大会员解锁';
+  }
+  return '${q.label} 需要${q.needsVip ? '绑定 B 站账号并开通大会员' : '绑定 B 站账号'}解锁';
 }
 
 /// 账号绑定入口行：图标 + 标题/副标题 + 绑定状态，点击进入对应绑定页。

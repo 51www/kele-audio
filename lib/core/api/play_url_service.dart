@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart';
+
 import '../domain/playback.dart';
 import 'api_config.dart';
 import 'bili_client.dart';
@@ -215,11 +217,15 @@ class PlayUrlService {
   }
 
   /// 音质选择 + fallback 排序：
-  /// 1. 目标档位（最接近的一档）放最前；
-  /// 2. 其余音轨按 bandwidth 降序（192K 优先于 64K）；
-  /// 3. flac / dolby 兜底（仅当 AAC 全挂时才轮到）。
+  /// 1. Hi-Res 目标档：flac 置顶；缺失时从 192K 起降级（bandwidth 降序 = 192K→132K→64K）；
+  /// 2. AAC 目标档位（最接近的一档）放最前，其余按 bandwidth 降序；
+  /// 3. dolby 殿后兜底（不立档位，仅 AAC/flac 全挂时才轮到）。
   ///
   /// 每条音轨都展开 `baseUrl + backup_url`，`http://` 统一转 `https://`。
+  @visibleForTesting
+  List<String> orderUrls(PlayUrlResult result, AudioQuality quality) =>
+      _order(result, quality);
+
   List<String> _order(PlayUrlResult result, AudioQuality quality) {
     final seen = <String>{};
     String toHttps(String u) =>
@@ -235,6 +241,16 @@ class PlayUrlService {
 
     final sorted = [...result.tracks]
       ..sort((a, b) => b.bandwidth.compareTo(a.bandwidth));
+
+    // Hi-Res：flac 置顶；缺档时 192K 起降级（不走「最接近」逻辑，否则会先落到 132K）
+    if (quality == AudioQuality.qHiRes) {
+      collect(result.flac);
+      for (final t in sorted) {
+        collect(t);
+      }
+      collect(result.dolby);
+      return seen.toList();
+    }
 
     // 目标档位（或最接近的一档）优先
     final target = sorted.where((t) => t.id == quality.trackId).toList();

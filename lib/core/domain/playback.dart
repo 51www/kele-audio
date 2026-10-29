@@ -46,12 +46,18 @@ extension PlayModeX on PlayMode {
 
 /// 音质档位（PRD §5.4 / R7）：对应 B 站 DASH 音轨 id。
 ///
-/// 30216 = 64K AAC（省流）、30232 = 132K（默认）、30280 = 192K。
-/// 注意：**选档是客户端在 `dash.audio` 里挑音轨**，不改变 playurl 请求参数。
+/// 30216 = 64K AAC（省流）、30232 = 132K（默认）、30280 = 192K、
+/// 30251 = Hi-Res FLAC（无损，需大会员）。
+/// 注意：**选档是客户端在 `dash.audio` 里挑音轨**，不改变 playurl 请求参数；
+/// Hi-Res 走独立的 `dash.flac` 字段。
+///
+/// 解锁梯度：64K/132K 匿名可用 → 192K **绑定解锁** → Hi-Res **大会员解锁**。
+/// 杜比（30250）不立档位，仅作 AAC 全挂时的兜底。
 enum AudioQuality {
   q64k(trackId: 30216),
   q132k(trackId: 30232),
-  q192k(trackId: 30280);
+  q192k(trackId: 30280),
+  qHiRes(trackId: 30251);
 
   const AudioQuality({required this.trackId});
 
@@ -62,17 +68,43 @@ enum AudioQuality {
         AudioQuality.q64k => '64K',
         AudioQuality.q132k => '132K',
         AudioQuality.q192k => '192K',
+        AudioQuality.qHiRes => 'Hi-Res',
       };
 
   String get wire => switch (this) {
         AudioQuality.q64k => '64k',
         AudioQuality.q132k => '132k',
         AudioQuality.q192k => '192k',
+        AudioQuality.qHiRes => 'hires',
       };
+
+  /// 需要绑定 B 站账号才可选（192K 起）。
+  bool get needsBinding =>
+      this == AudioQuality.q192k || this == AudioQuality.qHiRes;
+
+  /// 需要大会员才可选（仅 Hi-Res）。
+  bool get needsVip => this == AudioQuality.qHiRes;
+
+  /// 给定绑定/会员态下该档是否可选可播（Q1 锁态判定的单一事实源）。
+  bool isUnlocked({required bool bound, required bool isVip}) =>
+      (!needsBinding || bound) && (!needsVip || isVip);
+
+  /// 给定绑定/会员态下的**最高**可用档（权限变化时的回落目标）：
+  /// 解绑 → 132K、大会员过期 → 192K、大会员 → Hi-Res。
+  static AudioQuality highestUnlocked({
+    required bool bound,
+    required bool isVip,
+  }) =>
+      bound && isVip
+          ? AudioQuality.qHiRes
+          : bound
+              ? AudioQuality.q192k
+              : AudioQuality.q132k;
 
   static AudioQuality fromWire(String? v) => switch (v) {
         '64k' => AudioQuality.q64k,
         '192k' => AudioQuality.q192k,
+        'hires' => AudioQuality.qHiRes,
         _ => AudioQuality.q132k,
       };
 }

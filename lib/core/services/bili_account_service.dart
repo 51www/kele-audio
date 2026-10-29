@@ -68,6 +68,9 @@ class BiliAccountService extends ChangeNotifier {
   /// 是否已绑定（会话里有 SESSDATA）。
   bool get bound => client.isLoggedIn;
 
+  /// 大会员是否生效中（档案缓存为准，nav 校准后更新）。
+  bool get isVip => _account?.isVip ?? false;
+
   /// 已绑定账号档案（缓存优先，进页时后台校准）。
   BiliAccount? get account => _account;
 
