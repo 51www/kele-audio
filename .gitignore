@@ -50,5 +50,4 @@ app.*.map.json
 # OpenCode / playwright-cli 本地会话产物
 .opencode/
 .playwright-cli/
-.logs
-docs/shortscreen/
+.logs 
