@@ -262,74 +262,92 @@ class PlayerPage extends StatelessWidget {
             .replaceFirst(RegExp(r'0+$'), '')
             .replaceFirst(RegExp(r'\.$'), '');
 
+  /// 定时关闭面板（PRD §5.4）：时长 / 本章结束 / 取消 三组语义分层——
+  /// 6 个时长按 3×2 等宽网格排布（比列表更紧凑、对齐可比），
+  /// 「本章结束」与「关闭定时」作为两个停止条件并排在底部。
   static void _showSleepSheet(BuildContext context, PlayerService player) {
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: StatefulBuilder(
-          builder: (context, setState) {
-            final tokens = AppTokens.of(context);
-            Widget option(
-              String label,
-              bool selected,
-              Future<void> Function() onTap,
-            ) => ListTile(
-              dense: true,
-              title: Text(label, style: tokens.bodyStyle),
-              trailing: selected
-                  ? Icon(
-                      Icons.check_rounded,
-                      color: Theme.of(context).colorScheme.primary,
-                    )
-                  : null,
-              onTap: () async {
-                await onTap();
-                if (context.mounted) Navigator.of(context).pop();
-              },
-            );
-            final none = !player.hasSleepTimer && !player.stopAtChapterEnd;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                  child: Row(
+      builder: (sheetContext) {
+        final tokens = AppTokens.of(sheetContext);
+        final none = !player.hasSleepTimer && !player.stopAtChapterEnd;
+
+        Future<void> apply(Future<void> Function() task) async {
+          await task();
+          if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+        }
+
+        return SafeArea(
+          top: false,
+          // 底部安全距离：避开手势条/圆角屏，内容不贴边
+          minimum: const EdgeInsets.only(bottom: 12),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
                     children: [
                       Text('定时关闭', style: tokens.sectionStyle),
                       const Spacer(),
-                      if (player.hasSleepTimer || player.stopAtChapterEnd)
-                        TextButton(
-                          onPressed: () async {
-                            await player.cancelSleepTimer();
-                            if (context.mounted) {
-                              Navigator.of(context).pop();
-                            }
-                          },
-                          child: const Text('关闭'),
-                        ),
+                      _SleepStatusPill(player: player),
                     ],
                   ),
-                ),
-                // PRD §5.4：关闭 / 5 / 10 / 15 / 30 / 45 / 60 分钟 / 本章结束
-                option(
-                  '本章结束',
-                  player.stopAtChapterEnd,
-                  () => player.setSleepTimer(minutes: 0),
-                ),
-                for (final m in const [5, 10, 15, 30, 45, 60])
-                  option(
-                    '$m 分钟',
-                    _sel(player, m, none),
-                    () => player.setSleepTimer(minutes: m),
+                  const SizedBox(height: 14),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      const gap = 8.0;
+                      final w = (constraints.maxWidth - gap * 2) / 3;
+                      return Wrap(
+                        spacing: gap,
+                        runSpacing: gap,
+                        children: [
+                          for (final m in const [5, 10, 15, 30, 45, 60])
+                            SizedBox(
+                              width: w,
+                              child: _SleepOption(
+                                label: '$m 分钟',
+                                selected: _sel(player, m, none),
+                                onTap: () => apply(
+                                  () => player.setSleepTimer(minutes: m),
+                                ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
                   ),
-                option('关闭', none, () => player.cancelSleepTimer()),
-                const SizedBox(height: 12),
-              ],
-            );
-          },
-        ),
-      ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _SleepOption(
+                          label: '本章结束',
+                          selected: player.stopAtChapterEnd,
+                          onTap: () =>
+                              apply(() => player.setSleepTimer(minutes: 0)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _SleepOption(
+                          label: '关闭定时',
+                          selected: false,
+                          enabled: !none,
+                          onTap: () => apply(player.cancelSleepTimer),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -544,6 +562,14 @@ class _IdleView extends StatelessWidget {
   }
 }
 
+/// 睡眠定时状态文案：「本章结束」/「剩余 m:ss」/「未开启」。
+String _sleepStatusText(PlayerService p) {
+  if (p.stopAtChapterEnd) return '本章结束';
+  if (!p.hasSleepTimer) return '未开启';
+  final r = p.sleepRemaining;
+  return '剩余 ${r.inMinutes}:${(r.inSeconds % 60).toString().padLeft(2, '0')}';
+}
+
 /// 睡眠定时剩余时间徽标（播放页顶部居中）：定时关闭开启倒计时停止时，
 /// 显示「剩余 m:ss」随秒递减（数据源 [PlayerService.sleepRemaining]，每秒
 /// notifyListeners 自动刷新）；「本章结束」模式显示模式文案。
@@ -556,10 +582,7 @@ class _SleepCountdown extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final remaining = player.sleepRemaining;
-    final label = player.stopAtChapterEnd
-        ? '本章结束'
-        : '剩余 ${remaining.inMinutes}:${(remaining.inSeconds % 60).toString().padLeft(2, '0')}';
+    final label = _sleepStatusText(player);
     return Padding(
       padding: EdgeInsets.only(top: tokens.spaceXs, bottom: tokens.spaceXs),
       child: Center(
@@ -579,6 +602,107 @@ class _SleepCountdown extends StatelessWidget {
                 style: tokens.numStyle.copyWith(
                   color: scheme.primary,
                   fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 定时面板头部的当前状态徽标（未开启 / 剩余 m:ss / 本章结束），
+/// 与播放页顶部 [_SleepCountdown] 同一视觉语言（主色淡染胶囊 + 数字等宽）。
+class _SleepStatusPill extends StatelessWidget {
+  const _SleepStatusPill({required this.player});
+
+  final PlayerService player;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final on = player.hasSleepTimer || player.stopAtChapterEnd;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: on
+            ? scheme.primary.withValues(alpha: 0.12)
+            : scheme.onSurface.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(tokens.radiusPill),
+      ),
+      child: Text(
+        _sleepStatusText(player),
+        style: tokens.numStyle.copyWith(
+          color: on ? scheme.primary : scheme.onSurfaceVariant,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// 定时面板选项按钮：胶囊形、高度 40、圆角/配色沿用主题 token——
+/// 选中态主色淡染底 + 主色描边与文字 + 对勾，未选中态纸面淡底 + 发丝描边；
+/// 禁用态（已关闭定时时点「关闭定时」）降透明度且不响应点击。
+class _SleepOption extends StatelessWidget {
+  const _SleepOption({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.enabled = true,
+  });
+
+  static const double height = 40;
+
+  final String label;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final Color fg = !enabled
+        ? scheme.onSurfaceVariant.withValues(alpha: 0.45)
+        : selected
+        ? scheme.primary
+        : scheme.onSurface;
+    return Material(
+      color: selected
+          ? scheme.primary.withValues(alpha: 0.14)
+          : scheme.onSurface.withValues(alpha: 0.05),
+      shape: StadiumBorder(
+        side: BorderSide(
+          color: selected
+              ? scheme.primary.withValues(alpha: 0.45)
+              : tokens.hairlineColor,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        child: SizedBox(
+          height: height,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (selected) ...[
+                Icon(Icons.check_rounded, size: 14, color: fg),
+                SizedBox(width: tokens.spaceXs),
+              ],
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tokens.bodyStyle.copyWith(
+                    fontSize: 14,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                    color: fg,
+                  ),
                 ),
               ),
             ],

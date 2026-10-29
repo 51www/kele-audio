@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../app/router.dart';
 import '../../app/theme/app_tokens.dart';
-import '../../app/widgets/progress_ring.dart';
+import '../../app/widgets/cover_progress_avatar.dart';
 import '../../core/services/mini_player_controller.dart';
 import '../../core/services/player/player_service.dart';
 
@@ -48,14 +48,16 @@ class MiniPlayerSlot extends StatelessWidget {
 /// - 点 ✕ 关闭 → 收起（正在播放则先暂停），开始新播放任务时自动回来。
 ///
 /// 交互语义：
-/// - 点条身 → 跳转播放页；
-/// - ▶（暂停态）→ 开始播放并跳转播放页（非播放页点播放按钮直达播放页）；
+/// - 点条身（播放按钮以外的任意区域）→ 跳转播放页；
+/// - ▶（暂停态）→ 原地开始播放，不离开当前页；
 /// - ⏸（播放态）→ 原地暂停，不离开当前页；
 /// - ✕ → 暂停并关闭播放条。
 ///
 /// 状态由 `MiniPlayerController`（PlayerService 推送）驱动；章节进度不再占一条
-/// 通栏细线，而是画在封面外圈（[ProgressRing]）——秒级 tick 由环自身的
-/// 补间动画吸收，不会突兀跳变。
+/// 通栏细线，而是画在圆形封面的外轮廓上（[CoverProgressAvatar]）——秒级 tick
+/// 由环自身的补间动画吸收，不会突兀跳变。封面右下角还有一枚状态徽标：
+/// 播放态是起伏的等化器柱 + 环外呼吸光晕，暂停态是静态 ⏸ 且封面蒙灰，
+/// 一眼即可分辨当前音频是否在播。
 /// 导航走 `AppRouter.router`（部分挂载点拿不到 InheritedGoRouter）。
 class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key, this.bottomGap = 0});
@@ -94,7 +96,7 @@ class MiniPlayer extends StatelessWidget {
           borderRadius: BorderRadius.circular(tokens.radiusPill),
           // push 进入播放页（go 会清空导航栈，导致播放页向下按钮无栈可弹）
           onTap: () => AppRouter.router.push('/player'),
-          // 高度下限 56（正好容纳 42 的进度环 + 上下 7 内边距）；
+          // 高度下限 56（正好容纳 42 的圆形封面 + 上下 7 内边距）；
           // 标题/副标题均单行省略，条高恒定、不随文本长度变化。
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 56),
@@ -102,28 +104,14 @@ class MiniPlayer extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(8, 7, 4, 7),
               child: Row(
                 children: [
-                  // 封面外圈 = 章节进度环（替代原底部通栏进度条）：
-                  // 0% 只有轨道底环，100% 闭合成整圆。
-                  ProgressRing(
-                    value: state.progress,
-                    size: 42,
-                    strokeWidth: 2.5,
-                    gap: 1.5,
-                    color: scheme.primary,
-                    trackColor: fg.withValues(alpha: 0.18),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(tokens.radiusSm),
-                      child: SizedBox.expand(
-                        child: state.coverUrl.isEmpty
-                            ? _placeholderCover(fg)
-                            : Image.network(
-                                state.coverUrl,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) =>
-                                    _placeholderCover(fg),
-                              ),
-                      ),
-                    ),
+                  // 圆形封面 + 沿封面外轮廓的章节进度环 + 播放/暂停状态徽标
+                  CoverProgressAvatar(
+                    coverUrl: state.coverUrl,
+                    progress: state.progress,
+                    playing: state.playing,
+                    background: bg,
+                    foreground: fg,
+                    accent: scheme.primary,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -168,13 +156,12 @@ class MiniPlayer extends StatelessWidget {
                   IconButton(
                     tooltip: state.playing ? '暂停' : '播放',
                     onPressed: () {
+                      // 播放/暂停均原地生效，不离开当前页；
+                      // 跳转播放页只能通过点播放条的其他区域触发
                       if (state.playing) {
-                        // 暂停：原地生效，不离开当前页
                         unawaited(player.pause());
                       } else {
-                        // 播放：非播放页点播放按钮 → 直达播放页
                         unawaited(player.play());
-                        AppRouter.router.push('/player');
                       }
                     },
                     icon: Icon(
@@ -207,11 +194,4 @@ class MiniPlayer extends StatelessWidget {
       ),
     );
   }
-
-  /// 无封面时的耳机占位：尺寸由外层 [ProgressRing] 的内容区决定。
-  Widget _placeholderCover(Color fg) => Container(
-    color: fg.withValues(alpha: 0.14),
-    alignment: Alignment.center,
-    child: Icon(Icons.headphones_rounded, size: 16, color: fg),
-  );
 }
