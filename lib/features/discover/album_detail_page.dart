@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -266,16 +268,18 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                     width: double.infinity,
                     height: 48,
                     child: FilledButton.icon(
-                      // 「播放全部」是播放按钮：清空当前播放列表、导入本专辑
-                      // 列表并从第一集开播（fromStart，不走断点续播），然后
-                      // 直达播放页；换专辑装载失败也不会残留旧音频/旧列表
+                      // 「播放全部」：立即进入播放页，装载/取址/开播与页面
+                      // 转场并行进行（playAlbum 入口同步置 loading，播放页
+                      // 第一帧即呈现装载态，不会闪过「未选择内容」空态）。
+                      // 播放逻辑与数据传递不变：仍是清空当前播放列表、导入
+                      // 本专辑列表并从第一集开播（fromStart，不走断点续播），
+                      // 失败由播放页展示错误态，与原先无论成败都 push 一致。
                       onPressed: _orderedChapters.isEmpty
                           ? null
-                          : () async {
-                              await player.playAlbum(album,
-                                  chapters: _orderedChapters, fromStart: true);
-                              if (!context.mounted) return;
+                          : () {
                               context.push('/player');
+                              unawaited(player.playAlbum(album,
+                                  chapters: _orderedChapters, fromStart: true));
                             },
                       icon: const Icon(Icons.play_arrow_rounded, size: 18),
                       label: const Text('播放全部'),

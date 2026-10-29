@@ -7,28 +7,36 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/theme/app_tokens.dart';
+import '../../core/api/subtitle_source.dart';
 import '../../core/domain/album.dart';
-import '../../core/domain/playback.dart';
 import '../../core/services/offline/offline_cache_service.dart';
 import '../../core/services/player/player_service.dart';
 import '../../core/services/shelf_controller.dart';
 
 /// 播放页（PRD §5.4）—— M2：真实播放控制。
 ///
-/// 布局（拇指区重构）：上区封面 + 标题（弹性高度，短屏自动压缩封面）；
-/// 页面下部拇指区自上而下为——功能图标带（收藏/定时/播放顺序/缓存/更多，
-/// 无背景图标-only，语义进 tooltip，非默认状态用主色 + 状态点提示）→
-/// 进度条 → 传输控件（倍速文字居左、章节目录居右，参考同类产品播放页）。
+/// 布局（拇指区重构）：上区「封面（默认）⇄ 文稿」二态切换（弹性高度，
+/// 短屏自动压缩封面）；页面下部拇指区自上而下为——功能图标带
+/// （收藏/定时/文稿/缓存/更多，无背景图标-only，语义进 tooltip，
+/// 非默认状态用主色 + 状态点提示）→ 进度条 → 传输控件
+/// （倍速文字居左、章节目录居右，参考同类产品播放页）。
 /// 状态一律来自 [PlayerService]（唯一事实源）。
-class PlayerPage extends StatelessWidget {
+/// 播放模式不再提供页内切换，由设置页「默认播放模式」决定。
+class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
+
+  @override
+  State<PlayerPage> createState() => _PlayerPageState();
+}
+
+class _PlayerPageState extends State<PlayerPage> {
+  /// 上区视图开关：false=封面，true=文稿
+  bool _showTranscript = false;
 
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
-    final scheme = Theme.of(context).colorScheme;
     final player = context.watch<PlayerService>();
-    final chapter = player.currentChapter;
     final album = player.album;
 
     return Scaffold(
@@ -70,7 +78,9 @@ class PlayerPage extends StatelessWidget {
       ),
       body: SafeArea(
         child: !player.hasSession
-            ? const _IdleView()
+            // 「播放全部」先跳转后装载：装载完成前会话尚未提交，
+            // 此时呈现装载态而非空闲态，避免页面跳转后闪过空态
+            ? (player.loading ? const _LoadingView() : const _IdleView())
             : Padding(
                 padding: EdgeInsets.symmetric(horizontal: tokens.spaceLg),
                 child: Column(
@@ -79,67 +89,23 @@ class PlayerPage extends StatelessWidget {
                     if (player.hasSleepTimer || player.stopAtChapterEnd)
                       _SleepCountdown(player: player),
 
-                    // ── 上区：封面 + 标题（弹性高度，短屏自动压缩） ──
+                    // ── 上区：封面（默认）⇄ 文稿（开关打开：顶端固定标题 +
+                    // 下方滚动文本；仅浏览、不联动进度） ──
                     Expanded(
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final raw = math.min(
-                            constraints.maxWidth * 0.58,
-                            constraints.maxHeight * 0.58,
-                          );
-                          final coverSize = raw.clamp(140.0, 230.0).toDouble();
-                          return SingleChildScrollView(
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                minHeight: constraints.maxHeight,
-                              ),
-                              child: Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    _Cover(
-                                      coverUrl: album?.coverUrl ?? '',
-                                      size: coverSize,
-                                    ),
-                                    SizedBox(height: tokens.spaceLg),
-                                    Text(
-                                      album?.title ?? '未选择内容',
-                                      style: tokens.titleStyle,
-                                      textAlign: TextAlign.center,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      chapter?.title ?? '准备播放',
-                                      style: tokens.captionStyle,
-                                      textAlign: TextAlign.center,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    if (player.error != null) ...[
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        player.error!,
-                                        style: tokens.captionStyle.copyWith(
-                                          color: scheme.error,
-                                        ),
-                                        textAlign: TextAlign.center,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
+                      child: _showTranscript
+                          ? _TranscriptView(player: player)
+                          : _CoverPane(player: player, album: album),
                     ),
 
                     // ── 拇指区：功能图标带 → 进度条 → 传输控件，整体贴近页面下部 ──
-                    _ControlBand(player: player, album: album),
+                    _ControlBand(
+                      player: player,
+                      album: album,
+                      showTranscript: _showTranscript,
+                      onToggleTranscript: () => setState(
+                        () => _showTranscript = !_showTranscript,
+                      ),
+                    ),
                     SizedBox(height: tokens.spaceMd),
 
                     // 进度条：位置更新走 positionTick（独立刷新，不整页重建）
@@ -177,7 +143,7 @@ class PlayerPage extends StatelessWidget {
                           icon: Icons.toc_rounded,
                           tooltip: '章节目录（${player.chapters.length}）',
                           onTap: () =>
-                              PlayerPage._showChapterSheet(context, player),
+                              _PlayerPageState._showChapterSheet(context, player),
                         ),
                       ],
                     ),
@@ -188,19 +154,6 @@ class PlayerPage extends StatelessWidget {
       ),
     );
   }
-
-  /// 顺序 / 列表循环 / 单曲循环三态图标各不相同，一眼可辨当前模式
-  static IconData _modeIcon(PlayMode m) => switch (m) {
-    PlayMode.sequential => Icons.playlist_play_rounded,
-    PlayMode.loopAll => Icons.repeat_rounded,
-    PlayMode.loopOne => Icons.repeat_one_rounded,
-  };
-
-  static PlayMode nextMode(PlayMode m) => switch (m) {
-    PlayMode.sequential => PlayMode.loopAll,
-    PlayMode.loopAll => PlayMode.loopOne,
-    PlayMode.loopOne => PlayMode.sequential,
-  };
 
   static String _sleepLabel(PlayerService p) {
     if (p.stopAtChapterEnd) return '本章结束';
@@ -562,6 +515,38 @@ class _IdleView extends StatelessWidget {
   }
 }
 
+/// 装载态：会话尚未提交（取址/打开引擎中）时替代空闲态，
+/// 消除「播放全部」先跳转后装载路径上的空态闪烁。
+class _LoadingView extends StatelessWidget {
+  const _LoadingView();
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 32,
+            height: 32,
+            child: CircularProgressIndicator(strokeWidth: 2.6),
+          ),
+          SizedBox(height: tokens.spaceMd),
+          Text(
+            '正在准备播放…',
+            style: tokens.bodyStyle.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 睡眠定时状态文案：「本章结束」/「剩余 m:ss」/「未开启」。
 String _sleepStatusText(PlayerService p) {
   if (p.stopAtChapterEnd) return '本章结束';
@@ -708,6 +693,218 @@ class _SleepOption extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 上区默认视图：封面 + 标题（弹性高度，短屏自动压缩封面）。
+class _CoverPane extends StatelessWidget {
+  const _CoverPane({required this.player, required this.album});
+
+  final PlayerService player;
+  final Album? album;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final chapter = player.currentChapter;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final raw = math.min(
+          constraints.maxWidth * 0.58,
+          constraints.maxHeight * 0.58,
+        );
+        final coverSize = raw.clamp(140.0, 230.0).toDouble();
+        return SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: constraints.maxHeight,
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _Cover(
+                    coverUrl: album?.coverUrl ?? '',
+                    size: coverSize,
+                  ),
+                  SizedBox(height: tokens.spaceLg),
+                  Text(
+                    album?.title ?? '未选择内容',
+                    style: tokens.titleStyle,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    chapter?.title ?? '准备播放',
+                    style: tokens.captionStyle,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (player.error != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      player.error!,
+                      style: tokens.captionStyle.copyWith(
+                        color: scheme.error,
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 上区文稿视图：顶端固定「专辑 + 章节」标题，下方整段滚动展示本章文稿。
+///
+/// 仅浏览（PRD 范围收口）：不跟随播放进度高亮、点击句子不 seek。
+/// 数据源 [SubtitleSource]（按 `bvid:cid` 内存缓存）；加载中转圈，
+/// 无字幕 / 拉取失败统一显示「本章暂无文稿」空态，不影响播放主链路。
+class _TranscriptView extends StatefulWidget {
+  const _TranscriptView({required this.player});
+
+  final PlayerService player;
+
+  @override
+  State<_TranscriptView> createState() => _TranscriptViewState();
+}
+
+class _TranscriptViewState extends State<_TranscriptView> {
+  /// null = 加载中；空列表 = 本章无文稿
+  List<SubtitleCue>? _cues;
+
+  /// 已完成加载的章节键（`bvid:cid`），用于切章重载与丢弃过期响应
+  String? _loadedKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _TranscriptView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 切章后重新拉取（同章命中内存缓存，直接返回）
+    if (_chapterKey != _loadedKey) _load();
+  }
+
+  String? get _chapterKey {
+    final c = widget.player.currentChapter;
+    if (c == null || c.bvid.isEmpty || c.cid <= 0) return null;
+    return '${c.bvid}:${c.cid}';
+  }
+
+  Future<void> _load() async {
+    final chapter = widget.player.currentChapter;
+    final key = _chapterKey;
+    _loadedKey = key;
+    if (chapter == null || key == null) {
+      setState(() => _cues = const []);
+      return;
+    }
+    setState(() => _cues = null);
+    try {
+      final cues = await context.read<SubtitleSource>().fetch(
+            bvid: chapter.bvid,
+            cid: chapter.cid,
+          );
+      // 已切章 / 页面已销毁：丢弃过期响应
+      if (!mounted || _chapterKey != key) return;
+      setState(() => _cues = cues);
+    } catch (_) {
+      if (!mounted || _chapterKey != key) return;
+      setState(() => _cues = const []);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final album = widget.player.album;
+    final chapter = widget.player.currentChapter;
+
+    return Column(
+      children: [
+        // ── 顶端固定标题（不随文稿滚动） ──
+        Padding(
+          padding: EdgeInsets.only(top: tokens.spaceXs, bottom: tokens.spaceSm),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                album?.title ?? '未选择内容',
+                style: tokens.titleStyle,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                chapter?.title ?? '准备播放',
+                style: tokens.captionStyle,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+        // ── 文稿正文（可滚动） ──
+        Expanded(child: _buildBody(tokens, Theme.of(context).colorScheme)),
+      ],
+    );
+  }
+
+  Widget _buildBody(AppTokens tokens, ColorScheme scheme) {
+    final cues = _cues;
+    if (cues == null) {
+      return const Center(
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(strokeWidth: 2.4),
+        ),
+      );
+    }
+    if (cues.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.menu_book_rounded,
+              size: 40,
+              color: scheme.onSurfaceVariant,
+            ),
+            SizedBox(height: tokens.spaceSm),
+            Text('本章暂无文稿', style: tokens.bodyStyle),
+            const SizedBox(height: 4),
+            Text('该章节没有可用的字幕内容', style: tokens.captionStyle),
+          ],
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: EdgeInsets.only(top: tokens.spaceXs, bottom: tokens.spaceLg),
+      itemCount: cues.length,
+      separatorBuilder: (_, _) => SizedBox(height: tokens.spaceSm),
+      itemBuilder: (context, i) => Text(
+        cues[i].content,
+        style: tokens.bodyStyle.copyWith(fontSize: 15, height: 1.7),
       ),
     );
   }
@@ -1066,20 +1263,28 @@ class _ProgressBar extends StatelessWidget {
   }
 }
 
-/// 功能图标带（进度条上方，拇指区上沿）：收藏 / 定时 / 播放顺序 /
+/// 功能图标带（进度条上方，拇指区上沿）：收藏 / 定时 / 文稿 /
 /// 缓存 / 更多 —— 无背景、仅保留图标，文字信息收进 tooltip（长按可见并供无障碍
 /// 朗读），「非默认值」以主色 + 6dp 状态点提示。倍速（文字）、章节分居
-/// 传输行两侧。
+/// 传输行两侧。播放顺序切换已移除（设置页「默认播放模式」收口）。
 class _ControlBand extends StatelessWidget {
-  const _ControlBand({required this.player, required this.album});
+  const _ControlBand({
+    required this.player,
+    required this.album,
+    required this.showTranscript,
+    required this.onToggleTranscript,
+  });
 
   final PlayerService player;
   final Album? album;
 
+  /// 文稿视图开关（true 时图标着主色）
+  final bool showTranscript;
+  final VoidCallback onToggleTranscript;
+
   @override
   Widget build(BuildContext context) {
     final sleepOn = player.hasSleepTimer || player.stopAtChapterEnd;
-    final modeOn = player.mode != PlayMode.sequential;
 
     return Row(
       children: [
@@ -1087,17 +1292,18 @@ class _ControlBand extends StatelessWidget {
         Expanded(
           child: _IconAction(
             icon: Icons.alarm_rounded,
-            tooltip: sleepOn ? '定时 ${PlayerPage._sleepLabel(player)}' : '定时关闭',
+            tooltip: sleepOn ? '定时 ${_PlayerPageState._sleepLabel(player)}' : '定时关闭',
             active: sleepOn,
-            onTap: () => PlayerPage._showSleepSheet(context, player),
+            onTap: () => _PlayerPageState._showSleepSheet(context, player),
           ),
         ),
         Expanded(
           child: _IconAction(
-            icon: PlayerPage._modeIcon(player.mode),
-            tooltip: '播放顺序：${player.mode.label}',
-            active: modeOn,
-            onTap: () => player.setMode(PlayerPage.nextMode(player.mode)),
+            icon: Icons.menu_book_rounded,
+            tooltip: showTranscript ? '文稿（点击收起）' : '文稿',
+            active: showTranscript,
+            showBadge: false,
+            onTap: onToggleTranscript,
           ),
         ),
         Expanded(child: _CacheAction(player: player)),
@@ -1123,7 +1329,7 @@ class _SpeedLabel extends StatelessWidget {
       message: '倍速 ${player.rateLabel}',
       child: InkWell(
         customBorder: const StadiumBorder(),
-        onTap: () => PlayerPage._showSpeedSheet(context, player),
+        onTap: () => _PlayerPageState._showSpeedSheet(context, player),
         child: SizedBox(
           width: 56,
           height: 48,
@@ -1160,7 +1366,7 @@ class _CacheAction extends StatelessWidget {
       tooltip: done ? '本章已缓存' : '缓存',
       active: done,
       showBadge: false, // ✓ 图标本身已表达完成态
-      onTap: () => PlayerPage._showCacheSheet(context, player, offline),
+      onTap: () => _PlayerPageState._showCacheSheet(context, player, offline),
     );
   }
 }

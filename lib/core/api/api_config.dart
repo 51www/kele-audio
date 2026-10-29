@@ -39,6 +39,9 @@ class BiliPaths {
   /// 取流（DASH，fnval=16）
   static const String playUrl = '/x/player/wbi/playurl';
 
+  /// 播放器信息（字幕列表：人工 + AI 字幕，WBI 签名；AI 字幕需登录态）
+  static const String playerInfo = '/x/player/wbi/v2';
+
   /// buvid 激活（gaia 风控闭环：ExClimbWuzhi）
   static const String activateBuvid =
       '/x/internal/gaia-gateway/ExClimbWuzhi';

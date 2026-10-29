@@ -7,6 +7,7 @@ import '../core/api/bili_client.dart';
 import '../core/api/content_config.dart';
 import '../core/api/discover_source.dart';
 import '../core/api/play_url_service.dart';
+import '../core/api/subtitle_source.dart';
 import '../core/data/daos.dart';
 import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
@@ -52,6 +53,7 @@ class KeleApp extends StatelessWidget {
         Provider<Daos>.value(value: services.daos),
         Provider<PlayUrlService>.value(value: services.playUrl),
         Provider<AlbumSource>.value(value: services.albums),
+        Provider<SubtitleSource>.value(value: services.subtitle),
         Provider<ContentConfig>.value(value: services.content),
         ChangeNotifierProvider<OfflineCacheService>.value(
           value: services.offline,

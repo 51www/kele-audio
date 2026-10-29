@@ -9,6 +9,7 @@ import '../core/api/discover_source.dart';
 import '../core/api/key_value_store.dart';
 import '../core/api/play_url_service.dart';
 import '../core/api/prefs_kv_store.dart';
+import '../core/api/subtitle_source.dart';
 import '../core/data/daos.dart';
 import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
@@ -39,6 +40,7 @@ class AppServices {
     required this.miniPlayer,
     required this.playUrl,
     required this.albums,
+    required this.subtitle,
     required this.discover,
     required this.discoverCache,
     required this.progress,
@@ -70,6 +72,9 @@ class AppServices {
 
   /// 章节来源（多 P / 合集系列）
   final AlbumSource albums;
+
+  /// 字幕（文稿）来源：内存缓存、失败回落空列表，不落库
+  final SubtitleSource subtitle;
 
   /// 发现页聚合源（合集/UP 优先 + 搜索补充 + 过滤去重）
   final DiscoverSource discover;
@@ -155,6 +160,7 @@ class AppServices {
     await shelf.ensure();
     final playUrl = PlayUrlService(client: client, config: config, log: _log);
     final albums = AlbumSource(client: client, config: config, log: _log);
+    final subtitle = SubtitleSource(client: client, config: config, log: _log);
     final discover = DiscoverSource(
       client: client,
       config: config,
@@ -236,6 +242,7 @@ class AppServices {
       miniPlayer: miniPlayer,
       playUrl: playUrl,
       albums: albums,
+      subtitle: subtitle,
       discover: discover,
       discoverCache: discoverCache,
       progress: progress,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -39,9 +41,10 @@ class _HistoryPageState extends State<HistoryPage> {
       return;
     }
     final player = context.read<PlayerService>();
-    await player.playAlbum(album); // 不指定章节 → P-04 定位最后听的章节
-    if (!mounted) return;
-    context.push('/player');
+    // 播放入口统一语义：只有详情页「播放全部」才跳播放页；这里就地
+    // 续播并显示播放条（点击播放条才进播放页），不随装载时序跳转
+    // （原先 await 装载后 push，会出现播放条先弹出再跳页的突兀过渡）。
+    unawaited(player.playAlbum(album)); // 不指定章节 → P-04 定位最后听的章节
   }
 
   Future<void> _deleteOne(HistoryEntryView entry) async {

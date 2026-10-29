@@ -267,6 +267,12 @@ class PlayerService extends ChangeNotifier
     bool autoPlay = true,
     bool fromStart = false,
   }) async {
+    // 同步置 loading：详情页「播放全部」先跳播放页再装载（转场与取址
+    // 并行），保证播放页第一帧就是装载态而非「未选择内容」空态；
+    // loading 由 _openChapter 的 finally 统一收口。
+    _loading = true;
+    notifyListeners();
+
     var list = chapters;
     if (list == null || list.isEmpty) {
       if (daos.albums.get(album.id) != null) {
@@ -276,6 +282,7 @@ class PlayerService extends ChangeNotifier
       list ??= await _loadChapters(album);
     }
     if (list.isEmpty) {
+      _loading = false;
       _error = '这张专辑没有可播放的章节';
       notifyListeners();
       return false;
@@ -333,7 +340,9 @@ class PlayerService extends ChangeNotifier
     _session++;
     _recovering = false;
     _recoverFloor = null;
-    _loading = false;
+    // 不复位 _loading：playAlbum 入口已置装载态，清队列（含 await 引擎
+    // stop 的异步间隙）到 _openChapter 之间不能让播放页闪回空态；
+    // loading 统一由 _openChapter 的 finally 收口。
     _buffering = false;
     _mediaReady = false;
     _playing = false;
