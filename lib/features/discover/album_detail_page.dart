@@ -266,12 +266,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                     width: double.infinity,
                     height: 48,
                     child: FilledButton.icon(
-                      // 「播放全部」是播放按钮：播放并直达播放页
+                      // 「播放全部」是播放按钮：清空当前播放列表、导入本专辑
+                      // 列表并从第一集开播（fromStart，不走断点续播），然后
+                      // 直达播放页；换专辑装载失败也不会残留旧音频/旧列表
                       onPressed: _orderedChapters.isEmpty
                           ? null
                           : () async {
                               await player.playAlbum(album,
-                                  chapters: _orderedChapters);
+                                  chapters: _orderedChapters, fromStart: true);
                               if (!context.mounted) return;
                               context.push('/player');
                             },

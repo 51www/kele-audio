@@ -249,15 +249,23 @@ class PlayerService extends ChangeNotifier
 
   // ================================================================ 播放入口
 
-  /// 开始播放一张专辑（详情页「播放全部」/ 卡片点击）。
+  /// 开始播放一张专辑（详情页「播放全部」/ 卡片点击 / 书架·历史续播）。
   ///
-  /// 不指定章节时按 **P-04** 定位到「最后听的章节 + 秒级进度」。
+  /// 换专辑（或 [fromStart] 重开）时这是一次**全新播放任务**：先
+  /// [_clearSession] 落盘旧进度并清空当前播放列表/音频/错误，再导入
+  /// 新专辑的章节列表——保证播放状态、播放列表与当前播放项同步更新，
+  /// 新任务装载失败时也不残留旧音频或旧列表数据。
+  ///
+  /// 不指定章节且未传 [fromStart] 时按 **P-04** 定位到「最后听的章节 +
+  /// 秒级进度」（书架/历史的续播语义）；[fromStart] 为「播放全部」语义：
+  /// 忽略断点，从该专辑第一集开始播放。
   Future<bool> playAlbum(
     Album album, {
     List<Chapter>? chapters,
     int? startIndex,
     Duration startAt = Duration.zero,
     bool autoPlay = true,
+    bool fromStart = false,
   }) async {
     var list = chapters;
     if (list == null || list.isEmpty) {
@@ -273,10 +281,20 @@ class PlayerService extends ChangeNotifier
       return false;
     }
 
+    // 换专辑 / 「播放全部」＝新播放任务：先清空当前会话再装载，
+    // 否则新任务取址失败时旧音频会继续播、旧列表残留在内存里。
+    if (fromStart || _album?.id != album.id) {
+      await _clearSession();
+    }
+
     int index;
     Duration pos;
     if (startIndex != null) {
       index = startIndex.clamp(0, list.length - 1);
+      pos = startAt;
+    } else if (fromStart) {
+      // 「播放全部」：清空旧列表、导入新列表并从第一集开播
+      index = 0;
       pos = startAt;
     } else {
       final last = store.lastOfAlbum(album.id);
@@ -297,6 +315,46 @@ class PlayerService extends ChangeNotifier
       album: album,
       chapters: list,
     );
+  }
+
+  /// 清空当前播放任务（换专辑 / 「播放全部」的新任务装载前调用）：
+  ///
+  /// 1. 旧进度先落盘（P-03，含收听时长提交，必须趁 [_album] 还在时做）；
+  /// 2. `_session++` 作废在途的装载/自愈（其回调都有会话校验，安全失效）；
+  /// 3. 停掉引擎里还在响的旧音频；
+  /// 4. 清空内存中的专辑/章节队列与播放态，并同步刷新播放条与系统媒体卡。
+  ///
+  /// 之后无论新任务成功与否，播放器都不会残留旧音频或旧列表：
+  /// 失败时是「干净的无会话 + 错误提示」，用户重试即可。
+  Future<void> _clearSession() async {
+    if (hasSession) {
+      await _saveNow();
+    }
+    _session++;
+    _recovering = false;
+    _recoverFloor = null;
+    _loading = false;
+    _buffering = false;
+    _mediaReady = false;
+    _playing = false;
+    _album = null;
+    _chapters = const [];
+    _index = -1;
+    _position = Duration.zero;
+    _duration = Duration.zero;
+    _lastKnown = Duration.zero;
+    _tallyPos = Duration.zero;
+    positionTick.value = Duration.zero;
+    _error = null;
+    if (_engine != null) {
+      try {
+        await _engine!.stop();
+      } catch (e) {
+        _log('[clear] 停止旧音频失败：$e');
+      }
+    }
+    _pushBridge(force: true);
+    notifyListeners();
   }
 
   Future<List<Chapter>> _loadChapters(Album album) async {

@@ -301,6 +301,31 @@ List<Chapter> makeChapters() => [
         ),
     ];
 
+Album makeAlbumB() => Album(
+      id: 'BV1OTHER',
+      sourceType: SourceType.multiPart,
+      title: '另一张专辑',
+      coverUrl: '',
+      upName: '另一位UP',
+      chapterCount: 2,
+      categoryId: 'rec',
+      bvid: 'BV1OTHER',
+      createdAt: 2,
+    );
+
+List<Chapter> makeChaptersB() => [
+      for (var i = 1; i <= 2; i++)
+        Chapter(
+          id: Chapter.keyOf('BV1OTHER', 200 + i),
+          albumId: 'BV1OTHER',
+          index: i - 1,
+          title: 'B第$i章',
+          durationSec: 80,
+          bvid: 'BV1OTHER',
+          cid: 200 + i,
+        ),
+    ];
+
 Harness makeHarness() => Harness(MemoryKeyValueStore());
 
 /// 注入假音频焦点的环境（P-07 焦点/拔耳机用例）
@@ -418,6 +443,72 @@ void main() {
     h.engine.positionC.add(const Duration(seconds: 42));
     await settle();
     expect(p.progress, greaterThan(0), reason: '时长恢复后进度条应可拖动');
+
+    await h.dispose();
+  });
+
+  test('换专辑「播放全部」：清空旧队列、从第一集开播且状态同步', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+    final chaptersB = makeChaptersB();
+
+    // 先在专辑 A 播第 2 章
+    await p.playAlbum(makeAlbum(), chapters: chapters, startIndex: 1);
+    await settle();
+    expect(p.album?.id, 'BV1TEST');
+
+    // 切到专辑 B 点「播放全部」：清空旧列表、导入 B 的列表、从第 1 集开播
+    h.playUrl.urls = ['https://cdn.example/b-ep1.m4s'];
+    final ok = await p.playAlbum(makeAlbumB(),
+        chapters: chaptersB, fromStart: true);
+    await settle();
+
+    expect(ok, isTrue);
+    expect(p.album?.id, 'BV1OTHER', reason: '当前播放项应切换到新专辑');
+    expect(p.index, 0, reason: '播放全部应从第一集开始，不走断点续播');
+    expect(p.currentChapter?.id, chaptersB.first.id);
+    expect(p.chapters.every((c) => c.albumId == 'BV1OTHER'), isTrue,
+        reason: '播放列表应整表替换，不残留专辑 A 的章节');
+    expect(p.chapters, hasLength(chaptersB.length));
+    expect(h.engine.opens.last.url, contains('b-ep1'));
+    expect(h.engine.opens.last.startAt, Duration.zero);
+    expect(p.playing, isTrue, reason: '播放全部应自动开播');
+    expect(h.mini.state.hasTask, isTrue);
+    expect(h.mini.state.albumTitle, '另一张专辑');
+
+    await h.dispose();
+  });
+
+  test('换专辑装载失败：不残留旧音频与旧列表（干净会话 + 错误提示）', () async {
+    final h = makeHarness();
+    final p = await h.start();
+    final chapters = makeChapters();
+    final chaptersB = makeChaptersB();
+
+    // 专辑 A 播放中，切专辑 B 但取址失败（所有候选不可用）
+    await p.playAlbum(makeAlbum(), chapters: chapters, startIndex: 0);
+    await settle();
+    h.playUrl.urls = const [];
+    final ok = await p.playAlbum(makeAlbumB(),
+        chapters: chaptersB, fromStart: true);
+    await settle();
+
+    expect(ok, isFalse);
+    expect(p.error, isNotNull);
+    expect(p.hasSession, isFalse, reason: '失败后不得残留旧专辑会话');
+    expect(p.album, isNull);
+    expect(p.chapters, isEmpty, reason: '失败后不得残留旧播放列表');
+    expect(p.playing, isFalse);
+    expect(h.mini.state.hasTask, isFalse, reason: '播放条应回到空闲态');
+
+    // 旧专辑 A 的进度已在清空前落盘，之后仍可续播
+    h.playUrl.urls = ['https://cdn.example/ok-a.m4s'];
+    final restored = await h.restart();
+    final okA = await restored.playAlbum(makeAlbum());
+    await settle();
+    expect(okA, isTrue);
+    expect(restored.currentChapter?.id, chapters.first.id);
 
     await h.dispose();
   });
