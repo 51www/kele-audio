@@ -4,14 +4,19 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
+import androidx.core.content.FileProvider
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 /// 主 Activity。
 ///
@@ -102,6 +107,72 @@ class MainActivity : AudioServiceActivity() {
                 focusCallback = null
             }
         })
+
+        // 检查更新：APK 安装链路（提示词 2「Android 安装链路」）
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.kele.audio/update",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "canRequestInstall" -> result.success(canRequestInstall())
+                "openInstallPermission" -> {
+                    openInstallPermission()
+                    result.success(null)
+                }
+                "installApk" -> {
+                    val path = call.argument<String>("path")
+                    if (path == null) {
+                        result.error("INVALID_ARG", "missing path", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        installApk(path)
+                        result.success(null)
+                    } catch (e: Exception) {
+                        result.error("INSTALL_FAILED", e.message ?: "", null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun canRequestInstall(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            packageManager.canRequestPackageInstalls()
+        } else {
+            true
+        }
+    }
+
+    private fun openInstallPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName"),
+                )
+                startActivity(intent)
+            } catch (e: Exception) {
+                // 个别 ROM 无此页，忽略
+            }
+        }
+    }
+
+    private fun installApk(path: String) {
+        val file = File(path)
+        if (!file.exists()) throw Exception("apk not found: $path")
+        val uri = FileProvider.getUriForFile(
+            this,
+            "$packageName.fileprovider",
+            file,
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
     }
 
     override fun onDestroy() {

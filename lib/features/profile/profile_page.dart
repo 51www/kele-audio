@@ -14,7 +14,8 @@ import '../../core/services/listen_stats.dart';
 import '../../core/services/player/player_service.dart';
 
 /// 与 pubspec.yaml 的 version 保持一致（M5 设置页/关于页共用）。
-const String appVersion = '1.0.0';
+/// 注意：关于页显示优先用 PackageInfo 真实版本，此常量仅作兜底。
+const String appVersion = '1.2.0';
 
 /// Tab 3 我的（PRD §5.6）。
 ///
