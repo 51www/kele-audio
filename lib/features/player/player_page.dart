@@ -12,6 +12,7 @@ import '../../core/domain/album.dart';
 import '../../core/services/offline/offline_cache_service.dart';
 import '../../core/services/player/player_service.dart';
 import '../../core/services/shelf_controller.dart';
+import 'transcript_body.dart';
 
 /// 播放页（PRD §5.4）—— M2：真实播放控制。
 ///
@@ -90,7 +91,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       _SleepCountdown(player: player),
 
                     // ── 上区：封面（默认）⇄ 文稿（开关打开：顶端固定标题 +
-                    // 下方滚动文本；仅浏览、不联动进度） ──
+                    // 下方滚动文本；跟随播放进度高亮，点击句子不 seek） ──
                     Expanded(
                       child: _showTranscript
                           ? _TranscriptView(player: player)
@@ -770,7 +771,9 @@ class _CoverPane extends StatelessWidget {
 
 /// 上区文稿视图：顶端固定「专辑 + 章节」标题，下方整段滚动展示本章文稿。
 ///
-/// 仅浏览（PRD 范围收口）：不跟随播放进度高亮、点击句子不 seek。
+/// **跟随播放进度高亮**：当前句高亮 + 自动滚动跟随，逻辑见
+/// [TranscriptBody]（`transcript_body.dart`）；仍保持仅浏览的 PRD 收口：
+/// 点击句子不 seek。
 /// 数据源 [SubtitleSource]（按 `bvid:cid` 内存缓存）；加载中转圈，
 /// 无字幕 / 拉取失败统一显示「本章暂无文稿」空态，不影响播放主链路。
 class _TranscriptView extends StatefulWidget {
@@ -898,14 +901,12 @@ class _TranscriptViewState extends State<_TranscriptView> {
         ),
       );
     }
-    return ListView.separated(
-      padding: EdgeInsets.only(top: tokens.spaceXs, bottom: tokens.spaceLg),
-      itemCount: cues.length,
-      separatorBuilder: (_, _) => SizedBox(height: tokens.spaceSm),
-      itemBuilder: (context, i) => Text(
-        cues[i].content,
-        style: tokens.bodyStyle.copyWith(fontSize: 15, height: 1.7),
-      ),
+    // 跟随播放进度高亮 + 自动滚动（key 含章节：切章时走全新 State，
+    // 高亮/滚动/测高缓存一并重建）
+    return TranscriptBody(
+      key: ValueKey(_loadedKey),
+      cues: cues,
+      positionTick: widget.player.positionTick,
     );
   }
 }
