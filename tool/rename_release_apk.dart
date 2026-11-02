@@ -8,10 +8,10 @@
 //   flutter build appbundle --release && dart run tool/rename_release_apk.dart
 //
 // 重命名规则：
-//   app-arm64-v8a-release.apk   -> kele-music-<version>-android-arm64-v8a.apk
-//   app-armeabi-v7a-release.apk -> kele-music-<version>-android-armeabi-v7a.apk
-//   app-x86_64-release.apk      -> kele-music-<version>-android-x86_64.apk
-//   app-release.aab             -> kele-music-<version>-android.aab
+//   app-arm64-v8a-release.apk   -> kele-audio-<version>-android-arm64-v8a.apk
+//   app-armeabi-v7a-release.apk -> kele-audio-<version>-android-armeabi-v7a.apk
+//   app-x86_64-release.apk      -> kele-audio-<version>-android-x86_64.apk
+//   app-release.aab             -> kele-audio-<version>-android.aab
 
 import 'dart:io';
 
@@ -69,7 +69,7 @@ void main(List<String> args) {
       if (!name.startsWith('app-') || !name.endsWith('.apk')) continue;
       final base = name.substring(0, name.length - 4); // 去掉 .apk
       final abi = _abiOf(base);
-      final newName = 'kele-music-$version-android-$abi.apk';
+      final newName = 'kele-audio-$version-android-$abi.apk';
       _rename(ent, _joinAll(apkDir.path, [newName]));
       renamed++;
     }
@@ -79,7 +79,7 @@ void main(List<String> args) {
     for (final ent in aabDir.listSync().whereType<File>()) {
       final name = _baseName(ent.path);
       if (!name.startsWith('app-') || !name.endsWith('.aab')) continue;
-      final newName = 'kele-music-$version-android.aab';
+      final newName = 'kele-audio-$version-android.aab';
       _rename(ent, _joinAll(aabDir.path, [newName]));
       renamed++;
     }
