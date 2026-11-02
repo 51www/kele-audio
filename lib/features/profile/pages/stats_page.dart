@@ -141,10 +141,7 @@ class _StatsPageState extends State<StatsPage> {
                             ],
                           ),
                           const SizedBox(height: 2),
-                          Text(
-                            '近 ${_monthly ? 30 : 7} 天 · 日均 $avgMin 分钟',
-                            style: tokens.captionStyle,
-                          ),
+                          Text('日均 $avgMin 分钟', style: tokens.captionStyle),
                         ],
                       ),
                     ),
@@ -292,7 +289,7 @@ class _TrendChart extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Y 轴：顶格最大值 + 0 刻度（单位见下方图注「分钟」）
+              // Y 轴：最大值 / 中间值 / 0 刻度（单位见下方图注「分钟」）
               SizedBox(
                 width: _yAxisWidth,
                 child: Column(
@@ -300,27 +297,66 @@ class _TrendChart extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text('$maxMin', style: tokens.captionStyle),
+                    Text('${maxMin ~/ 2}', style: tokens.captionStyle),
                     Text('0', style: tokens.captionStyle),
                   ],
                 ),
               ),
               const SizedBox(width: 4),
               Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                child: Stack(
                   children: [
-                    for (final e in trend)
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 1.5),
-                          child: _TrendBar(
-                            sec: e.sec,
-                            maxSec: maxSec,
-                            showValue: !monthly,
-                            tokens: tokens,
-                          ),
-                        ),
+                    // 横向网格线（画在柱后；对齐 Y 轴三条刻度：最大/中间/0）
+                    Positioned.fill(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          for (var i = 0; i < 3; i++)
+                            Container(
+                              height: 1,
+                              color: tokens.hairlineColor
+                                  .withValues(alpha: 0.4),
+                            ),
+                        ],
                       ),
+                    ),
+                    // 纵向网格线（画在柱后；位于 X 轴有刻度的柱位）
+                    Positioned.fill(
+                      child: Row(
+                        children: [
+                          for (final (i, _) in trend.indexed)
+                            Expanded(
+                              child: (!monthly || i % 5 == 0)
+                                  ? Center(
+                                      child: Container(
+                                        width: 1,
+                                        color: tokens.hairlineColor
+                                            .withValues(alpha: 0.55),
+                                      ),
+                                    )
+                                  : const SizedBox.shrink(),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        for (final e in trend)
+                          Expanded(
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 1.5),
+                              child: _TrendBar(
+                                sec: e.sec,
+                                maxSec: maxSec,
+                                showValue: !monthly,
+                                tokens: tokens,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -328,22 +364,36 @@ class _TrendChart extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        // X 轴刻度（与柱对齐；左缩进对齐 Y 轴宽度）
+        // X 轴刻度：按柱位比例定位（标签宽度不受单柱格子约束，避免被裁剪）
         Padding(
           padding: const EdgeInsets.only(left: _yAxisWidth + 4),
-          child: Row(
-            children: [
-              for (final (i, e) in trend.indexed)
-                Expanded(
-                  child: Text(
-                    _xLabel(e.date, i),
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.clip,
-                    style: tokens.captionStyle.copyWith(fontSize: 9),
-                  ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final n = trend.length;
+              return SizedBox(
+                height: 14,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    for (final (i, e) in trend.indexed)
+                      if (_xLabel(e.date, i).isNotEmpty)
+                        Positioned(
+                          left: (i + 0.5) / n * constraints.maxWidth,
+                          child: FractionalTranslation(
+                            translation: i == 0
+                                ? const Offset(-0.2, 0)
+                                : const Offset(-0.5, 0),
+                            child: Text(
+                              _xLabel(e.date, i),
+                              maxLines: 1,
+                              style: tokens.captionStyle.copyWith(fontSize: 9),
+                            ),
+                          ),
+                        ),
+                  ],
                 ),
-            ],
+              );
+            },
           ),
         ),
       ],
