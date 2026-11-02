@@ -148,6 +148,28 @@ flutter build apk --release
 
 3. 浏览器访问 **http://localhost:8088**。
 
+## 本地单平台打包（需对应平台工具链）：
+```bash
+# Android：分 ABI 打包（推荐，单个包更小）；CI 已不再产出 universal 胖包
+flutter build apk --release --split-per-abi
+# 按 pubspec 版本号重命名产物（跨平台通用：Windows / macOS / Linux，需装 Flutter）
+# 执行后：app-arm64-v8a-release.apk -> kele-music-<版本>-android-arm64-v8a.apk
+dart run tool/rename_release_apk.dart
+
+# Android AAB（上架 Play；--split-debug-info 分离符号便于崩溃上报）
+flutter build appbundle --release --split-debug-info=build/symbols
+dart run tool/rename_release_apk.dart
+# 执行后：app-release.aab -> kele-music-<版本>-android.aab
+
+# 如需本地装机的 universal 包（含全部 ABI，体积较大）：
+flutter build apk --release
+flutter build windows --release        # Windows（需 VS C++ 桌面开发）
+flutter build macos --release          # macOS（需在 Mac 上）
+flutter build linux --release          # Linux（需 GTK3 dev）
+flutter build ios --release --no-codesign   # iOS（需在 Mac 上）
+# Web 必须带 canvaskit 自托管参数，否则会去访问被墙的 gstatic
+flutter build web --release --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
+```
 **常见问题：**
 
 | 现象 | 原因 | 解决 |

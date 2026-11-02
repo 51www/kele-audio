@@ -1,3 +1,13 @@
+import java.util.Properties
+import java.io.FileInputStream
+
+// Load signing credentials from android/app/key.properties (git-ignored)
+val keystoreProperties = Properties()
+val keystorePropertiesFile = file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -27,11 +37,27 @@ android {
         versionName = flutter.versionName
     }
 
+    // 正式签名：从 key.properties 读取密钥材料（文件已被 gitignore，不入仓库）。
+    signingConfigs {
+        create("release") {
+            storeFile = file(checkNotNull(keystoreProperties["storeFile"]) {
+                "android/app/key.properties 缺少 storeFile，无法使用正式签名打包 release"
+            } as String)
+            storePassword = checkNotNull(keystoreProperties["storePassword"]) {
+                "android/app/key.properties 缺少 storePassword"
+            } as String
+            keyAlias = checkNotNull(keystoreProperties["keyAlias"]) {
+                "android/app/key.properties 缺少 keyAlias"
+            } as String
+            keyPassword = checkNotNull(keystoreProperties["keyPassword"]) {
+                "android/app/key.properties 缺少 keyPassword"
+            } as String
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

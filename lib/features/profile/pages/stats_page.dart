@@ -12,8 +12,16 @@ import '../../../core/services/player/player_service.dart';
 /// 听书统计页（M8 / PRD §5.6.1）。
 ///
 /// 全部数据来自本地 `play_log` / `album` / `play_history`，不上传任何服务器。
-class StatsPage extends StatelessWidget {
+class StatsPage extends StatefulWidget {
   const StatsPage({super.key});
+
+  @override
+  State<StatsPage> createState() => _StatsPageState();
+}
+
+class _StatsPageState extends State<StatsPage> {
+  /// 趋势图区间：false = 周统计（近 7 天），true = 月统计（近 30 天）。
+  bool _monthly = false;
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +35,7 @@ class StatsPage extends StatelessWidget {
     final entries = daos.playLogs.all();
     final stats = ListenStats.fromEntries(entries);
     final monthSec = StatsAgg.monthSec(entries);
-    final trend = StatsAgg.dailyTrend(entries, days: 14);
+    final trend = StatsAgg.dailyTrend(entries, days: _monthly ? 30 : 7);
     final topCategories = StatsAgg.topCategories(
       entries,
       nameOf: (id) => services.content.byId(id)?.name ??
@@ -38,6 +46,9 @@ class StatsPage extends StatelessWidget {
       entries,
       nameOf: (id) => daos.albums.get(id)?.title ?? '未知专辑',
     );
+    final trendTotalSec = trend.fold<int>(0, (s, e) => s + e.sec);
+    final totalMin = (trendTotalSec / 60).round();
+    final avgMin = (trendTotalSec / 60 / trend.length).round();
     final finished = StatsAgg.finishedAlbumCount(
       albumIds: daos.albums.all().map((a) => a.id),
       finishedChaptersOf: daos.playHistory.finishedCount,
@@ -103,18 +114,56 @@ class StatsPage extends StatelessWidget {
             ),
           ),
 
-          // ── 近 14 天趋势 ─────────────────────────────────────────
-          const SectionTitle('近 14 天'),
+          // ── 收听趋势（周 / 月切换 + 渐变柱状图）─────────────────
+          const SectionTitle('收听趋势'),
           KeleCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _TrendBars(trend: trend, tokens: tokens, scheme: scheme),
-                SizedBox(height: tokens.spaceSm),
-                Text(
-                  '每天收听时长（分钟）',
-                  style: tokens.captionStyle,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Text(
+                                '$totalMin',
+                                style: tokens.titleStyle
+                                    .copyWith(fontSize: 24),
+                              ),
+                              const SizedBox(width: 4),
+                              Text('分钟', style: tokens.captionStyle),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '近 ${_monthly ? 30 : 7} 天 · 日均 $avgMin 分钟',
+                            style: tokens.captionStyle,
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(width: tokens.spaceSm),
+                    _RangeToggle(
+                      monthly: _monthly,
+                      onChanged: (v) => setState(() => _monthly = v),
+                      tokens: tokens,
+                    ),
+                  ],
                 ),
+                SizedBox(height: tokens.spaceMd),
+                _TrendChart(
+                  trend: trend,
+                  monthly: _monthly,
+                  tokens: tokens,
+                ),
+                SizedBox(height: tokens.spaceSm),
+                Text('每天收听时长（分钟）', style: tokens.captionStyle),
               ],
             ),
           ),
@@ -211,50 +260,195 @@ class StatsPage extends StatelessWidget {
   }
 }
 
-/// 近 14 天柱状趋势（纯 Container，不引图表库）。
-class _TrendBars extends StatelessWidget {
-  const _TrendBars({
+/// 收听趋势柱状图（纯 Container + 主题渐变，不引图表库）。
+///
+/// 左侧 Y 轴刻度（单位：分钟），底部 X 轴刻度：
+/// 周统计标「周一~周日」，月统计每 5 天标一个「M/d」。
+class _TrendChart extends StatelessWidget {
+  const _TrendChart({
     required this.trend,
+    required this.monthly,
     required this.tokens,
-    required this.scheme,
   });
 
   final List<({String date, int sec})> trend;
+  final bool monthly;
   final AppTokens tokens;
-  final ColorScheme scheme;
+
+  static const _weekLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  static const _yAxisWidth = 34.0;
+  static const _chartHeight = 132.0;
 
   @override
   Widget build(BuildContext context) {
     final maxSec = trend.fold<int>(1, (m, e) => e.sec > m ? e.sec : m);
-    return SizedBox(
-      height: 96,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          for (final e in trend)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 1.5),
+    final maxMin = (maxSec / 60).ceil();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: _chartHeight,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Y 轴：顶格最大值 + 0 刻度（单位见下方图注「分钟」）
+              SizedBox(
+                width: _yAxisWidth,
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Container(
-                      height: e.sec <= 0
-                          ? 2
-                          : 6 + 84 * e.sec / maxSec,
-                      decoration: BoxDecoration(
-                        color: e.sec <= 0
-                            ? tokens.hairlineColor
-                            : scheme.primary.withValues(alpha: 0.65),
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
+                    Text('$maxMin', style: tokens.captionStyle),
+                    Text('0', style: tokens.captionStyle),
                   ],
                 ),
               ),
-            ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    for (final e in trend)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                          child: _TrendBar(
+                            sec: e.sec,
+                            maxSec: maxSec,
+                            showValue: !monthly,
+                            tokens: tokens,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        // X 轴刻度（与柱对齐；左缩进对齐 Y 轴宽度）
+        Padding(
+          padding: const EdgeInsets.only(left: _yAxisWidth + 4),
+          child: Row(
+            children: [
+              for (final (i, e) in trend.indexed)
+                Expanded(
+                  child: Text(
+                    _xLabel(e.date, i),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.clip,
+                    style: tokens.captionStyle.copyWith(fontSize: 9),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _xLabel(String date, int index) {
+    final d = DateTime.tryParse(date);
+    if (d == null) return '';
+    if (!monthly) return _weekLabels[d.weekday - 1];
+    return index % 5 == 0 ? '${d.month}/${d.day}' : '';
+  }
+}
+
+/// 单根趋势柱：数据天为品牌点缀渐变（底部深 → 顶部浅），空数据画发丝线。
+class _TrendBar extends StatelessWidget {
+  const _TrendBar({
+    required this.sec,
+    required this.maxSec,
+    required this.showValue,
+    required this.tokens,
+  });
+
+  final int sec;
+  final int maxSec;
+  final bool showValue;
+  final AppTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = (tokens.accentGradient as LinearGradient).colors;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        if (showValue && sec > 0) ...[
+          Text(
+            '${(sec / 60).round()}',
+            style: tokens.captionStyle.copyWith(fontSize: 9),
+          ),
+          const SizedBox(height: 2),
         ],
-      ),
+        Container(
+          height: sec <= 0 ? 2 : 6 + 110 * sec / maxSec,
+          decoration: BoxDecoration(
+            color: sec <= 0 ? tokens.hairlineColor : null,
+            gradient: sec <= 0
+                ? null
+                : LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: colors,
+                  ),
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 周统计 / 月统计切换（胶囊按钮，选中用 primary 实底）。
+class _RangeToggle extends StatelessWidget {
+  const _RangeToggle({
+    required this.monthly,
+    required this.onChanged,
+    required this.tokens,
+  });
+
+  final bool monthly;
+  final ValueChanged<bool> onChanged;
+  final AppTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    Widget chip(String label, bool selected, VoidCallback onTap) => InkWell(
+          borderRadius: BorderRadius.circular(tokens.radiusPill),
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: selected ? scheme.primary : Colors.transparent,
+              borderRadius: BorderRadius.circular(tokens.radiusPill),
+              border: Border.all(
+                color: selected ? Colors.transparent : tokens.hairlineColor,
+              ),
+            ),
+            child: Text(
+              label,
+              style: tokens.captionStyle.copyWith(
+                fontWeight: FontWeight.w600,
+                color: selected ? scheme.onPrimary : tokens.onHairline,
+              ),
+            ),
+          ),
+        );
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        chip('周统计', !monthly, () => onChanged(false)),
+        const SizedBox(width: 6),
+        chip('月统计', monthly, () => onChanged(true)),
+      ],
     );
   }
 }
