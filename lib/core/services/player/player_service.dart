@@ -707,7 +707,7 @@ class PlayerService extends ChangeNotifier
     notifyListeners();
   }
 
-  /// WebDAV 同步恢复后重读持久化参数（只更新默认值，不打断当前播放）。
+  /// 本地备份还原后重读持久化参数（只更新默认值，不打断当前播放）。
   void reloadPrefs() {
     _rate = prefs.rate;
     _mode = prefs.mode;

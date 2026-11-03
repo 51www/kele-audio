@@ -65,6 +65,6 @@ class SettingsStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 外部写入 KV 后（如 WebDAV 同步恢复）通知设置页刷新。
+  /// 外部写入 KV 后（如本地备份还原）通知设置页刷新。
   void notifyChanged() => notifyListeners();
 }

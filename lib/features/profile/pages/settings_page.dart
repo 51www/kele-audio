@@ -8,9 +8,11 @@ import '../../../app/theme/theme_controller.dart';
 import '../../../app/widgets/common.dart';
 import '../../../app/widgets/theme_preset_picker.dart';
 import '../../../core/domain/playback.dart';
+import '../../../core/services/backup/backup_delivery.dart';
+import '../../../core/services/backup/backup_pick.dart';
+import '../../../core/services/backup/backup_service.dart';
 import '../../../core/services/bili_account_service.dart';
 import '../../../core/services/image_cache_cleaner.dart';
-import '../../../core/services/webdav_sync_service.dart';
 import '../../../core/services/player/player_service.dart';
 import '../../../core/services/settings_store.dart';
 
@@ -24,8 +26,9 @@ import '../../../core/services/settings_store.dart';
 /// - 仅 Wi-Fi 下载：开关先占位持久化（下载能力 M8 实现）；
 /// - 清除图片缓存：内存 + 磁盘（Web 端仅内存）；
 /// - 高级设置：发现页「编辑精选」行显隐 + 分类显隐（「推荐」固定显示）；
-/// - 账号绑定：B 站扫码登录（绑定/解绑 + 资料展示，绑定后解锁高音质音源）、
-///   WebDAV 云同步（手动备份/同步设置、收藏、历史与进度、统计，整体覆盖）。
+/// - 账号绑定：B 站扫码登录（绑定/解绑 + 资料展示，绑定后解锁高音质音源）；
+/// - 数据备份：本机数据打包导出（可选密码加密）/ 从备份文件还原，
+///   用于换机、重装后的数据迁移（云端数据不参与迁移）。
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
@@ -36,7 +39,7 @@ class SettingsPage extends StatelessWidget {
     final player = context.watch<PlayerService>();
     final settings = context.watch<SettingsStore>();
     final account = context.watch<BiliAccountService>();
-    final webdav = context.watch<WebdavSyncService>();
+    final backup = context.watch<BackupService>();
 
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
@@ -202,7 +205,7 @@ class SettingsPage extends StatelessWidget {
             title: '账号绑定',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [  
+              children: [
                 _BindingRow(
                   icon: Icons.smart_display_outlined,
                   title: 'B 站账号',
@@ -213,16 +216,301 @@ class SettingsPage extends StatelessWidget {
                   bound: account.bound,
                   onTap: () => context.push('/profile/bili-account'),
                 ),
-                _BindingRow(
-                  icon: Icons.cloud_sync_outlined,
-                  title: 'WebDAV',
-                  subtitle: '备份/同步设置、收藏、历史与统计',
-                  status: webdav.bound ? '已绑定' : '未绑定',
-                  bound: webdav.bound,
-                  onTap: () => context.push('/profile/webdav'),
-                ),
               ],
             ),
+          ),
+          SizedBox(height: tokens.spaceMd),
+          _SectionCard(
+            icon: Icons.backup_outlined,
+            title: '数据备份',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '把设置、书架、历史与进度、统计打包成备份文件，'
+                  '用于换机 / 重装后的数据迁移；云端数据不参与迁移。',
+                  style: tokens.captionStyle,
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton.tonalIcon(
+                      onPressed:
+                          backup.busy ? null : () => _exportBackup(context),
+                      icon: const Icon(Icons.file_upload_outlined, size: 18),
+                      label: const Text('导出备份'),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed:
+                          backup.busy ? null : () => _importBackup(context),
+                      icon: const Icon(Icons.file_download_outlined, size: 18),
+                      label: const Text('导入备份'),
+                    ),
+                  ],
+                ),
+                if (backup.busy) ...[
+                  const SizedBox(height: 12),
+                  const Center(child: LinearProgressIndicator()),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------- 数据备份
+
+  /// 导出：弹窗设密码（留空=明文）→ 生成文件 → 平台交付
+  /// （Web 下载 / 移动端分享面板 / 桌面另存为）。
+  Future<void> _exportBackup(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final service = context.read<BackupService>();
+    final password = await _askExportPassword(context);
+    if (password == null) return; // 用户取消
+
+    try {
+      final bytes = await service.buildBackup(
+        password: password.isEmpty ? null : password,
+      );
+      final delivered = await deliverBackupFile(
+        suggestedBackupFileName(DateTime.now()),
+        bytes,
+      );
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(delivered ? '备份已导出' : '已取消导出'),
+        ));
+    } on UnsupportedError {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('当前平台不支持导出备份文件')));
+    } catch (e) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('导出失败：$e')));
+    }
+  }
+
+  /// 导入：选文件 → 解析校验（加密文件弹密码框重试）→ 逐项确认覆盖 →
+  /// 确认后整批写回并即时生效。任一步取消/失败本机数据不变。
+  Future<void> _importBackup(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final service = context.read<BackupService>();
+    final bytes = await pickBackupFile();
+    if (bytes == null) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('已取消导入')));
+      return;
+    }
+
+    StagedImport staged;
+    String? password;
+    while (true) {
+      try {
+        staged = await service.parseImport(bytes, password: password);
+        break;
+      } on BackupFailure catch (f) {
+        final wantsPassword = f.kind == BackupFailureKind.needsPassword ||
+            f.kind == BackupFailureKind.wrongPassword;
+        if (!wantsPassword || !context.mounted) {
+          messenger
+            ..hideCurrentSnackBar()
+            ..showSnackBar(SnackBar(
+              content: Text(wantsPassword ? '已取消导入' : f.message),
+            ));
+          return;
+        }
+        final retry = await _askImportPassword(
+          context,
+          firstAttempt: f.kind == BackupFailureKind.needsPassword,
+        );
+        if (retry == null) {
+          messenger
+            ..hideCurrentSnackBar()
+            ..showSnackBar(const SnackBar(content: Text('已取消导入')));
+          return;
+        }
+        password = retry;
+      } catch (e) {
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text('导入失败：$e')));
+        return;
+      }
+    }
+
+    if (staged.entries.isEmpty) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('备份文件里没有可导入的数据')),
+        );
+      return;
+    }
+    if (!context.mounted) return;
+
+    final ok = await _confirmImport(context, staged);
+    if (ok != true) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('已取消导入')));
+      return;
+    }
+
+    try {
+      await service.applyImport(staged);
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('还原完成，已生效')));
+    } catch (e) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('还原失败：$e')));
+    }
+  }
+
+  /// 导出密码弹窗：返回 null=取消，空串=明文导出。
+  Future<String?> _askExportPassword(BuildContext context) async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('导出备份'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: '加密密码（可选）',
+                hintText: '留空则导出明文备份',
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '设置密码后，还原时需要输入同一密码。请牢记密码：'
+              '密码丢失将无法恢复备份内容。',
+              style: Theme.of(dialogContext).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('导出'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 导入密码弹窗（加密备份）：null=取消；[firstAttempt]=false 时提示密码错误。
+  Future<String?> _askImportPassword(
+    BuildContext context, {
+    required bool firstAttempt,
+  }) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(firstAttempt ? '备份已加密' : '密码错误或文件已损坏'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(firstAttempt ? '请输入导出时设置的密码：' : '请重新输入密码：'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autofocus: true,
+              onSubmitted: (v) =>
+                  Navigator.of(dialogContext).pop(controller.text),
+              decoration: const InputDecoration(labelText: '密码'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 「将被覆盖的数据」确认框（中文 label 逐项列出）。
+  Future<bool?> _confirmImport(BuildContext context, StagedImport staged) {
+    final meta = <String>[
+      if (staged.createdAt != null)
+        '备份时间：${staged.createdAt!.toIso8601String().replaceAll(RegExp(r'\.\d+'), '')}',
+      if (staged.appVersion.isNotEmpty) '导出版本：${staged.appVersion}',
+      if (staged.encrypted) '已通过密码校验',
+    ];
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('导入备份？'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (meta.isNotEmpty) ...[
+                Text(meta.join('\n'),
+                    style: Theme.of(dialogContext).textTheme.bodySmall),
+                const SizedBox(height: 8),
+              ],
+              const Text('以下本机数据将被覆盖：'),
+              const SizedBox(height: 8),
+              for (final e in staged.entries)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('• '),
+                      Expanded(child: Text(e.label)),
+                      Text(
+                        e.detail,
+                        style: Theme.of(dialogContext).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Text(
+                '其余数据保持不变。覆盖后不可撤销，请确认继续。',
+                style: Theme.of(dialogContext).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('确认覆盖'),
           ),
         ],
       ),

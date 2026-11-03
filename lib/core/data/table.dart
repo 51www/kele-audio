@@ -62,6 +62,14 @@ class Table<T> {
   /// 内存快照（需先 [load]）。
   List<T> all() => List<T>.unmodifiable(_rows ?? <T>[]);
 
+  /// 全表行编码快照（备份/同步导出用）。
+  ///
+  /// 外部持有 `Table<dynamic>` 时直接撕裂 `encode` 字段会因 `T` 在参数位
+  /// 触发运行时签名检查失败（`(ShelfItem)=>Map` vs `(dynamic)=>Map`），
+  /// 这里在 `Table<T>` 内部完成编码，类型安全。
+  List<Map<String, dynamic>> encodeAll() =>
+      [for (final row in all()) encode(row)];
+
   T? byId(String id) {
     final rows = _rows;
     if (rows == null) return null;
@@ -106,6 +114,14 @@ class Table<T> {
     _rows = newRows.toList();
     await _flush();
   }
+
+  /// 用行 JSON 整体替换（内部解码，备份/同步导入用）。
+  ///
+  /// 外部持有 `Table<dynamic>` 时撕裂 `decode` 后经 `replaceAll` 会在
+  /// `Iterable<ShelfItem>` 泛型检查处运行时报错，这里在 `Table<T>` 内部
+  /// 完成解码，类型安全。
+  Future<void> replaceAllDecoded(List<Map<String, dynamic>> rows) =>
+      replaceAll([for (final r in rows) decode(r)]);
 
   Future<bool> deleteById(String id) async {
     await load();

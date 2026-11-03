@@ -92,6 +92,12 @@ class BiliAccountService extends ChangeNotifier {
     }
   }
 
+  /// 档案缓存被外部改写（如备份还原）后重读并通知（登录态以 Cookie 会话为准）。
+  void reloadProfile() {
+    _restoreProfile();
+    notifyListeners();
+  }
+
   /// 开始一轮扫码登录：生成二维码并定时轮询。
   Future<void> startQrLogin() async {
     stopQrLogin();

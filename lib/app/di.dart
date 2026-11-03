@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../core/api/api_config.dart';
 import '../core/api/album_source.dart';
@@ -13,6 +14,7 @@ import '../core/api/subtitle_source.dart';
 import '../core/data/daos.dart';
 import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
+import '../core/services/backup/backup_service.dart';
 import '../core/services/bili_account_service.dart';
 import '../core/services/mini_player_controller.dart';
 import '../core/services/offline/dio_audio_fetcher.dart';
@@ -23,7 +25,6 @@ import '../core/services/player/player_service.dart';
 import '../core/services/player/progress_store.dart';
 import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
-import '../core/services/webdav_sync_service.dart';
 import 'theme/theme_controller.dart';
 
 /// 应用级服务集合（DI）：一次性启动装配，页面用 `context.read` 取用。
@@ -50,7 +51,7 @@ class AppServices {
     required this.settings,
     required this.offline,
     required this.account,
-    required this.webdav,
+    required this.backup,
   });
 
   final KeyValueStore kv;
@@ -103,8 +104,8 @@ class AppServices {
   /// B 站账号绑定（M5）：扫码登录状态机 + 绑定态/账号档案
   final BiliAccountService account;
 
-  /// WebDAV 云同步（M5 账号绑定）：手动备份/同步四件套（整体覆盖）
-  final WebdavSyncService webdav;
+  /// 数据备份 / 还原（本地文件，替代原 WebDAV 云同步）
+  final BackupService backup;
 
   /// 启动装配：**不发任何网络请求**（PRD 冷启动 ≤ 3s）。
   ///
@@ -217,16 +218,28 @@ class AppServices {
     syncEntitlement();
     account.addListener(syncEntitlement);
 
-    // WebDAV 同步：恢复落库后重载各处内存缓存（主题/书架/播放参数/开关）
-    final webdav = WebdavSyncService(
+    // 数据备份 / 还原：导入落库后重载各处内存缓存（即时生效，重启只是兜底）
+    final backup = BackupService(
       kv: kv,
       db: db,
+      appVersionProvider: () async {
+        final info = await PackageInfo.fromPlatform();
+        return '${info.version}+${info.buildNumber}';
+      },
       afterRestore: () async {
         await theme.load();
         await shelf.reload();
         player.reloadPrefs();
         settings.notifyChanged();
         await offline.initFlags(kv);
+        // 登录态：Cookie 从 KV 重新灌回运行中的会话 + 档案缓存重读
+        await client.reloadSessionFromKv();
+        account.reloadProfile();
+        await player
+            .setEntitlement(bound: account.bound, isVip: account.isVip)
+            .catchError((Object e) {
+          _log('restore entitlement error: $e');
+        });
       },
     );
 
@@ -252,7 +265,7 @@ class AppServices {
       settings: settings,
       offline: offline,
       account: account,
-      webdav: webdav,
+      backup: backup,
     );
   }
 

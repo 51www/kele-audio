@@ -130,6 +130,36 @@ class BiliClient {
     if (!_ready) await initLocal();
   }
 
+  /// 从 KV 重灌运行中会话（数据备份还原后调用）：Cookie / WBI 缓存以
+  /// 本地持久化为准整体刷新（解绑还原出的旧登录态也会被正确清掉）。
+  Future<void> reloadSessionFromKv() async {
+    await _ensureReady();
+    jar.clear();
+    _imgUrl = null;
+    _subUrl = null;
+    _wbiFetchedAt = 0;
+    final cookie = kv.getString(prefCookie);
+    if (cookie != null && cookie.isNotEmpty) {
+      final map = <String, String>{};
+      for (final seg in cookie.split(';')) {
+        final eq = seg.indexOf('=');
+        if (eq > 0) {
+          map[seg.substring(0, eq).trim()] = seg.substring(eq + 1).trim();
+        }
+      }
+      jar.mergeFromMap(map);
+    }
+    final wbi = kv.getString(prefWbi);
+    if (wbi != null) {
+      final parts = wbi.split('|');
+      if (parts.length == 3) {
+        _imgUrl = parts[0];
+        _subUrl = parts[1];
+        _wbiFetchedAt = int.tryParse(parts[2]) ?? 0;
+      }
+    }
+  }
+
   /// 网络预热（进主界面后后台执行，绝不阻塞启动）：种 buvid → 激活 → 刷 WBI key。
   Future<void> warmupIfNeeded() async {
     await _ensureReady();

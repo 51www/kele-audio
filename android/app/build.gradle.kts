@@ -16,7 +16,8 @@ plugins {
 
 android {
     namespace = "com.kele.audio"
-    compileSdk = flutter.compileSdkVersion
+    // file_picker 依赖的 flutter_plugin_android_lifecycle 要求 compileSdk >= 36
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

@@ -12,12 +12,12 @@ import '../core/data/daos.dart';
 import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
 import '../core/services/bili_account_service.dart';
+import '../core/services/backup/backup_service.dart';
 import '../core/services/mini_player_controller.dart';
 import '../core/services/offline/offline_cache_service.dart';
 import '../core/services/player/player_service.dart';
 import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
-import '../core/services/webdav_sync_service.dart';
 import 'di.dart';
 import 'router.dart';
 import 'theme/app_theme.dart';
@@ -43,8 +43,8 @@ class KeleApp extends StatelessWidget {
         ChangeNotifierProvider<BiliAccountService>.value(
           value: services.account,
         ),
-        ChangeNotifierProvider<WebdavSyncService>.value(
-          value: services.webdav,
+        ChangeNotifierProvider<BackupService>.value(
+          value: services.backup,
         ),
         Provider<AppServices>.value(value: services),
         Provider<BiliClient>.value(value: services.client),
