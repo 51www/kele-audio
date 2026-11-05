@@ -70,7 +70,7 @@ void main() {
     // ── Tab 2 书架：空态 + 建表/DAO 读写 Demo ───────────────────────
     await tester.tap(find.text('书架'));
     await tester.pumpAndSettle();
-    expect(find.text('书架还是空的'), findsOneWidget);
+    expect(find.text('还没有本地书'), findsOneWidget);
 
     await scrollTo(tester, find.text('本地数据层 · core/data'));
     expect(find.text('本地数据层 · core/data'), findsOneWidget);

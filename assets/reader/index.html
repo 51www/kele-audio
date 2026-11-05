@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>kele-audio reader</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+  body { background: #f7f1e7; }
+  foliate-view { width: 100%; height: 100%; display: block; }
+  #status { display: none; }
+</style>
+</head>
+<body>
+<foliate-view id="view"></foliate-view>
+<div id="status">reader: booting…</div>
+<script type="module">
+import './foliate-js/view.js'
+
+const view = document.getElementById('view')
+const status = document.getElementById('status')
+
+// ---- 桥：JS -> Dart ----------------------------------------------------
+// flutter_inappwebview 的 callHandler 是唯一通道；无桥时（浏览器直调）只打日志。
+function post(name, payload) {
+  const msg = { name, payload: payload ?? null, ts: Date.now() }
+  if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+    try { window.flutter_inappwebview.callHandler('readerMessage', msg) } catch (e) { /* ignore */ }
+  }
+  console.log('READER_MSG ' + JSON.stringify(msg))
+}
+
+// ---- 渲染器事件 ---------------------------------------------------------
+let lastRange = null
+view.addEventListener('relocate', e => {
+  const d = e.detail || {}
+  lastRange = d.range || null
+  post('onRelocated', {
+    index: d.section?.current ?? d.index ?? d.tocItem?.index ?? null,
+    fraction: d.fraction ?? null,
+    cfi: d.cfi ?? null,
+  })
+})
+
+// 章节内点击正文呼出/收起工具栏（链接点击除外）。
+// 注意：翻页模式下 iframe 内部是「多列宽文档」，clientX 不落在可视区，
+// 不能用坐标判断中心区域，改为「非链接点击一律视为呼出工具栏」。
+view.addEventListener('load', e => {
+  const doc = e.detail?.doc
+  if (!doc) return
+  doc.addEventListener('click', ev => {
+    const a = ev.target.closest?.('a[href]')
+    if (a) return
+    post('onTapCenter', {})
+  }, false)
+})
+
+// ---- 状态 ---------------------------------------------------------------
+let lastStyle = null
+let pendingLocate = null
+
+// ---- TTS 段落 -----------------------------------------------------------
+// 段落列表按当前渲染章节缓存；高亮用 inline style，不污染排版 CSS。
+const PARA_SELECTOR = 'p,li,blockquote,dd,dt,h1,h2,h3,h4,h5,h6'
+let ttsChapter = -1
+let ttsNodes = []
+let ttsActiveNode = null
+
+function currentContents() {
+  try { return (view.renderer?.getContents?.() || [])[0] || null } catch (e) { return null }
+}
+
+function textOf(node) {
+  return (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim()
+}
+
+function extractChapter(force) {
+  const c = currentContents()
+  if (!c || !c.doc || !c.doc.body) return -1
+  const chapter = Number(c.index ?? -1)
+  if (!force && chapter === ttsChapter && ttsNodes.length) return chapter
+  const nodes = []
+  const all = c.doc.body.querySelectorAll(PARA_SELECTOR)
+  for (const el of all) {
+    if (el.closest('script,style,nav')) continue
+    // 取最内层块，避免 li>p 之类重复朗读。
+    if (el.parentElement && el.parentElement.closest(PARA_SELECTOR)) continue
+    if (textOf(el).length < 2) continue
+    nodes.push(el)
+  }
+  ttsNodes = nodes
+  ttsChapter = chapter
+  ttsActiveNode = null
+  return chapter
+}
+
+function clearTtsHighlight() {
+  if (!ttsActiveNode) return
+  ttsActiveNode.style.backgroundColor = ''
+  ttsActiveNode.style.borderRadius = ''
+  ttsActiveNode.style.boxShadow = ''
+  ttsActiveNode = null
+}
+
+function applyStyle() {
+  if (!lastStyle) return
+  const c = lastStyle.colors || {}
+  const margin = Number(lastStyle.margin ?? 22)
+  // foliate 的栏间距（--_gap）会撑出左右留白，跟「页边距」同步收缩：0px→2%，默认 22px→7%。
+  const gapPct = Math.min(7, Math.max(2, 2 + margin * 5 / 22))
+  // 版式规则：字号/行距/字重只作用在 body 上，靠继承下传；
+  // 边距只加在 body，避免嵌套 div 反复叠加导致正文宽度被吃掉。
+  const css = `
+:root {
+  --reader-bg: ${c.bg};
+  --reader-fg: ${c.fg};
+  --reader-muted: ${c.muted};
+  --reader-accent: ${c.accent};
+  --reader-line: ${c.line};
+}
+html { background-color: var(--reader-bg) !important; }
+body {
+  background-color: var(--reader-bg) !important;
+  color: var(--reader-fg) !important;
+  font-size: ${Number(lastStyle.fontSize)}px !important;
+  line-height: ${Number(lastStyle.lineHeight)} !important;
+  font-weight: ${Number(lastStyle.weight)} !important;
+  padding-left: ${margin}px !important;
+  padding-right: ${margin}px !important;
+  -webkit-text-size-adjust: 100%;
+  text-align: justify;
+}
+p, li, div, span, td, blockquote, dd, dt {
+  color: var(--reader-fg) !important;
+  line-height: inherit !important;
+  font-weight: inherit !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+h1, h2, h3, h4, h5, h6 { color: var(--reader-fg) !important; }
+a { color: var(--reader-accent) !important; }
+img { max-width: 100% !important; height: auto !important; }
+hr { border-color: var(--reader-line) !important; }
+::selection { background: ${c.accent}33; }
+`
+  try { view.style.setProperty('--reader-gap', gapPct + '%') } catch (e) { /* ignore */ }
+  try { view.renderer?.style?.setProperty('--reader-gap', gapPct + '%') } catch (e) { /* ignore */ }
+  try { view.renderer?.setStyles(css) } catch (e) { console.warn('setStyles failed', e) }
+  document.body.style.background = c.bg || ''
+  // 字号/行距改变后需要重新分栏，否则当前页仍是旧版式。
+  try { view.renderer?.expand?.() } catch (e) { /* ignore */ }
+}
+
+async function gotoPending() {
+  if (!pendingLocate) return
+  const target = pendingLocate
+  pendingLocate = null
+  const index = Number(target.chapterIndex || 0)
+  const frac = Number(target.fraction || 0)
+  if (target.cfi) {
+    await view.goTo(target.cfi)
+    return
+  }
+  if (frac > 0) {
+    const list = view.getSectionFractions?.() || []
+    const start = list[index] ?? 0
+    const end = list[index + 1] ?? 1
+    await view.goToFraction(start + (end - start) * frac)
+    return
+  }
+  await view.goTo(index)
+}
+
+// ---- Dart -> JS API ----------------------------------------------------
+let chunks = []
+let expected = 0
+
+window.reader = {
+  beginLoad(size) { chunks = []; expected = Number(size) || 0; return true },
+  pushChunk(b64) { chunks.push(b64); return true },
+  async finishLoad(name) {
+    try {
+      const joined = chunks.join('')
+      chunks = []
+      if (expected && joined.length !== expected) throw new Error('chunk length mismatch')
+      const bin = atob(joined)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      // foliate-js 按文件名/类型判断格式（isCBZ/isFB2 读 name），故构造 File。
+      const file = new File([bytes], name || 'book.epub', { type: 'application/epub+zip' })
+      await view.open(file)
+      applyStyle()
+      await view.goTo(0)
+      const meta = view.book?.metadata || {}
+      const sectionCount = view.book?.sections?.length || 0
+      post('onBookMeta', {
+        title: meta.title || '',
+        author: meta.author || '',
+        chapterCount: sectionCount,
+      })
+      this.requestToc()
+      // 有续读目标就直接落到目标位置，避免先跳 0 再跳目标、覆盖阅读进度。
+      if (pendingLocate) await gotoPending()
+      else await view.goTo(0)
+      status.textContent = 'reader: book loaded'
+      post('onLoadComplete', { chapterCount: sectionCount })
+      return true
+    } catch (err) {
+      status.textContent = 'reader: load failed: ' + err
+      post('onError', { message: String(err) })
+      return false
+    }
+  },
+  /** {chapterIndex, fraction, cfi?} */
+  async openAt(target) {
+    pendingLocate = target || {}
+    if (view.book) await gotoPending()
+    return true
+  },
+  setStyle(style) {
+    lastStyle = style || null
+    applyStyle()
+    try {
+      view.renderer?.setAttribute('flow', (style?.mode === 'scrolled') ? 'scrolled' : 'paginated')
+    } catch (e) { /* renderer 未就绪时忽略，open 后再设 */ }
+    return true
+  },
+  requestToc() {
+    const raw = view.book?.toc || []
+    const flat = []
+    const walk = list => {
+      for (const item of list) {
+        if (!item) continue
+        if (Array.isArray(item.children) && item.children.length) walk(item.children)
+        else flat.push({ label: item.label || '', href: item.href || '' })
+      }
+    }
+    walk(raw)
+    post('onToc', { items: flat.map((t, i) => ({ index: i, label: t.label, href: t.href })) })
+    return true
+  },
+  async goToChapter(index) { await view.goTo(Number(index)); return true },
+  async goToHref(href) { if (href) await view.goTo(href); return true },
+  async next() { await view.renderer.next(); return true },
+  async prev() { await view.renderer.prev(); return true },
+
+  // ---- M9.3 TTS ----
+  currentChapterIndex() {
+    const c = currentContents()
+    return c ? Number(c.index ?? 0) : 0
+  },
+  isChapterReady(index) {
+    const c = currentContents()
+    return !!c && Number(c.index ?? -1) === Number(index)
+  },
+  extractParagraphs() {
+    if (extractChapter(false) < 0) return []
+    return ttsNodes.map(textOf)
+  },
+  highlightParagraph(index) {
+    const i = Number(index)
+    if (extractChapter(false) < 0) return false
+    const node = ttsNodes[i]
+    if (!node) return false
+    clearTtsHighlight()
+    ttsActiveNode = node
+    const accent = (lastStyle?.colors?.accent) || '#B8863B'
+    node.style.backgroundColor = accent + '2E'
+    node.style.borderRadius = '6px'
+    node.style.boxShadow = '0 0 0 4px ' + accent + '1A'
+    try { view.renderer?.scrollToAnchor?.(node) } catch (e) { /* ignore */ }
+    return true
+  },
+  clearHighlight() { clearTtsHighlight(); return true },
+  visibleParagraphIndex() {
+    if (extractChapter(false) < 0) return 0
+    const range = lastRange
+    if (!range || typeof range.intersectsNode !== 'function') return 0
+    for (let i = 0; i < ttsNodes.length; i++) {
+      try {
+        if (range.intersectsNode(ttsNodes[i])) return i
+      } catch (e) { /* ignore */ }
+    }
+    return 0
+  },
+}
+
+// 就绪通知
+post('onReady', { href: location.href })
+status.textContent = 'reader: ready'
+</script>
+</body>
+</html>

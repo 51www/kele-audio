@@ -20,6 +20,15 @@ android {
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
+    packaging {
+        jniLibs {
+            // M9.0：AGP8 默认 extractNativeLibs=false（so 不解压、映射自 APK），
+            // 此时 dlopen("libmpv.so") 按名打开会失败，media_kit 初始化抛
+            // "ensureInitialized must be called..."。改为解压安装以按名加载。
+            useLegacyPackaging = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -36,9 +45,11 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // 应用名占位：prod = 可乐听书，dev = 可乐听书（调试），见 productFlavors
+        manifestPlaceholders["appLabel"] = "可乐听书"
     }
 
-    // 正式签名：从 key.properties 读取密钥材料（文件已被 gitignore，不入仓库）。
+    // 签名：prod 读正式 key.properties；dev 读独立的 dev-key.properties（两者均 git-ignored）。
     signingConfigs {
         create("release") {
             storeFile = file(checkNotNull(keystoreProperties["storeFile"]) {
@@ -54,11 +65,57 @@ android {
                 "android/app/key.properties 缺少 keyPassword"
             } as String
         }
+        // 二期调试专用：全新 keystore，与正式包签名完全无关（文件与口令均不入仓库）
+        create("dev") {
+            val devKeyProperties = Properties()
+            val devKeyFile = file("dev-key.properties")
+            if (devKeyFile.exists()) {
+                devKeyProperties.load(FileInputStream(devKeyFile))
+            }
+            storeFile = file(checkNotNull(devKeyProperties["storeFile"] as String?) {
+                "android/app/dev-key.properties 缺少 storeFile，无法打包 dev 变体"
+            })
+            storePassword = checkNotNull(devKeyProperties["storePassword"] as String?) {
+                "android/app/dev-key.properties 缺少 storePassword"
+            }
+            keyAlias = checkNotNull(devKeyProperties["keyAlias"] as String?) {
+                "android/app/dev-key.properties 缺少 keyAlias"
+            }
+            keyPassword = checkNotNull(devKeyProperties["keyPassword"] as String?) {
+                "android/app/dev-key.properties 缺少 keyPassword"
+            }
+        }
+    }
+
+    // 包名/签名/应用名统一由 flavor 管理：prod 与已上线版本完全一致，dev 为独立调试包。
+    flavorDimensions += "env"
+    productFlavors {
+        create("prod") {
+            dimension = "env"
+            applicationId = "com.kele.audio"
+            signingConfig = signingConfigs.getByName("release")
+            manifestPlaceholders["appLabel"] = "可乐听书"
+        }
+        create("dev") {
+            dimension = "env"
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            signingConfig = signingConfigs.getByName("dev")
+            manifestPlaceholders["appLabel"] = "可乐听书（调试）"
+        }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // 签名由 flavor 决定（prod=正式，dev=调试 keystore）
+        }
+        debug {
+            // AGP 会给 debug 变体自动回落到默认 debug keystore，这里显式改用 dev keystore，
+            // 保证二期调试包与正式包签名完全无关（prod 的 debug 变体同样只用本机调试，不外发）。
+            signingConfig = signingConfigs.getByName("dev")
+        }
+        getByName("profile") {
+            signingConfig = signingConfigs.getByName("dev")
         }
     }
 }

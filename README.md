@@ -42,6 +42,14 @@ kele-audio 是一款**免登录、无广告、专注收听**的第三方听书�
 - **书架**：「在听」置顶区（进度条 + 一键续播）+ 收藏列表；排序（最近收听 / 收藏时间 / 标题）；左滑删除（可撤销）、长按多选删除；空态引导跳转发现页；
 - **历史收听**：按今天 / 昨天 / 日期分组，单条删除（可撤销）、清空（二次确认）、点击续播。
 
+### 本地书与阅读
+
+- **导入**：支持 TXT（自动识别 UTF-8 / GBK 编码并切章）、EPUB，以及公众号/网页文章链接（导入时抓取正文保存快照，离线可读，支持重新抓取）；
+- **书架分组**：本地书独立分区，展示来源、已读章节与百分比、最后阅读时间；支持按最近阅读/导入时间/标题排序、左滑删除（可撤销）、长按多选删除；
+- **阅读页**：分页与滚动两种阅读方式，字号/行距/边距/字重可调，配色跟随六套主题与儿童模式；章节目录（正序/倒序、点章跳转）、阅读进度保存与断点续读；
+- **听书**：系统朗读 / Edge 在线朗读 / 自定义 HTTP 朗读服务三档可选，可调音色、语速与音调；朗读时段落高亮并自动跟随滚动，支持上一段/下一段、睡眠定时、断点续听，退出阅读页或锁屏后仍可继续朗读，通知栏与锁屏可控制；
+- **活动记录**：阅读与听书记录写入历史页「阅读」分组，静读与听书时长分别计入统计页「阅读时长」。
+
 ### 离线缓存
 
 - **缓存能力**：整本缓存 + 单章缓存（串行下载队列），暂停 / 继续、单集删除、整本删除、全部清理；
@@ -74,8 +82,9 @@ kele-audio 是一款**免登录、无广告、专注收听**的第三方听书�
 
 ### 数据与隐私
 
-- 收藏、历史、进度、统计、设置**全部本地存储**，无需注册，不上传服务器；
-- 播放地址只存内存、不落库；备份文件由用户自行保存与传递，应用本身无任何对外数据传输。
+- 收藏、历史、进度、统计、设置、本地书与阅读记录**全部本地存储**，无需注册，不上传服务器；
+- 播放地址只存内存、不落库；备份文件由用户自行保存与传递，应用本身无任何对外数据传输；
+- 本地书朗读：选择「系统朗读」时不联网；选择「Edge 在线朗读」或「自定义 HTTP 朗读」时，待朗读的正文会发送至对应朗读服务方，请按需选择。
 
 ### 检查更新
 
@@ -86,7 +95,7 @@ kele-audio 是一款**免登录、无广告、专注收听**的第三方听书�
 ## 待完成功能项
 
 - [x] **客户端检查更新**：关于页手动检查 GitHub Releases，Android 支持下载安装闭环（详见 `docs/release-notes.md` v1.2.0）；
-- [ ] **阅读及朗读本地书籍**：导入本地书籍文本，支持阅读与 TTS 朗读收听。
+- [x] **阅读及朗读本地书籍**：导入 TXT / EPUB / 网页文章，支持阅读与系统/Edge/自定义 HTTP 朗读收听（详见 `docs/release-notes.md` v1.4.0）；
 - [ ] **音频文档同步**：播放音频时与原稿同步高亮
 
 以下截图来自应用实际运行画面（暗色为静夜墨灰主题，另含儿童模式）：
@@ -199,7 +208,15 @@ MIT 开源协议。
 | 项目 | 用途 |
 |---|---|
 | [abts（阿B听书）](https://github.com/fengqiao57/abts)（MIT 协议） | 技术选型与核心逻辑参考：`media_kit` 取流播放、WBI 签名与风控节流、断点续播、离线缓存等实现对照 |
+| [anx-reader（安读）](https://github.com/Anxcye/anx-reader)（MIT 协议） | 本地书阅读集成方式参考：Flutter + WebView + foliate-js 的容器与交互设计 |
 | [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) | B 站 Web 接口社区逆向文档，WBI 签名算法与 DASH 音频流接口的对接依据 |
+
+### 本地集成（vendored）
+
+| 项目 | 许可证 | 用途 |
+|---|---|---|
+| [foliate-js](https://github.com/johnfactotum/foliate-js) | MIT | EPUB 渲染内核（分页/滚动、目录、CFI 定位），位于 `assets/reader/foliate-js/` |
+| [Readability.js](https://github.com/mozilla/readability) | Apache-2.0 | 网页文章正文提取，位于 `assets/reader/readability/` |
 
 ### 开源依赖
 
@@ -218,5 +235,10 @@ MIT 开源协议。
 | [path_provider](https://pub.dev/packages/path_provider) | 离线缓存音频文件目录 |
 | [web](https://pub.dev/packages/web) | Web 端 IndexedDB 访问（离线缓存） |
 | [qr_flutter](https://pub.dev/packages/qr_flutter) | 扫码登录二维码渲染 |
+| [flutter_inappwebview](https://pub.dev/packages/flutter_inappwebview) | 阅读页 WebView 容器与网页正文抓取 |
+| [edge_tts](https://pub.dev/packages/edge_tts)（MIT） | Edge 在线朗读合成（免密钥） |
+| [flutter_tts](https://pub.dev/packages/flutter_tts) | 系统朗读引擎 |
+| [archive](https://pub.dev/packages/archive) | EPUB 打包（TXT / 网页正文转章节） |
+| [charset](https://pub.dev/packages/charset) | TXT 编码识别与 GBK 解码 |
 | [cupertino_icons](https://pub.dev/packages/cupertino_icons) | iOS 风格图标 |
 | [flutter_lints](https://pub.dev/packages/flutter_lints) | 静态检查规则（开发期） |

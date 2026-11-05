@@ -31,20 +31,30 @@ class _AboutPageState extends State<AboutPage> {
   late final bool _isAndroid;
   UpdateService? _service;
   String _realVersion = appVersion;
+  String _packageName = 'com.kele.audio';
+
+  /// 仅正式包（applicationId = com.kele.audio）开放检查更新；
+  /// 二期 dev flavor 包名带 `.dev` 后缀，若保留入口会去下载正式 APK，签名不一致导致安装失败。
+  bool _isProdBuild = true;
 
   @override
   void initState() {
     super.initState();
     _isAndroid =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    // 显示真实 package 版本，避免硬编码漂移误报（提示词 4）。
+    // 显示真实 package 版本与包名，避免硬编码漂移误报（提示词 4）。
     PackageInfo.fromPlatform().then((PackageInfo info) {
-      if (mounted) setState(() => _realVersion = info.version);
+      if (!mounted) return;
+      setState(() {
+        _realVersion = info.version;
+        _packageName = info.packageName;
+        _isProdBuild = info.packageName == 'com.kele.audio';
+      });
+      if (_isAndroid && _isProdBuild && _service == null) {
+        _service = UpdateService();
+        _service!.init();
+      }
     });
-    if (_isAndroid) {
-      _service = UpdateService();
-      _service!.init();
-    }
   }
 
   String get _repoUrl => UpdateConfig.repoUrl;
@@ -98,7 +108,7 @@ class _AboutPageState extends State<AboutPage> {
                       Text('可乐听书', style: tokens.titleStyle),
                       const SizedBox(height: 4),
                       Text(
-                        '版本 $_realVersion · com.kele.audio',
+                        '版本 $_realVersion · $_packageName',
                         style: tokens.captionStyle,
                       ),
                       const SizedBox(height: 2),
@@ -134,12 +144,14 @@ class _AboutPageState extends State<AboutPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  '当前版本 $_realVersion。Android 端可点击下方「检查更新」获取新版安装包；'
-                  '其他平台请前往仓库 Releases 页面。',
+                  _isAndroid && _isProdBuild
+                      ? '当前版本 $_realVersion。Android 端可点击下方「检查更新」获取新版安装包；'
+                        '其他平台请前往仓库 Releases 页面。'
+                      : '当前版本 $_realVersion。更新与反馈请前往仓库 Releases 页面。',
                   style: tokens.bodyStyle.copyWith(height: 1.6),
                 ),
                 const SizedBox(height: 12),
-                if (_isAndroid && _service != null)
+                if (_isAndroid && _isProdBuild && _service != null)
                   _CheckUpdateRow(service: _service!, onCheck: _onCheck)
                 else
                   _LinkRow(
@@ -157,7 +169,7 @@ class _AboutPageState extends State<AboutPage> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  _isAndroid
+                  _isAndroid && _isProdBuild
                       ? '更新与反馈走仓库链接；检查更新永不强制，可随时取消。'
                       : '更新与反馈走仓库链接，点击可复制。',
                   style: tokens.captionStyle,

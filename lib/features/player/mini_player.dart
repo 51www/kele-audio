@@ -8,6 +8,7 @@ import '../../app/theme/app_tokens.dart';
 import '../../app/widgets/cover_progress_avatar.dart';
 import '../../core/services/mini_player_controller.dart';
 import '../../core/services/player/player_service.dart';
+import '../../core/services/tts/tts_session.dart';
 
 /// 播放条在页面底部的挂载槽位。
 ///
@@ -27,8 +28,10 @@ class MiniPlayerSlot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 本地书朗读进行时只保留朗读控制条，避免两条播放条同时出现。
+    final ttsActive = context.watch<TtsSession>().active;
     final visible = context.watch<MiniPlayerController>().visible;
-    if (!visible) return const SizedBox.shrink();
+    if (!visible || ttsActive) return const SizedBox.shrink();
 
     if (!alignToHomeBar) return const MiniPlayer();
 

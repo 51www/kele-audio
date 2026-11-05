@@ -145,13 +145,18 @@ class AlbumCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CoverImage(
-            url: album.coverUrl,
-            title: album.title,
-            borderRadius: BorderRadius.vertical(
-              top: Radius.circular(tokens.radiusMd - 1),
+          // 封面固定 16:9，行高由网格按「封面 + 文案区 104px」计算，
+          // 避免文案区按 100px 估算时差 0.875px 触发溢出。
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: CoverImage(
+              url: album.coverUrl,
+              title: album.title,
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(tokens.radiusMd - 1),
+              ),
             ),
-          )._fixedHeight(context),
+          ),
           Padding(
             padding: EdgeInsets.all(tokens.spaceSm + 2),
             child: Column(
@@ -211,14 +216,4 @@ class AlbumCard extends StatelessWidget {
     if (play >= 10000) return '${(play / 10000).toStringAsFixed(1)} 万播放';
     return '$play 播放';
   }
-}
-
-extension on Widget {
-  /// 卡片内封面定高：双列网格列宽自适应，高度按 16:9 随宽度算。
-  Widget _fixedHeight(BuildContext context) => LayoutBuilder(
-        builder: (context, constraints) {
-          final w = constraints.maxWidth;
-          return SizedBox(width: w, height: w * 9 / 16, child: this);
-        },
-      );
 }

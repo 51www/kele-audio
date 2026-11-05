@@ -21,10 +21,22 @@ import '../core/services/offline/dio_audio_fetcher.dart';
 import '../core/services/offline/audio_store.dart';
 import '../core/services/offline/offline_cache_service.dart';
 import '../core/services/player/media_bridge.dart';
+import '../core/services/player/playback_arbiter.dart';
 import '../core/services/player/player_service.dart';
 import '../core/services/player/progress_store.dart';
+import '../core/services/reader/book_store.dart';
+import '../core/services/reader/reader_activity_store.dart';
+import '../core/services/reader/reader_import_service.dart';
+import '../core/services/reader/reader_progress_store.dart';
+import '../core/services/reader/reader_typography.dart';
 import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
+import '../core/services/tts/tts_engine.dart';
+import '../core/services/tts/tts_engine_edge.dart';
+import '../core/services/tts/tts_engine_http.dart';
+import '../core/services/tts/tts_engine_system.dart';
+import '../core/services/tts/tts_session.dart';
+import '../core/services/tts/tts_settings_store.dart';
 import 'theme/theme_controller.dart';
 
 /// 应用级服务集合（DI）：一次性启动装配，页面用 `context.read` 取用。
@@ -52,6 +64,14 @@ class AppServices {
     required this.offline,
     required this.account,
     required this.backup,
+    required this.readerBooks,
+    required this.readerActivity,
+    required this.readerImport,
+    required this.readerTypography,
+    required this.readerProgress,
+    required this.playbackArbiter,
+    required this.ttsSettings,
+    required this.ttsSession,
   });
 
   final KeyValueStore kv;
@@ -106,6 +126,30 @@ class AppServices {
 
   /// 数据备份 / 还原（本地文件，替代原 WebDAV 云同步）
   final BackupService backup;
+
+  /// 本地书元数据（M9.1）：独立数据域，不写 shelf / play_history / play_log
+  final ReaderBookStore readerBooks;
+
+  /// 阅读历史与时长埋点（M9.1 建立，M9.2/M9.3 写入）
+  final ReaderActivityStore readerActivity;
+
+  /// 三路导入编排（TXT / EPUB / 网页）
+  final ReaderImportService readerImport;
+
+  /// 阅读排版设置（M9.2，`reader_typography`）
+  final ReaderTypographyStore readerTypography;
+
+  /// 阅读进度细粒度真源（M9.2，`reader_progress_{id}`）
+  final ReaderProgressStore readerProgress;
+
+  /// 播放互斥收敛点（M9.3）：B 站收听 ↔ 本地书 TTS 共用系统媒体会话
+  final PlaybackArbiter playbackArbiter;
+
+  /// 听书设置（M9.3，`tts_settings`）
+  final TtsSettingsStore ttsSettings;
+
+  /// 听书会话（M9.3）：前台服务/锁屏通知/音频焦点/断点续听
+  final TtsSession ttsSession;
 
   /// 启动装配：**不发任何网络请求**（PRD 冷启动 ≤ 3s）。
   ///
@@ -174,6 +218,20 @@ class AppServices {
     final settings = SettingsStore(kv);
     final account = BiliAccountService(client: client, kv: kv, log: _log);
     final miniPlayer = MiniPlayerController();
+
+    // 本地书（M9.1）：独立 reader_* 数据域，启动只读本地、不发网络请求。
+    final readerBooks = ReaderBookStore(kv);
+    await readerBooks.load();
+    final readerActivity = ReaderActivityStore(kv);
+    await readerActivity.load();
+    final readerTypography = ReaderTypographyStore(kv);
+    await readerTypography.load();
+    final readerProgress = ReaderProgressStore(kv);
+    final readerImport = ReaderImportService(
+      books: readerBooks,
+      activity: readerActivity,
+      progress: readerProgress,
+    );
     final offline = OfflineCacheService(
       daos: daos,
       playUrl: playUrl,
@@ -184,6 +242,12 @@ class AppServices {
     );
     await offline.initFlags(kv);
     offline.useAudioProxy = web;
+
+    // 听书（M9.3）：设置读取 → 播放互斥 → TTS 会话（三档引擎按需创建）。
+    final ttsSettings = TtsSettingsStore(kv);
+    await ttsSettings.load();
+    final arbiter = PlaybackArbiter(media: mediaBridge ?? NoopMediaBridge());
+
     final player = PlayerService(
       playUrl: playUrl,
       albumSource: albums,
@@ -196,9 +260,24 @@ class AppServices {
       log: _log,
       shelf: shelf,
       offline: offline,
+      arbiter: arbiter,
     );
     // 零网络、零引擎：只挂生命周期/焦点/系统桥 + 读持久化参数
     await player.init();
+
+    final ttsSession = TtsSession(
+      settings: ttsSettings,
+      books: readerBooks,
+      activity: readerActivity,
+      arbiter: arbiter,
+      engineFactory: (kind) => switch (kind) {
+        TtsEngineKind.system => TtsSystemEngine(),
+        TtsEngineKind.edge => TtsEdgeEngine(),
+        TtsEngineKind.http => TtsHttpEngine(
+          templateProvider: () => ttsSettings.httpTemplate,
+        ),
+      },
+    );
 
     // 下载档位跟随默认音质（封顶 192K 由 OfflineCacheService 收口）
     offline.qualityProvider = () => player.quality;
@@ -240,6 +319,11 @@ class AppServices {
             .catchError((Object e) {
           _log('restore entitlement error: $e');
         });
+        // 备份还原后重读本地书元数据与阅读活动（M9.4 正式纳入备份）。
+        await readerBooks.load();
+        await readerActivity.load();
+        await readerTypography.load();
+        await ttsSettings.load();
       },
     );
 
@@ -266,6 +350,14 @@ class AppServices {
       offline: offline,
       account: account,
       backup: backup,
+      readerBooks: readerBooks,
+      readerActivity: readerActivity,
+      readerImport: readerImport,
+      readerTypography: readerTypography,
+      readerProgress: readerProgress,
+      playbackArbiter: arbiter,
+      ttsSettings: ttsSettings,
+      ttsSession: ttsSession,
     );
   }
 

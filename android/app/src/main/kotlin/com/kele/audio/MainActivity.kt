@@ -1,5 +1,6 @@
 package com.kele.audio
 
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -11,6 +12,8 @@ import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -108,6 +111,33 @@ class MainActivity : AudioServiceActivity() {
             }
         })
 
+        // M9.3：Android 13+ 通知运行时权限（后台/锁屏听书通知依赖）
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.kele.audio/notifications",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "status" -> result.success(hasNotificationPermission())
+                "request" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        !hasNotificationPermission()
+                    ) {
+                        ActivityCompat.requestPermissions(
+                            this,
+                            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                            101,
+                        )
+                    }
+                    result.success(hasNotificationPermission())
+                }
+                "openSettings" -> {
+                    openNotificationSettings()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         // 检查更新：APK 安装链路（提示词 2「Android 安装链路」）
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -133,6 +163,35 @@ class MainActivity : AudioServiceActivity() {
                     }
                 }
                 else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun hasNotificationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /// 打开本应用的通知设置页；个别 ROM 无此页时退回应用详情页。
+    private fun openNotificationSettings() {
+        try {
+            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+        } catch (e: Exception) {
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:$packageName"),
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            } catch (ignored: Exception) {
+                // 无可用设置页时静默忽略
             }
         }
     }

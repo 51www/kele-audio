@@ -9,6 +9,8 @@ import '../../../app/widgets/common.dart';
 import '../../../core/data/daos.dart';
 import '../../../core/services/history_service.dart';
 import '../../../core/services/player/player_service.dart';
+import '../../../core/services/reader/book_store.dart';
+import '../../../core/services/reader/reader_activity_store.dart';
 import '../../discover/album_card.dart';
 
 /// 历史收听页（PRD §5.6.2，M5 实装）。
@@ -101,12 +103,48 @@ class _HistoryPageState extends State<HistoryPage> {
     return '$h:$m';
   }
 
+  static String _dayLabel(DateTime time) {
+    final now = DateTime.now();
+    final date = DateTime(time.year, time.month, time.day);
+    final today = DateTime(now.year, now.month, now.day);
+    final diff = today.difference(date).inDays;
+    if (diff == 0) return '今天';
+    if (diff == 1) return '昨天';
+    return '${time.month}月${time.day}日';
+  }
+
+  void _openBook(String bookId) {
+    context.push('/reader/$bookId');
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
     final entries = _history.buildEntries();
     final groups = HistoryService.groupByDay(entries);
     final rows = _flatten(groups);
+    // M9.3：本地书「阅读」分组与收听历史并列。
+    final readerActivity = context.watch<ReaderActivityStore>();
+    final readerBooks = context.watch<ReaderBookStore>();
+    final readerEntries = readerActivity.history
+        .where((e) => readerBooks.byId(e.bookId) != null)
+        .toList();
+    // 阅读条目按天分组（与收听分组并列）。
+    final readerDayGroups = <String, List<ReaderHistoryEntry>>{};
+    for (final entry in readerEntries) {
+      final label = _dayLabel(entry.at);
+      readerDayGroups.putIfAbsent(label, () => []).add(entry);
+    }
+    final allRows = <Object>[
+      if (readerEntries.isNotEmpty)
+        _ReaderSectionHeader(readerEntries.length),
+      for (final group in readerDayGroups.entries) ...[
+        _ReaderDayHeader(group.key, group.value.length),
+        for (final entry in group.value) _ReaderRow(entry),
+      ],
+      if (entries.isNotEmpty) _ListenSectionHeader(entries.length),
+      if (entries.isNotEmpty) ...rows,
+    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -119,7 +157,7 @@ class _HistoryPageState extends State<HistoryPage> {
           ),
         ],
       ),
-      body: entries.isEmpty
+      body: entries.isEmpty && readerEntries.isEmpty
           ? EmptyState(
               icon: Icons.history_rounded,
               title: '还没有收听记录',
@@ -130,10 +168,41 @@ class _HistoryPageState extends State<HistoryPage> {
           : ListView.builder(
               padding: EdgeInsets.only(bottom: tokens.spaceLg),
               // 懒构建：分组头 + 条目打平后按滚动增量构建（分页语义）
-              itemCount: rows.length,
+              itemCount: allRows.length,
               itemBuilder: (context, index) {
-                final row = rows[index];
+                final row = allRows[index];
                 return switch (row) {
+                  _ReaderSectionHeader() => _GroupHeader(
+                      label: '阅读',
+                      count: row.count,
+                      unit: '条',
+                    ),
+                  _ListenSectionHeader() => _GroupHeader(
+                      label: '收听',
+                      count: row.count,
+                      unit: '本',
+                    ),
+                  _ReaderDayHeader() => Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        tokens.spaceMd,
+                        tokens.spaceSm,
+                        tokens.spaceMd,
+                        2,
+                      ),
+                      child: Row(
+                        children: [
+                          Text(row.label, style: tokens.captionStyle),
+                          const SizedBox(width: 6),
+                          Text('${row.count} 条', style: tokens.captionStyle),
+                        ],
+                      ),
+                    ),
+                  _ReaderRow() => _ReaderHistoryRow(
+                      entry: row.entry,
+                      time:
+                          _timeOf(row.entry.at.millisecondsSinceEpoch),
+                      onTap: () => _openBook(row.entry.bookId),
+                    ),
                   _RowHeader() => _GroupHeader(label: row.label, count: row.count),
                   _RowEntry() => _HistoryRow(
                       entry: row.entry,
@@ -141,9 +210,88 @@ class _HistoryPageState extends State<HistoryPage> {
                       onTap: () => _resume(row.entry),
                       onDelete: () => _deleteOne(row.entry),
                     ),
+                  _ => const SizedBox.shrink(),
                 };
               },
             ),
+    );
+  }
+}
+
+/// 阅读历史单行（M9.3）：图标 + 书名 + 章节/方式 + 时间；点击回到阅读页。
+class _ReaderHistoryRow extends StatelessWidget {
+  const _ReaderHistoryRow({
+    required this.entry,
+    required this.time,
+    required this.onTap,
+  });
+
+  final ReaderHistoryEntry entry;
+  final String time;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final listening = entry.mode == ReaderActivityMode.listening;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            tokens.spaceMd,
+            tokens.spaceSm,
+            tokens.spaceMd,
+            tokens.spaceSm,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: scheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(tokens.radiusSm),
+                ),
+                child: Icon(
+                  listening
+                      ? Icons.headphones_rounded
+                      : Icons.menu_book_rounded,
+                  color: scheme.onSecondaryContainer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry.bookTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tokens.bodyStyle.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${listening ? '听书' : '阅读'} · ${entry.chapterTitle}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tokens.captionStyle,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(time, style: tokens.captionStyle),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -171,11 +319,37 @@ List<_Row> _flatten(List<HistoryDayGroup> groups) {
   return rows;
 }
 
+class _ReaderSectionHeader {
+  const _ReaderSectionHeader(this.count);
+  final int count;
+}
+
+class _ListenSectionHeader {
+  const _ListenSectionHeader(this.count);
+  final int count;
+}
+
+class _ReaderDayHeader {
+  const _ReaderDayHeader(this.label, this.count);
+  final String label;
+  final int count;
+}
+
+class _ReaderRow {
+  const _ReaderRow(this.entry);
+  final ReaderHistoryEntry entry;
+}
+
 class _GroupHeader extends StatelessWidget {
-  const _GroupHeader({required this.label, required this.count});
+  const _GroupHeader({
+    required this.label,
+    required this.count,
+    this.unit = '本',
+  });
 
   final String label;
   final int count;
+  final String unit;
 
   @override
   Widget build(BuildContext context) {
@@ -200,7 +374,7 @@ class _GroupHeader extends StatelessWidget {
           const SizedBox(width: 8),
           Text(label, style: tokens.sectionStyle),
           const SizedBox(width: 8),
-          Text('$count 本', style: tokens.captionStyle),
+          Text('$count $unit', style: tokens.captionStyle),
         ],
       ),
     );

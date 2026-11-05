@@ -15,6 +15,7 @@ import '../../../core/services/bili_account_service.dart';
 import '../../../core/services/image_cache_cleaner.dart';
 import '../../../core/services/player/player_service.dart';
 import '../../../core/services/settings_store.dart';
+import 'tts_settings_section.dart';
 
 /// 设置页（PRD §5.6.4，M5 接线）。
 ///
@@ -218,6 +219,12 @@ class SettingsPage extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          SizedBox(height: tokens.spaceMd),
+          _SectionCard(
+            icon: Icons.headphones_rounded,
+            title: '本地书 · 听书',
+            child: const TtsSettingsSection(),
           ),
           SizedBox(height: tokens.spaceMd),
           _SectionCard(

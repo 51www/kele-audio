@@ -7,6 +7,7 @@ import 'package:kele_audio/core/api/bili_client.dart';
 import 'package:kele_audio/core/api/key_value_store.dart';
 import 'package:kele_audio/core/data/local_database.dart';
 import 'package:kele_audio/core/data/table.dart';
+import 'package:kele_audio/core/domain/album.dart';
 import 'package:kele_audio/core/services/backup/backup_crypto.dart';
 import 'package:kele_audio/core/services/backup/backup_keys.dart';
 import 'package:kele_audio/core/services/backup/backup_service.dart';
@@ -49,6 +50,53 @@ const logRow = {
   'duration_sec': 120,
 };
 
+const albumRow = {
+  'id': 'al1',
+  'source_type': 'multi_part',
+  'title': '三体有声书',
+  'cover_url': 'https://i0.hdslb.com/bfs/archive/cover.jpg',
+  'up_name': '科幻电台',
+  'chapter_count': 2,
+  'category_id': 'novel',
+  'bvid': 'BV1al1',
+  'up_mid': 1001,
+  'intro': '简介',
+  'total_duration_sec': 120,
+  'play_count': 999,
+  'created_at': 100,
+};
+
+const chapterRows = [
+  {
+    'id': 'al1:101',
+    'album_id': 'al1',
+    'index': 0,
+    'title': '第一集',
+    'duration': 60,
+    'bvid': 'BV1al1',
+    'cid': 101,
+  },
+  {
+    'id': 'al1:102',
+    'album_id': 'al1',
+    'index': 1,
+    'title': '第二集',
+    'duration': 60,
+    'bvid': 'BV1al1',
+    'cid': 102,
+  },
+];
+
+/// 造专辑缓存 + 曲目（缓存表本身不进备份，只经轻量快照迁移）。
+Future<void> seedAlbum(LocalDatabase db) async {
+  await db.ensureCreated();
+  await db.albums.upsert(db.albums.decode(Map<String, dynamic>.from(albumRow)));
+  await db.chapters.upsertAll([
+    for (final r in chapterRows)
+      db.chapters.decode(Map<String, dynamic>.from(r)),
+  ]);
+}
+
 /// 在源设备上造一份典型数据（设置 KV + 三表 + 登录态）。
 Future<void> seedSource(
   MemoryKeyValueStore kv,
@@ -84,6 +132,79 @@ void main() {
     expect(dst.db.shelf.all().first.albumId, 'al1');
     expect(dst.db.playHistory.count, 1);
     expect(dst.db.playLogs.count, 1);
+  });
+
+  test('导出→清空→导入：书架专辑元数据 / 分类 / 封面 URL / 曲目 / 进度齐全', () async {
+    final src = device();
+    await seedSource(src.kv, src.db);
+    await seedAlbum(src.db);
+
+    final bytes = await src.service.buildBackup();
+    // 封面只随快照存 URL，不塞图片二进制
+    expect(utf8.decode(bytes).contains('cover_url'), isTrue);
+
+    final dst = device();
+    final staged = await dst.service.parseImport(bytes);
+    expect(staged.albumSnapshots, hasLength(1));
+    expect(
+      staged.entries.any((e) => e.key == BackupWhitelist.shelfAlbumMetaKey),
+      isTrue,
+    );
+    await dst.service.applyImport(staged);
+
+    final album = dst.db.albums.byId('al1');
+    expect(album, isNotNull);
+    expect(album!.title, '三体有声书');
+    expect(album.categoryId, 'novel');
+    expect(album.coverUrl, 'https://i0.hdslb.com/bfs/archive/cover.jpg');
+    expect(album.upName, '科幻电台');
+    expect(album.upMid, 1001);
+    expect(album.sourceType, SourceType.multiPart);
+    expect(dst.db.chapters.where((c) => c.albumId == 'al1'), hasLength(2));
+    expect(dst.db.chapters.byId('al1:101')!.bvid, 'BV1al1');
+    final shelf = dst.db.shelf.byId('al1');
+    expect(shelf, isNotNull);
+    expect(shelf!.lastChapterId, 'c1');
+    expect(shelf.lastPositionSec, 30);
+  });
+
+  test('旧格式备份（无专辑快照）导入不崩：收藏保留，元数据留空交给补抓', () async {
+    final src = device();
+    await seedSource(src.kv, src.db);
+    await seedAlbum(src.db);
+    final bytes = await src.service.buildBackup();
+
+    // 模拟旧版本导出：把新字段整个去掉
+    final envelope = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+    final keys = (envelope['payload'] as Map)['keys'] as Map<String, dynamic>;
+    keys.remove(BackupWhitelist.shelfAlbumMetaKey);
+    final legacy = _bytes(jsonEncode(envelope));
+
+    final dst = device();
+    final staged = await dst.service.parseImport(legacy);
+    expect(staged.albumSnapshots, isEmpty);
+    await dst.service.applyImport(staged);
+    expect(dst.db.shelf.count, 1); // 收藏还在
+    expect(dst.db.albums.count, 0); // 元数据为空 → 书架走补抓/提示
+    expect(dst.db.chapters.count, 0);
+  });
+
+  test('专辑快照损坏只跳过该段，其余数据正常导入', () async {
+    final src = device();
+    await seedSource(src.kv, src.db);
+    await seedAlbum(src.db);
+    final bytes = await src.service.buildBackup();
+
+    final envelope = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+    final keys = (envelope['payload'] as Map)['keys'] as Map<String, dynamic>;
+    keys[BackupWhitelist.shelfAlbumMetaKey] = 'not-a-json';
+    final broken = _bytes(jsonEncode(envelope));
+
+    final dst = device();
+    final staged = await dst.service.parseImport(broken);
+    expect(staged.albumSnapshots, isEmpty);
+    await dst.service.applyImport(staged);
+    expect(dst.db.shelf.count, 1);
   });
 
   test('加密备份导出再导入，数据一致', () async {
@@ -279,6 +400,7 @@ void main() {
       for (final item in BackupWhitelist.settingsItems) item.key,
       for (final t in BackupWhitelist.tablesOf(src.db))
         Table.storageKey(t.name),
+      BackupWhitelist.shelfAlbumMetaKey,
     };
     expect(keys.difference(allowed), isEmpty);
     expect(

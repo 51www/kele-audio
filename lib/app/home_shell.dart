@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/player/mini_player.dart';
+import '../features/reader/reader_tts_mini_bar.dart';
 
 /// 三 Tab 壳：Bottom Navigation（PRD §4.1）。
 /// 播放条（[MiniPlayerSlot]）浮于底栏之上，无播放内容/已关闭时自动塌缩。
@@ -38,6 +39,8 @@ class HomeShell extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // 本地书朗读进行时，朗读控制条常驻底栏之上（停止后自动消失）。
+            const TtsMiniPlayerSlot(),
             // 播放条浮于底栏之上；无内容/已关闭时塌缩为 0 高度。
             const MiniPlayerSlot(),
             NavigationBar(

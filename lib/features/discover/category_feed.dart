@@ -229,7 +229,8 @@ class _CategoryFeedState extends State<CategoryFeed>
         builder: (context, constraints) {
           // 双列卡片按列宽自适应行高（封面 16:9 + 文案区实高）
           final colW = (constraints.maxWidth - tokens.spaceMd * 3) / 2;
-          final childAspect = colW / (colW * 9 / 16 + 100);
+          // 文案区实高约 100.9px（真机曾溢出 0.875px），预算按 104px 留余量。
+          final childAspect = colW / (colW * 9 / 16 + 104);
           return ListView(
             controller: _scroll,
             padding: EdgeInsets.fromLTRB(

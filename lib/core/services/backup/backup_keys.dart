@@ -28,7 +28,26 @@ class BackupWhitelist {
     (key: OfflineCacheService.keyOnlyCached, label: '「仅播放已缓存」'),
     (key: 'theme_preset', label: '主题皮肤'),
     (key: 'children_mode', label: '儿童模式'),
+    // M9.4：本地书 / 阅读 / 听书数据纳入迁移（进度细粒度键按 bookId 动态收集）
+    (key: 'reader_books', label: '本地书库'),
+    (key: 'reader_history', label: '阅读历史'),
+    (key: 'reader_log', label: '阅读时长统计'),
+    (key: 'reader_typography', label: '阅读排版设置'),
+    (key: 'tts_settings', label: '听书设置'),
   ];
+
+  /// 阅读进度按书动态存储（`reader_progress_{bookId}`），单独按前缀迁移。
+  static const String readerProgressPrefix = 'reader_progress_';
+
+  /// 书架专辑的轻量元数据快照（JSON 数组，见 shelf_album_snapshot.dart）。
+  ///
+  /// `album` / `chapter` 仍是缓存表、不进表备份；这里只随备份携带重开所需
+  /// 的字段（标题/UP/分类/封面 URL/曲目精简结构与上次进度），还原时合并入库。
+  /// 旧备份没有该 key 时按「空快照」降级，不影响导入。
+  static const String shelfAlbumMetaKey = 'shelf_album_meta';
+
+  /// 快照条的展示 label（确认框）。
+  static const String shelfAlbumMetaLabel = '书架专辑信息';
 
   /// 参与备份的表（引用 [LocalDatabase] 实例上的同一批 [Table] 对象，
   /// 不含 album/chapter 缓存表与 download 任务表）。

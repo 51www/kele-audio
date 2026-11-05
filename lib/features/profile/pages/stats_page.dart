@@ -8,6 +8,7 @@ import '../../../app/widgets/common.dart';
 import '../../../core/data/daos.dart';
 import '../../../core/services/listen_stats.dart';
 import '../../../core/services/player/player_service.dart';
+import '../../../core/services/reader/reader_activity_store.dart';
 
 /// 听书统计页（M8 / PRD §5.6.1）。
 ///
@@ -23,6 +24,12 @@ class _StatsPageState extends State<StatsPage> {
   /// 趋势图区间：false = 周统计（近 7 天），true = 月统计（近 30 天）。
   bool _monthly = false;
 
+  static String _dateKey(DateTime time) {
+    final month = time.month.toString().padLeft(2, '0');
+    final day = time.day.toString().padLeft(2, '0');
+    return '${time.year}-$month-$day';
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
@@ -32,6 +39,7 @@ class _StatsPageState extends State<StatsPage> {
 
     // watch PlayerService：播放落进度（play_log 落盘）后自动刷新
     context.watch<PlayerService>();
+    final readerActivity = context.watch<ReaderActivityStore>();
     final entries = daos.playLogs.all();
     final stats = ListenStats.fromEntries(entries);
     final monthSec = StatsAgg.monthSec(entries);
@@ -57,6 +65,29 @@ class _StatsPageState extends State<StatsPage> {
         return album?.chapterCount ?? daos.chapters.countFor(id);
       },
     );
+    // 阅读时长（M9.3）：本周 / 累计，静读与 TTS 分开统计。
+    final now = DateTime.now();
+    final weekStart = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(Duration(days: now.weekday - 1));
+    final weekStartKey = _dateKey(weekStart);
+    var readWeek = 0;
+    var listenWeek = 0;
+    var readTotal = 0;
+    var listenTotal = 0;
+    for (final log in readerActivity.log) {
+      readTotal += log.mode == ReaderActivityMode.reading ? log.durationSec : 0;
+      listenTotal +=
+          log.mode == ReaderActivityMode.listening ? log.durationSec : 0;
+      if (log.date.compareTo(weekStartKey) >= 0) {
+        readWeek +=
+            log.mode == ReaderActivityMode.reading ? log.durationSec : 0;
+        listenWeek +=
+            log.mode == ReaderActivityMode.listening ? log.durationSec : 0;
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('听书统计')),
@@ -98,6 +129,48 @@ class _StatsPageState extends State<StatsPage> {
                 ),
               ],
             ],
+          ),
+          SizedBox(height: tokens.spaceSm),
+          // ── 阅读时长（本地书静读 / TTS 听书分开计数）────────────
+          KeleCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.menu_book_rounded,
+                        size: 20, color: scheme.primary),
+                    SizedBox(width: 8),
+                    Text('阅读时长', style: tokens.bodyStyle.copyWith(
+                      fontWeight: FontWeight.w700,
+                    )),
+                    const Spacer(),
+                    Text('数据只存本机', style: tokens.captionStyle),
+                  ],
+                ),
+                SizedBox(height: tokens.spaceSm),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _ReadingMetric(
+                        label: '本周',
+                        readingSec: readWeek,
+                        listeningSec: listenWeek,
+                        tokens: tokens,
+                      ),
+                    ),
+                    Expanded(
+                      child: _ReadingMetric(
+                        label: '累计',
+                        readingSec: readTotal,
+                        listeningSec: listenTotal,
+                        tokens: tokens,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
           SizedBox(height: tokens.spaceSm),
           KeleCard(
@@ -448,6 +521,45 @@ class _TrendBar extends StatelessWidget {
                   ),
             borderRadius: BorderRadius.circular(3),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 阅读时长指标：总时长 + 静读/听书拆分。
+class _ReadingMetric extends StatelessWidget {
+  const _ReadingMetric({
+    required this.label,
+    required this.readingSec,
+    required this.listeningSec,
+    required this.tokens,
+  });
+
+  final String label;
+  final int readingSec;
+  final int listeningSec;
+  final AppTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: tokens.captionStyle),
+        const SizedBox(height: 2),
+        Text(
+          ListenStats.formatDuration(readingSec + listeningSec),
+          style: tokens.titleStyle.copyWith(fontSize: 18),
+          maxLines: 1,
+        ),
+        const SizedBox(height: 2),
+        Text(
+          '静读 ${ListenStats.formatDuration(readingSec)} · '
+          '听书 ${ListenStats.formatDuration(listeningSec)}',
+          style: tokens.captionStyle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );

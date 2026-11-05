@@ -5,8 +5,10 @@ import 'package:flutter/foundation.dart';
 import '../../api/key_value_store.dart';
 import '../../data/local_database.dart';
 import '../../data/table.dart';
+import '../../domain/records.dart';
 import 'backup_crypto.dart';
 import 'backup_keys.dart';
+import 'shelf_album_snapshot.dart';
 
 /// 导入失败的分类（页面按此给友好提示 / 决定是否弹密码框重试）。
 enum BackupFailureKind {
@@ -55,6 +57,7 @@ class StagedImport {
     required this.entries,
     required this.kvWrites,
     required this.tableRows,
+    this.albumSnapshots = const [],
   });
 
   final DateTime? createdAt;
@@ -69,6 +72,9 @@ class StagedImport {
 
   /// 待整体替换的表：表名 → 已解码行。
   final Map<String, List<Map<String, dynamic>>> tableRows;
+
+  /// 书架专辑的轻量元数据（旧备份没有该段时为空 → UI 走补抓/提示降级）。
+  final List<ShelfAlbumSnapshot> albumSnapshots;
 }
 
 /// 数据备份 / 还原（本地文件，替代原 WebDAV 云同步）。
@@ -118,9 +124,36 @@ class BackupService extends ChangeNotifier {
         final v = kv.getString(item.key);
         if (v != null) keys[item.key] = v;
       }
+      // 阅读进度是 `reader_progress_{bookId}` 动态键：按本地书库 ids 收集。
+      try {
+        final booksRaw = kv.getString('reader_books');
+        if (booksRaw != null && booksRaw.isNotEmpty) {
+          final decoded = jsonDecode(booksRaw);
+          if (decoded is List) {
+            for (final item in decoded) {
+              final id = item is Map ? item['id']?.toString() : null;
+              if (id == null || id.isEmpty) continue;
+              final v = kv.getString(
+                '${BackupWhitelist.readerProgressPrefix}$id',
+              );
+              if (v != null) {
+                keys['${BackupWhitelist.readerProgressPrefix}$id'] = v;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[backup] 收集阅读进度失败：$e');
+      }
       for (final table in BackupWhitelist.tablesOf(db)) {
         final storageKey = Table.storageKey(table.name);
         keys[storageKey] = _encodeTable(table);
+      }
+      // 书架专辑元数据：album/chapter 是缓存表不整体迁移，这里补最小快照，
+      // 保证换机还原后书架卡片与「打开继续听」可用。旧版本导入端会忽略该 key。
+      final albumMeta = _collectShelfAlbumMeta();
+      if (albumMeta.isNotEmpty) {
+        keys[BackupWhitelist.shelfAlbumMetaKey] = jsonEncode(albumMeta);
       }
       payload['keys'] = keys;
 
@@ -238,6 +271,33 @@ class BackupService extends ChangeNotifier {
         if (table == null) continue;
         await table.replaceAllDecoded(e.value);
       }
+      // 书架专辑元数据：合并入库（不替换缓存表），书架页下一次 build 即可
+      // 本地渲染封面 URL/标题/分类/曲目，无需等网络重拉。
+      for (final snap in staged.albumSnapshots) {
+        final albumId = snap.album.id;
+        if (db.albums.byId(albumId) == null) {
+          await db.albums.upsert(snap.album);
+        }
+        if (snap.chapters.isNotEmpty &&
+            db.chapters.where((c) => c.albumId == albumId).isEmpty) {
+          await db.chapters.upsertAll(snap.chapters);
+        }
+        // 旧备份可能没带进度（极少数手工改过的文件）：用快照补书架行。
+        final item = db.shelf.byId(albumId);
+        if (item != null &&
+            item.lastChapterId.isEmpty &&
+            snap.lastChapterId.isNotEmpty) {
+          await db.shelf.upsert(ShelfItem(
+            albumId: albumId,
+            createdAt: item.createdAt,
+            lastChapterId: snap.lastChapterId,
+            lastPositionSec: snap.lastPositionSec,
+            lastPlayedAt: item.lastPlayedAt,
+            finishedChapters: item.finishedChapters,
+            totalChapters: item.totalChapters,
+          ));
+        }
+      }
       await afterRestore?.call();
     });
   }
@@ -281,6 +341,19 @@ class BackupService extends ChangeNotifier {
       if (v == null) continue;
       kvWrites[item.key] = '$v';
       entries.add(ImportEntry(key: item.key, label: item.label, detail: '设置项'));
+    }
+
+    // 阅读进度动态键（reader_progress_{id}）：只接受前缀，其余忽略。
+    for (final entry in keys.entries) {
+      if (!entry.key.startsWith(BackupWhitelist.readerProgressPrefix)) continue;
+      final v = entry.value;
+      if (v == null) continue;
+      kvWrites[entry.key] = '$v';
+      entries.add(ImportEntry(
+        key: entry.key,
+        label: '阅读进度 · ${entry.key.substring(BackupWhitelist.readerProgressPrefix.length)}',
+        detail: '设置项',
+      ));
     }
 
     // 表：key 必须在白名单表集合内（文件按 `t_*` 存储），行结构逐条解码
@@ -332,6 +405,25 @@ class BackupService extends ChangeNotifier {
       entries.add(ImportEntry(key: item.key, label: item.label, detail: '登录态'));
     }
 
+    // 书架专辑元数据（JSON 字符串）：解析失败只跳过该段，不影响其余导入；
+    // 旧备份没有该 key → 空快照，UI 走「补抓/提示重新收藏」的降级路径。
+    var albumSnapshots = const <ShelfAlbumSnapshot>[];
+    final metaRaw = keys[BackupWhitelist.shelfAlbumMetaKey];
+    if (metaRaw is String && metaRaw.isNotEmpty) {
+      try {
+        albumSnapshots = ShelfAlbumSnapshot.listFromJson(jsonDecode(metaRaw));
+      } catch (e) {
+        debugPrint('[backup] 书架专辑快照解析失败（忽略该段）：$e');
+      }
+    }
+    if (albumSnapshots.isNotEmpty) {
+      entries.add(ImportEntry(
+        key: BackupWhitelist.shelfAlbumMetaKey,
+        label: BackupWhitelist.shelfAlbumMetaLabel,
+        detail: '${albumSnapshots.length} 张专辑',
+      ));
+    }
+
     return StagedImport(
       createdAt: _tryParseDate(envelope['createdAt'] as String?),
       appVersion: '${envelope['appVersion'] ?? ''}',
@@ -339,6 +431,7 @@ class BackupService extends ChangeNotifier {
       entries: entries,
       kvWrites: kvWrites,
       tableRows: tableRows,
+      albumSnapshots: albumSnapshots,
     );
   }
 
@@ -351,6 +444,24 @@ class BackupService extends ChangeNotifier {
   /// `Table<dynamic>` 撕裂字段会触发运行时签名检查失败）。
   static List<Map<String, dynamic>> _encodeTable(Table<dynamic> t) =>
       t.encodeAll();
+
+  /// 书架收藏 → 专辑轻量快照（只读本地表，不发网络、不含封面二进制）。
+  List<Map<String, dynamic>> _collectShelfAlbumMeta() {
+    final out = <Map<String, dynamic>>[];
+    for (final item in db.shelf.all()) {
+      final album = db.albums.byId(item.albumId);
+      if (album == null) continue; // 旧格式还原出的空壳：本地已无信息可取
+      final chapters = db.chapters.where((c) => c.albumId == item.albumId)
+        ..sort((a, b) => a.index.compareTo(b.index));
+      out.add(ShelfAlbumSnapshot(
+        album: album,
+        chapters: chapters,
+        lastChapterId: item.lastChapterId,
+        lastPositionSec: item.lastPositionSec,
+      ).toJson());
+    }
+    return out;
+  }
 
   Future<T> _guard<T>(Future<T> Function() body) async {
     if (_busy) {

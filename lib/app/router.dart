@@ -12,6 +12,7 @@ import '../features/profile/pages/settings_page.dart';
 import '../features/profile/pages/stats_page.dart';
 import '../features/profile/profile_page.dart';
 import '../features/player/player_page.dart';
+import '../features/reader/reader_page.dart';
 import '../features/shelf/shelf_page.dart';
 import 'home_shell.dart';
 
@@ -120,6 +121,13 @@ class AppRouter {
         builder: (context, state) => SearchPage(
           initialKeyword: state.uri.queryParameters['q'] ?? '',
         ),
+      ),
+      // 13. 本地书阅读页（M9.1 占位，M9.2 接入 foliate-js）
+      GoRoute(
+        path: '/reader/:id',
+        name: 'reader',
+        builder: (context, state) =>
+            ReaderPage(bookId: state.pathParameters['id'] ?? ''),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(

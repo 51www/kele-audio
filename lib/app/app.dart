@@ -16,8 +16,15 @@ import '../core/services/backup/backup_service.dart';
 import '../core/services/mini_player_controller.dart';
 import '../core/services/offline/offline_cache_service.dart';
 import '../core/services/player/player_service.dart';
+import '../core/services/reader/book_store.dart';
+import '../core/services/reader/reader_activity_store.dart';
+import '../core/services/reader/reader_import_service.dart';
+import '../core/services/reader/reader_progress_store.dart';
+import '../core/services/reader/reader_typography.dart';
 import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
+import '../core/services/tts/tts_session.dart';
+import '../core/services/tts/tts_settings_store.dart';
 import 'di.dart';
 import 'router.dart';
 import 'theme/app_theme.dart';
@@ -46,6 +53,21 @@ class KeleApp extends StatelessWidget {
         ChangeNotifierProvider<BackupService>.value(
           value: services.backup,
         ),
+        ChangeNotifierProvider<ReaderBookStore>.value(
+          value: services.readerBooks,
+        ),
+        ChangeNotifierProvider<ReaderActivityStore>.value(
+          value: services.readerActivity,
+        ),
+        Provider<ReaderImportService>.value(value: services.readerImport),
+        ChangeNotifierProvider<ReaderTypographyStore>.value(
+          value: services.readerTypography,
+        ),
+        Provider<ReaderProgressStore>.value(value: services.readerProgress),
+        ChangeNotifierProvider<TtsSettingsStore>.value(
+          value: services.ttsSettings,
+        ),
+        ChangeNotifierProvider<TtsSession>.value(value: services.ttsSession),
         Provider<AppServices>.value(value: services),
         Provider<BiliClient>.value(value: services.client),
         Provider<ApiConfig>.value(value: services.config),

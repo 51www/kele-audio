@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../player/mini_player.dart';
+import '../reader/reader_tts_mini_bar.dart';
 
 import '../../app/di.dart';
 import '../../app/theme/app_tokens.dart';
@@ -171,8 +172,15 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ),
       ),
-      // 与首页（含底部导航栏）对齐：播放条距屏幕底部高度一致
-      bottomNavigationBar: const MiniPlayerSlot(alignToHomeBar: true),
+      // 与首页（含底部导航栏）对齐：播放条距屏幕底部高度一致；
+      // 本地书朗读时改为显示朗读控制条（两者互斥）。
+      bottomNavigationBar: const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TtsMiniPlayerSlot(alignToHomeBar: true),
+          MiniPlayerSlot(alignToHomeBar: true),
+        ],
+      ),
       body: _keyword.isEmpty ? _buildIdle(tokens, scheme) : _buildResults(tokens),
     );
   }

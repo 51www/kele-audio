@@ -14,6 +14,9 @@
 |---|---|---|
 | `docs/theme.md` | 六套 UI 主题的风格提示词与调色参考（含儿童模式选型） | 涉及任何 UI/主题工作时读 |
 | `docs/shortscreen/` | 风格参考截图（theme.md 的源图） | 需要视觉参考时 |
+| `docs/reader-plan.md` | M9 阅读与听书：调研结论、选型决策（D1~D8）、总体架构、依赖与许可证 | 做 M9 任何工作前先读 |
+| `docs/reader-design.md` | M9 技术设计：目录结构、数据模型、导入管线、WebView 桥协议、TTS 引擎 | 实现 M9 各阶段时对照读 |
+| `docs/reader-milestones.md` | M9 里程碑：M9.0~M9.4 任务分解、准出条件、进度表 | M9 开发推进时按阶段更新 |
 
 ## 技术决策（已定，勿改）
 

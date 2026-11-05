@@ -13,6 +13,7 @@ import '../mini_player_controller.dart';
 import '../offline/offline_cache_service.dart';
 import '../shelf_controller.dart';
 import 'audio_focus.dart';
+import 'playback_arbiter.dart';
 import 'media_bridge.dart';
 import 'media_kit_engine.dart';
 import 'player_engine.dart';
@@ -54,6 +55,7 @@ class PlayerService extends ChangeNotifier
     this.log,
     this.shelf,
     this.offline,
+    this.arbiter,
   })  : _focus = focus ?? AudioFocus.instance,
         _media = media ?? NoopMediaBridge(),
         _engineFactory = engineFactory ?? createPlayerEngine {
@@ -82,6 +84,9 @@ class PlayerService extends ChangeNotifier
   /// M8：离线缓存服务（可选）。已缓存章节优先用本地音频，
   /// `onlyCached` 开启时未缓存章节拒绝联网播放。
   final OfflineCacheService? offline;
+
+  /// M9.3：与本地书 TTS 的播放互斥收敛点。可选（单测可省略）。
+  final PlaybackArbiter? arbiter;
 
   /// M4：进度落盘后通知书架页刷新「在听置顶区 / 已听 x/y」。可选（单测可省略）。
   final ShelfController? shelf;
@@ -207,6 +212,12 @@ class PlayerService extends ChangeNotifier
   Future<void> init() async {
     if (_started) return;
     _started = true;
+    arbiter?.registerBili(
+      bind: _bindMedia,
+      bindFocus: _bindFocus,
+      stop: stop,
+      publish: () => _pushBridge(force: true),
+    );
     _bindMedia();
     _bindFocus();
     _focus.start();
@@ -399,6 +410,9 @@ class PlayerService extends ChangeNotifier
       return false;
     }
 
+    // M9.3：任何入口的自动播放都先收回播放权（TTS 在播时先停）。
+    if (autoPlay) await arbiter?.claimBili();
+
     final mySession = ++_session;
     _loading = true;
     _error = null;
@@ -519,6 +533,8 @@ class PlayerService extends ChangeNotifier
   void toggle() => _playing ? unawaited(pause()) : unawaited(play());
 
   Future<void> play() async {
+    // M9.3：B 站开始播放前先收回播放权（若 TTS 在播则先停）。
+    await arbiter?.claimBili();
     if (!hasSession) {
       final ok = await restoreLastSession(autoPlay: true);
       if (!ok) {
@@ -1184,6 +1200,8 @@ class PlayerService extends ChangeNotifier
 
   void _pushBridge({bool force = false}) {
     if (_disposed) return;
+    // 播放权在 TTS 时不动系统媒体会话，避免覆盖听书通知。
+    if (arbiter?.owner == PlaybackOwner.tts) return;
     final now = DateTime.now();
     if (!force && now.difference(_lastBridgePush) < const Duration(milliseconds: 500)) {
       return;
