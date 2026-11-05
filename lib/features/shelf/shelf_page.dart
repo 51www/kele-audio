@@ -1238,7 +1238,7 @@ class _ListeningCard extends StatelessWidget {
   }
 }
 
-/// 书架网格容器：按屏宽自适应 2~3 列，卡片等高。
+/// 书架网格容器：固定每行 2 列，卡片等高。
 ///
 /// 行高 = 封面（3:4）+ 文本区；文本区固定「上 8 / 标题 2 行 / 间隔 4 /
 /// 进度 1 行 / 下 8」的高度，并多留 2px 余量，避免字体度量差异触发
@@ -1255,7 +1255,8 @@ class _ShelfGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = shelfGridColumns(constraints.maxWidth);
-        final gap = tokens.spaceSm;
+        // 列/行间距与页边距同为 spaceMd：四周留白一致，保持呼吸感。
+        final gap = tokens.spaceMd;
         final columnWidth =
             (constraints.maxWidth -
                 tokens.spaceMd * 2 -

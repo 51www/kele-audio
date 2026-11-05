@@ -236,13 +236,31 @@ class TtsSession extends ChangeNotifier {
   }
 
   /// 用户手动翻页/跳章：TTS 位置同步（先停再取新章段落）。
+  ///
+  /// 暂停中只更新断点位置、不开讲，等用户恢复时从新位置开始。
   Future<void> repositionTo(int chapterIndex, int paragraphIndex) async {
     if (!_active || (chapterIndex == _chapterIndex && paragraphIndex == _paraIndex)) {
       return;
     }
     _chapterIndex = chapterIndex;
     _paraIndex = paragraphIndex;
+    _pendingChapter = null;
+    notifyListeners();
+    if (_paused) return;
     await _restartLoop();
+  }
+
+  /// 对齐到阅读页当前可见段落：播放中立即换段续讲，暂停中只记断点。
+  Future<void> alignToView(int chapterIndex) async {
+    final port = _port;
+    if (!_active || port == null) return;
+    int para;
+    try {
+      para = await port.visibleParagraph();
+    } catch (_) {
+      return;
+    }
+    await repositionTo(chapterIndex, para);
   }
 
   /// 设置页/控制条改了语速音调后即时重载当前段。
@@ -343,7 +361,6 @@ class TtsSession extends ChangeNotifier {
         if (index >= list.length) index = list.length - 1;
         _chapterIndex = chapter;
         _paraIndex = index;
-        _recordListeningHistory(book, chapter);
         _publishMedia();
         notifyListeners();
 
@@ -549,18 +566,6 @@ class TtsSession extends ChangeNotifier {
       chapterIndex: chapter,
       fraction: fraction,
       ttsParaIndex: para,
-    );
-  }
-
-  void _recordListeningHistory(ReaderBook book, int chapter) {
-    activity.recordHistory(
-      ReaderHistoryEntry(
-        bookId: book.id,
-        bookTitle: book.title,
-        chapterTitle: _chapterTitleOf?.call(chapter) ?? '第${chapter + 1}章',
-        mode: ReaderActivityMode.listening,
-        at: DateTime.now(),
-      ),
     );
   }
 

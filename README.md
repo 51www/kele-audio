@@ -163,11 +163,11 @@ flutter build apk --release
 flutter build apk --release --split-per-abi
 # 按 pubspec 版本号重命名产物（跨平台通用：Windows / macOS / Linux，需装 Flutter）
 # 执行后：app-arm64-v8a-release.apk -> kele-music-<版本>-android-arm64-v8a.apk
-dart run tool/rename_release_apk.dart
+dart tool/rename_release_apk.dart
 
 # Android AAB（上架 Play；--split-debug-info 分离符号便于崩溃上报）
 flutter build appbundle --release --split-debug-info=build/symbols
-dart run tool/rename_release_apk.dart
+dart tool/rename_release_apk.dart
 # 执行后：app-release.aab -> kele-music-<版本>-android.aab
 
 # 如需本地装机的 universal 包（含全部 ABI，体积较大）：

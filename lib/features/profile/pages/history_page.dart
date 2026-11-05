@@ -128,6 +128,8 @@ class _HistoryPageState extends State<HistoryPage> {
     final readerBooks = context.watch<ReaderBookStore>();
     final readerEntries = readerActivity.history
         .where((e) => readerBooks.byId(e.bookId) != null)
+        // 本地听书记录不进历史：只展示主动阅读的断点。
+        .where((e) => e.mode != ReaderActivityMode.listening)
         .toList();
     // 阅读条目按天分组（与收听分组并列）。
     final readerDayGroups = <String, List<ReaderHistoryEntry>>{};

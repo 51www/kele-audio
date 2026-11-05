@@ -54,5 +54,5 @@
 
 ## 环境
 
-- Flutter 3.38.x（Dart 3.10+）、JDK 17、Android SDK；构建：`flutter build apk --release`
+- Flutter 3.38.x（Dart 3.10+）、JDK 17、Android SDK；构建：`flutter build apk --release`（项目为单包名 `com.kele.audio`，debug/profile 用 dev-key 调试 keystore 签名，release 用正式 key.properties）
 - 平台范围：**仅 Android**（API 26+），iOS/Windows 不做。

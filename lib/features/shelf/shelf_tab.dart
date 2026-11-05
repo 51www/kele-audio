@@ -11,17 +11,16 @@ extension ShelfSectionX on ShelfSection {
 }
 
 /// 归类规则（唯一入口，测试与此保持同步）：
-/// - localTxt / localEpub / localPdf → 本地；
-/// - webArticle → null：数据保留，但不在书架任何分栏展示（收藏栏只放专辑）。
+/// - localTxt / localEpub / localPdf / webArticle → 本地（网页文章抓取后
+///   同样快照落盘，导入成功后须在「本地」分栏可见）；
+/// - 收藏栏只放专辑，不归类任何本地书。
 ShelfSection? shelfSectionOf(ReaderBookSource source) =>
     source.isLocalImport ? ShelfSection.local : null;
 
-/// 书架网格列数（按可用逻辑宽度自适应，封顶 3 列）。
+/// 书架网格列数：固定每行 2 个（测试与此保持同步）。
 ///
-/// 断点依据：720px 窄屏约 240dp → 2 列，避免单卡过窄；
-/// 常见竖屏手机 360dp / 横屏与平板 ≥600dp → 3 列。
-/// 用户要求一行 2~3 个，因此平板也不再扩到 4 列。
-int shelfGridColumns(double width) => width < 340 ? 2 : 3;
+/// 卡片更宽、封面更大，配合统一的 `spaceMd` 四周留白保持呼吸感。
+int shelfGridColumns(double width) => 2;
 
 /// 分栏空态文案（纯值对象，便于单测）。
 class ShelfEmptySpec {

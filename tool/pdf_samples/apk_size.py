@@ -1,9 +1,9 @@
-"""统计 debug dev APK 的体积与 pdfrx 原生库占比（同 ABI 口径）。"""
+"""统计 debug APK 的体积与 pdfrx 原生库占比（同 ABI 口径）。"""
 
 import os
 import zipfile
 
-APK = r"e:/www/kele-audio/build/app/outputs/flutter-apk/app-dev-debug.apk"
+APK = r"e:/www/kele-audio/build/app/outputs/flutter-apk/app-debug.apk"
 
 
 def main() -> None:

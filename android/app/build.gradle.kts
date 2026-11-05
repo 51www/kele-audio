@@ -45,11 +45,11 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // 应用名占位：prod = 可乐听书，dev = 可乐听书（调试），见 productFlavors
+        // 应用名：AndroidManifest 里 ${appLabel} 占位（可乐听书）
         manifestPlaceholders["appLabel"] = "可乐听书"
     }
 
-    // 签名：prod 读正式 key.properties；dev 读独立的 dev-key.properties（两者均 git-ignored）。
+    // 签名：release 读正式 key.properties；debug/profile 读独立的 dev-key.properties（两者均 git-ignored）。
     signingConfigs {
         create("release") {
             storeFile = file(checkNotNull(keystoreProperties["storeFile"]) {
@@ -65,7 +65,8 @@ android {
                 "android/app/key.properties 缺少 keyPassword"
             } as String
         }
-        // 二期调试专用：全新 keystore，与正式包签名完全无关（文件与口令均不入仓库）
+        // 调试专用 keystore：与正式包签名完全无关（文件与口令均不入仓库），
+        // debug/profile 变体统一用它，避免本机调试包与正式包签名混用。
         create("dev") {
             val devKeyProperties = Properties()
             val devKeyFile = file("dev-key.properties")
@@ -73,7 +74,7 @@ android {
                 devKeyProperties.load(FileInputStream(devKeyFile))
             }
             storeFile = file(checkNotNull(devKeyProperties["storeFile"] as String?) {
-                "android/app/dev-key.properties 缺少 storeFile，无法打包 dev 变体"
+                "android/app/dev-key.properties 缺少 storeFile，无法签名 debug/profile 变体"
             })
             storePassword = checkNotNull(devKeyProperties["storePassword"] as String?) {
                 "android/app/dev-key.properties 缺少 storePassword"
@@ -87,31 +88,14 @@ android {
         }
     }
 
-    // 包名/签名/应用名统一由 flavor 管理：prod 与已上线版本完全一致，dev 为独立调试包。
-    flavorDimensions += "env"
-    productFlavors {
-        create("prod") {
-            dimension = "env"
-            applicationId = "com.kele.audio"
-            signingConfig = signingConfigs.getByName("release")
-            manifestPlaceholders["appLabel"] = "可乐听书"
-        }
-        create("dev") {
-            dimension = "env"
-            applicationIdSuffix = ".dev"
-            versionNameSuffix = "-dev"
-            signingConfig = signingConfigs.getByName("dev")
-            manifestPlaceholders["appLabel"] = "可乐听书（调试）"
-        }
-    }
-
     buildTypes {
         release {
-            // 签名由 flavor 决定（prod=正式，dev=调试 keystore）
+            // 正式签名；debug/profile 见下
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             // AGP 会给 debug 变体自动回落到默认 debug keystore，这里显式改用 dev keystore，
-            // 保证二期调试包与正式包签名完全无关（prod 的 debug 变体同样只用本机调试，不外发）。
+            // 保证本机调试包与正式包签名完全无关（不外发）。
             signingConfig = signingConfigs.getByName("dev")
         }
         getByName("profile") {

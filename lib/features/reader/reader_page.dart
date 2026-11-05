@@ -182,8 +182,12 @@ class _ReaderPageState extends State<ReaderPage> {
       // 先读出上次进度再开始加载：WebView 首帧会先报 0 位置，
       // 若先加载再读进度，续读目标会被这次 0 位置覆盖。
       final saved = _progress.read(book.id);
+      // 从播放条跳入：阅读位置对齐到正在朗读的章节，而不是旧阅读断点。
+      final listening =
+          _tts.active && _tts.bookId == book.id && _tts.chapterIndex >= 0;
       _resumeTarget = saved;
-      _resumeSettled = saved == null || saved.chapterIndex == 0;
+      _resumeSettled =
+          listening || saved == null || saved.chapterIndex == 0;
       // PDF：读取页码侧车（缺失时退化为普通章节进度文案）。
       if (book.source == ReaderBookSource.localPdf) {
         final raw = await readReaderBookFile(book.id, PdfPageMap.fileName);
@@ -198,9 +202,11 @@ class _ReaderPageState extends State<ReaderPage> {
       _styleKey = _styleSignature(context);
       await _bridge.setStyle(style);
       await _bridge.openAt(
-        chapterIndex: saved?.chapterIndex ?? book.lastChapterIndex,
-        fraction: saved?.fraction ?? book.lastFraction,
-        cfi: saved?.cfi,
+        chapterIndex: listening
+            ? _tts.chapterIndex
+            : (saved?.chapterIndex ?? book.lastChapterIndex),
+        fraction: listening ? 0 : (saved?.fraction ?? book.lastFraction),
+        cfi: listening ? null : saved?.cfi,
       );
       final ok = await _bridge.loadBook(
         fileName: book.fileName,
@@ -224,7 +230,18 @@ class _ReaderPageState extends State<ReaderPage> {
         chapterTitleOf: (index) =>
             index < _toc.length ? _toc[index].label : '第${index + 1}章',
       );
-      _recordHistory(book, saved?.chapterIndex ?? book.lastChapterIndex);
+      // 听书会话仍在后台：定位到朗读断点段落（打开后高亮滚动即落到位）。
+      if (listening && mounted) {
+        await Future<void>.delayed(const Duration(milliseconds: 240));
+        if (!mounted) return;
+        await _bridge.highlightParagraph(_tts.paragraphIndex);
+      }
+      _recordHistory(
+        book,
+        listening
+            ? _tts.chapterIndex
+            : (saved?.chapterIndex ?? book.lastChapterIndex),
+      );
       // M9.4「进入书籍默认继续听书」：有听书断点才自动续读。
       if (!mounted) return;
       final ttsSettings = context.read<TtsSettingsStore>();
@@ -254,6 +271,24 @@ class _ReaderPageState extends State<ReaderPage> {
     } finally {
       _opening = false;
     }
+  }
+
+  /// 底栏页码：PDF 用页码侧车（精确），EPUB/TXT 用 JS 估算的全书页码。
+  String? _pageLabel() {
+    final map = _pdfPageMap;
+    if (map != null && map.pageCount > 0) {
+      final chapter = map.chapterAt(_location?.chapterIndex ?? 0);
+      if (chapter == null) return null;
+      final current = chapter.startPage == chapter.endPage
+          ? '${chapter.startPage}'
+          : '${chapter.startPage}–${chapter.endPage}';
+      return '$current / ${map.pageCount}';
+    }
+    final location = _location;
+    final page = location?.page;
+    final total = location?.pageCount;
+    if (page == null || total == null || total <= 0) return null;
+    return '$page / $total';
   }
 
   void _recordHistory(ReaderBook book, int chapterIndex) {
@@ -320,9 +355,9 @@ class _ReaderPageState extends State<ReaderPage> {
       ),
     );
     // 手动翻页/跳章时让听书同步到当前可见段落（TTS 自身滚动不会触发重定位）。
+    // 暂停中也同步断点：恢复朗读时从跳转后的位置继续。
     if (_tts.active &&
         _tts.bookId == widget.bookId &&
-        _tts.playing &&
         !_tts.navigating) {
       _scheduleTtsSync(location);
     }
@@ -331,9 +366,9 @@ class _ReaderPageState extends State<ReaderPage> {
   void _scheduleTtsSync(ReaderLocation location) {
     _ttsSyncTimer?.cancel();
     _ttsSyncTimer = Timer(const Duration(milliseconds: 600), () async {
-      if (!mounted || !_tts.active || !_tts.playing || _tts.navigating) return;
+      if (!mounted || !_tts.active || _tts.navigating) return;
       final paragraph = await _bridge.visibleParagraphIndex();
-      if (!mounted || !_tts.active || !_tts.playing || _tts.navigating) return;
+      if (!mounted || !_tts.active || _tts.navigating) return;
       await _tts.repositionTo(location.chapterIndex, paragraph);
     });
   }
@@ -343,9 +378,16 @@ class _ReaderPageState extends State<ReaderPage> {
       _showTtsDisabled(book);
       return;
     }
-    final active = _tts.active && _tts.bookId == book.id;
-    if (active) {
-      await _tts.toggle();
+    // 起播位置以「当前可见页」为准：跳页/跳章后点听书从当前页开始，而非旧书签。
+    final chapter = _location?.chapterIndex ?? book.lastChapterIndex;
+    if (_tts.active && _tts.bookId == book.id) {
+      if (_tts.playing) {
+        await _tts.pause();
+        return;
+      }
+      // 暂停中：先把断点对齐到当前页，再从这里恢复。
+      await _tts.alignToView(chapter);
+      await _tts.resume();
       return;
     }
     if (_tts.active) await _tts.stop();
@@ -355,12 +397,9 @@ class _ReaderPageState extends State<ReaderPage> {
       chapterTitleOf: (index) =>
           index < _toc.length ? _toc[index].label : '第${index + 1}章',
     );
-    final chapter = book.lastTtsParaIndex != null
-        ? book.lastChapterIndex
-        : (_location?.chapterIndex ?? book.lastChapterIndex);
     await _tts.start(
       chapterIndex: chapter,
-      paraIndex: book.lastTtsParaIndex,
+      fromBookmark: false,
     );
   }
 
@@ -812,6 +851,16 @@ class _ReaderPageState extends State<ReaderPage> {
                             style: tokens.captionStyle,
                           ),
                           const Spacer(),
+                          // 当前页码 / 总页数（PDF 用页码侧车，其余用 JS 估算）。
+                          if (_pageLabel() != null)
+                            Text(
+                              _pageLabel()!,
+                              style: tokens.captionStyle.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          if (_pageLabel() != null)
+                            SizedBox(width: tokens.spaceMd),
                           TextButton.icon(
                             onPressed: () => _bridge.prev(),
                             icon: const Icon(Icons.chevron_left_rounded),

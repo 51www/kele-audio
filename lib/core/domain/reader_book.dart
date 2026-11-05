@@ -19,10 +19,14 @@ extension ReaderBookSourceX on ReaderBookSource {
   };
 
   /// 是否为本机导入的书（书架「本地」分栏）。
+  ///
+  /// 网页文章同样是用户主动导入、抓取后以 EPUB 快照落盘，
+  /// 导入成功后必须在「本地」分栏可见，否则会出现「提示成功却找不到」。
   bool get isLocalImport =>
       this == ReaderBookSource.localTxt ||
       this == ReaderBookSource.localEpub ||
-      this == ReaderBookSource.localPdf;
+      this == ReaderBookSource.localPdf ||
+      this == ReaderBookSource.webArticle;
 
   static ReaderBookSource fromStorage(String? value) {
     for (final source in ReaderBookSource.values) {

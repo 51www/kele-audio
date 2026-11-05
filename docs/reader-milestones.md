@@ -151,7 +151,7 @@
 - [ ] 备份导出 → 卸载重装 → 还原，书架/进度/设置恢复（书籍文件按设计不参与备份）；
 - [ ] 还原后文件缺失书籍展示缺失态，重导/重抓引导可用；
 - [ ] 连通性自检在断网/正常网两种状态下提示正确；
-- [ ] `flutter build apk --release --split-per-abi` 构建成功，arm64 包体积增量 ≤ 6MB（本阶段先验证 debug dev 出包）；
+- [ ] `flutter build apk --release --split-per-abi` 构建成功，arm64 包体积增量 ≤ 6MB（本阶段先验证 debug 出包）；
 - [x] `flutter analyze` 无新增告警，全量测试通过（静态/构建级验收已完成）；
 - [x] release notes / README / 致谢三处收口完成。
 

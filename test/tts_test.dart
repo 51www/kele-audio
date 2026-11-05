@@ -178,7 +178,7 @@ void main() {
     expect(arbiter.owner, PlaybackOwner.bili);
   });
 
-  test('TtsSession：逐段朗读、跨章续读、断点落盘与听书历史', () async {
+  test('TtsSession：逐段朗读、跨章续读、断点落盘且不写听书历史', () async {
     final kv = MemoryKeyValueStore();
     final settings = TtsSettingsStore(kv);
     await settings.load();
@@ -223,11 +223,11 @@ void main() {
     expect(saved.lastChapterIndex, 1);
     expect(saved.lastTtsParaIndex, 1);
 
+    // 本地听书不写入历史记录（统计时长仍走独立的 logDuration）。
     final listening = activity.history
         .where((e) => e.mode == ReaderActivityMode.listening)
         .toList();
-    expect(listening.length, 2);
-    expect(listening.first.bookId, 'b1');
+    expect(listening, isEmpty);
   });
 
   group('系统引擎语速映射', () {

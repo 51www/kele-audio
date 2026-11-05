@@ -26,11 +26,17 @@ class ReaderLocation {
     required this.chapterIndex,
     required this.fraction,
     required this.cfi,
+    this.page,
+    this.pageCount,
   });
 
   final int chapterIndex;
   final double fraction;
   final String cfi;
+
+  /// 全书当前页码 / 总页数（JS 侧按字数估算，拿不到时为 null）。
+  final int? page;
+  final int? pageCount;
 }
 
 /// 目录项（`onToc`）。
@@ -186,6 +192,8 @@ class ReaderBridge {
             chapterIndex: (p['index'] as num?)?.toInt() ?? 0,
             fraction: (p['fraction'] as num?)?.toDouble() ?? 0,
             cfi: p['cfi']?.toString() ?? '',
+            page: (p['page'] as num?)?.toInt(),
+            pageCount: (p['pageCount'] as num?)?.toInt(),
           ),
         );
       case 'onToc':

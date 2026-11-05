@@ -198,12 +198,12 @@ void main() {
   });
 
   group('书架网格', () {
-    test('窄屏 2 列，常规与平板 3 列（封顶 3）', () {
+    test('每行固定 2 列（各屏宽一致）', () {
       expect(shelfGridColumns(240), 2);
       expect(shelfGridColumns(339), 2);
-      expect(shelfGridColumns(360), 3);
-      expect(shelfGridColumns(800), 3);
-      expect(shelfGridColumns(1200), 3);
+      expect(shelfGridColumns(360), 2);
+      expect(shelfGridColumns(800), 2);
+      expect(shelfGridColumns(1200), 2);
     });
 
     test('卡片进度紧凑且百分比优先', () {
@@ -230,7 +230,7 @@ void main() {
   });
 
   group('书架分栏归类', () {
-    test('本地来源进「本地」，网页文章不进任何分栏', () {
+    test('本地来源与网页文章都进「本地」分栏', () {
       expect(
         shelfSectionOf(ReaderBookSource.localTxt),
         ShelfSection.local,
@@ -243,7 +243,7 @@ void main() {
         shelfSectionOf(ReaderBookSource.localPdf),
         ShelfSection.local,
       );
-      expect(shelfSectionOf(ReaderBookSource.webArticle), isNull);
+      expect(shelfSectionOf(ReaderBookSource.webArticle), ShelfSection.local);
     });
 
     test('两个分栏的空态文案不同且行动导向明确', () {

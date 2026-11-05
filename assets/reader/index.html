@@ -32,13 +32,18 @@ function post(name, payload) {
 
 // ---- 渲染器事件 ---------------------------------------------------------
 let lastRange = null
+let lastRelocate = null
 view.addEventListener('relocate', e => {
   const d = e.detail || {}
   lastRange = d.range || null
+  lastRelocate = d
+  const info = estimatePage()
   post('onRelocated', {
     index: d.section?.current ?? d.index ?? d.tocItem?.index ?? null,
     fraction: d.fraction ?? null,
     cfi: d.cfi ?? null,
+    page: info ? info.page : null,
+    pageCount: info ? info.pageCount : null,
   })
 })
 
@@ -68,6 +73,44 @@ let ttsActiveNode = null
 
 function currentContents() {
   try { return (view.renderer?.getContents?.() || [])[0] || null } catch (e) { return null }
+}
+
+// ---- 全书页码（当前页 / 总页）-------------------------------------------
+// foliate 只给「章内」实测页数（page/pages，按列分页）：以当前章「字数/页」
+// 为密度，把各章字数折算成全书页码。滚动模式下 pages 无分页语义，退回
+// foliate 的 location（1500 字/页）；拿不到任何数据时返回 null（不显示）。
+function estimatePage() {
+  try {
+    const loc = lastRelocate && lastRelocate.location
+    const locFallback = (loc && Number.isFinite(Number(loc.current)))
+      ? {
+          page: Number(loc.current) + 1,
+          pageCount: Math.max(Number(loc.current) + 1, Number(loc.total) || 0),
+        }
+      : null
+    if (lastStyle && lastStyle.mode === 'scrolled') return locFallback
+    const r = view.renderer
+    const page = Number(r && r.page)
+    const pages = Number(r && r.pages)
+    if (!Number.isFinite(page) || !Number.isFinite(pages) || pages <= 0) return locFallback
+    const secs = (view.book && view.book.sections) || []
+    if (!secs.length) return locFallback
+    const idx = Number((currentContents() && currentContents().index) || 0)
+    const sizes = secs.map(s => Number(s && s.size) || 0)
+    const cur = sizes[idx] || 0
+    if (!(cur > 0)) return locFallback
+    const cpp = cur / pages               // 当前章每页字数（实测密度）
+    let before = 0
+    let total = 0
+    for (let i = 0; i < sizes.length; i++) {
+      total += sizes[i]
+      if (i < idx) before += sizes[i]
+    }
+    const page1 = Math.floor(before / cpp) + page + 1
+    return { page: page1, pageCount: Math.max(page1, Math.round(total / cpp)) }
+  } catch (e) {
+    return null
+  }
 }
 
 function textOf(node) {

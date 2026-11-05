@@ -3,9 +3,10 @@
 // 构建后把 Flutter Android 产物按 pubspec.yaml 的版本号重命名。
 // 跨平台通用（Windows / macOS / Linux，只要装了 Flutter，`dart` 即可用）。
 //
-// 用法（在仓库根目录，先执行 flutter build）：
-//   flutter build apk --release --split-per-abi && dart run tool/rename_release_apk.dart
-//   flutter build appbundle --release && dart run tool/rename_release_apk.dart
+// 用法（在仓库根目录，先执行 flutter build。注意用 `dart <file>` 而非 `dart run <file>`，
+// 后者会触发 pdfium_dart 等依赖的 host 端 build hooks，本机没装 MSVC 会直接失败）：
+//   flutter build apk --release --split-per-abi && dart tool/rename_release_apk.dart
+//   flutter build appbundle --release && dart tool/rename_release_apk.dart
 //
 // 重命名规则：
 //   app-arm64-v8a-release.apk   -> kele-audio-<version>-android-arm64-v8a.apk
