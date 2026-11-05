@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_tokens.dart';
 
 /// 品牌 Logo 徽标：应用内所有出现 logo 的位置统一用这一个组件，
-/// 图片源为 `docs/images/icon.png` 的 256px 切图 `docs/images/icon_app.png`
+/// 图片源为 `assets/icons/icon.png` 的 256px 切图 `assets/icons/icon_app.png`
 /// （pubspec 已声明为资产，源图 / 切图规则见 AGENT.md「项目 Logo」与 tool/gen_icons.ps1）。
 class KeleLogo extends StatelessWidget {
   const KeleLogo({super.key, this.size = 42, this.radius});
@@ -20,7 +20,7 @@ class KeleLogo extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius ?? tokens.radiusMd),
       child: Image.asset(
-        'docs/images/icon_app.png',
+        'assets/icons/icon_app.png',
         width: size,
         height: size,
         fit: BoxFit.cover,

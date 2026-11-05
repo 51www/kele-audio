@@ -1,9 +1,9 @@
-# 从 docs/images/icon.png 生成各类尺寸切图（全出血裁边 + 自适应图标前景/背景 + 应用内用图）
-# 仅本机开发用，产物写入 docs/images 与 android res mipmap
+# 从 assets/icons/icon.png 生成各类尺寸切图（全出血裁边 + 自适应图标前景/背景 + 应用内用图）
+# 仅本机开发用，产物写入 assets/icons 与 android res mipmap
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
-$src = [System.Drawing.Bitmap]::new('E:\www\kele-audio\docs\images\icon.png')
+$src = [System.Drawing.Bitmap]::new('E:\www\kele-audio\assets\icons\icon.png')
 Write-Output ("src: {0}x{1}" -f $src.Width, $src.Height)
 
 # 1) 检测非透明内容的包围盒（icon 四角为透明）
@@ -44,11 +44,11 @@ function Save ([System.Drawing.Bitmap]$bmp, [string]$path) {
 # 2) 全出血版：裁掉透明边，圆角方块顶满画布
 $full = $src.Clone([System.Drawing.Rectangle]::new($minX, $minY, $cropW, $cropH), $src.PixelFormat)
 $fullbleed = Resize $full 1024
-Save $fullbleed 'E:\www\kele-audio\docs\images\icon_fullbleed.png'
+Save $fullbleed 'E:\www\kele-audio\assets\icons\icon_fullbleed.png'
 
 # 3) 应用内用图（Flutter 资产）：256px 全出血
 $app = Resize $fullbleed 256
-Save $app 'E:\www\kele-audio\docs\images\icon_app.png'
+Save $app 'E:\www\kele-audio\assets\icons\icon_app.png'
 
 # 4) 传统 mipmap（API<26 机型）：全出血，48dp 基准
 $legacy = @{ 'mdpi' = 48; 'hdpi' = 72; 'xhdpi' = 96; 'xxhdpi' = 144; 'xxxhdpi' = 192 }
