@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/route_observer.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../core/domain/reader_book.dart';
 import '../../core/services/reader/book_file_store.dart';
@@ -17,6 +18,7 @@ import '../../core/services/reader/reader_import_service.dart';
 import '../../core/services/reader/reader_progress_store.dart';
 import '../../core/services/reader/reader_typography.dart';
 import '../../core/services/reader/pdf_page_map.dart';
+import '../../core/services/reader/reading_duration_clock.dart';
 import '../../core/services/tts/tts_session.dart';
 import '../../core/services/tts/tts_settings_store.dart';
 import 'reader_settings_sheet.dart';
@@ -35,7 +37,8 @@ class ReaderPage extends StatefulWidget {
   State<ReaderPage> createState() => _ReaderPageState();
 }
 
-class _ReaderPageState extends State<ReaderPage> {
+class _ReaderPageState extends State<ReaderPage>
+    with RouteAware, WidgetsBindingObserver {
   /// WebViewAssetLoader 的 https 域名（androidx.webkit 默认域）。
   static const _assetDomain = 'appassets.androidplatform.net';
 
@@ -50,7 +53,6 @@ class _ReaderPageState extends State<ReaderPage> {
   final DateTime _openedAt = DateTime.now();
   final List<ReaderTocItem> _toc = [];
   ReaderLocation? _location;
-  Timer? _ttsSyncTimer;
 
   Uint8List? _bytes;
   bool _jsReady = false;
@@ -68,9 +70,20 @@ class _ReaderPageState extends State<ReaderPage> {
   /// PDF 页码映射侧车（非 PDF 为 null）。
   PdfPageMap? _pdfPageMap;
 
+  /// 已推给页脚渲染的页码文案，避免重复桥调用。
+  String? _lastPageLabel;
+
+  /// 阅读计时：只累加「当前路由可见 + 应用在前台 + 书籍已打开」的时长。
+  /// 被听书播放页或任意二级页/弹层覆盖、退到后台都会暂停，重新露出后续算。
+  final ReadingDurationClock _readingClock = ReadingDurationClock();
+  ModalRoute<dynamic>? _route;
+  bool _routeVisible = true;
+  bool _appVisible = true;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _books = context.read<ReaderBookStore>();
     _activity = context.read<ReaderActivityStore>();
     _progress = context.read<ReaderProgressStore>();
@@ -85,6 +98,10 @@ class _ReaderPageState extends State<ReaderPage> {
       onRelocated: _onRelocated,
       onToc: (items) {
         if (!mounted) return;
+        // 目录同步给听书会话：关掉阅读页后播放页/播放条仍能显示章节名。
+        _tts.updateChapterTitles(widget.bookId, [
+          for (final item in items) item.label,
+        ]);
         setState(() {
           _toc
             ..clear()
@@ -108,8 +125,75 @@ class _ReaderPageState extends State<ReaderPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route == _route) return;
+    if (_route != null) appRouteObserver.unsubscribe(this);
+    _route = route;
+    _routeVisible = route?.isCurrent ?? true;
+    if (route != null) appRouteObserver.subscribe(this, route);
+    _syncReadingClock();
+  }
+
+  /// 被任意页面（听书播放页、二级页、目录/排版弹层…）覆盖。
+  @override
+  void didPushNext() {
+    _routeVisible = false;
+    _syncReadingClock();
+  }
+
+  /// 覆盖页退出，阅读页重新露出。
+  @override
+  void didPopNext() {
+    _routeVisible = true;
+    _syncReadingClock();
+    // 从播放页返回：以朗读段落为准重新锚定正文，避免停在用户浏览的旧页。
+    if (_tts.active && _tts.bookId == widget.bookId) {
+      unawaited(_anchorToTtsParagraph());
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final visible = state == AppLifecycleState.resumed;
+    if (visible == _appVisible) return;
+    _appVisible = visible;
+    _syncReadingClock();
+  }
+
+  /// 可见性统一判断：路由在前台且当前露出才计时，其余一律暂停。
+  void _syncReadingClock() {
+    if (_routeVisible && _appVisible) {
+      _readingClock.resume();
+      return;
+    }
+    _readingClock.pause();
+    // 暂停即落盘：退到后台被系统回收时不丢已停留的部分。
+    _flushReadingDuration();
+  }
+
+  /// 把尚未写入的可见时长追加到统计（增量写入，不会重复累加）。
+  void _flushReadingDuration() {
+    // 与既有口径一致：只有书籍真正打开过的会话才计入，打开失败不计。
+    if (!_opened) return;
+    final seconds = _readingClock.takeIncrement();
+    if (seconds <= 0) return;
+    unawaited(
+      _activity.logDuration(
+        bookId: widget.bookId,
+        durationSec: seconds,
+        mode: ReaderActivityMode.reading,
+        // 口径不变：一次阅读会话仍归到打开当天。
+        at: _openedAt,
+      ),
+    );
+  }
+
+  @override
   void dispose() {
-    _ttsSyncTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    appRouteObserver.unsubscribe(this);
     // 退出阅读页只解绑高亮，不中断后台听书（M9.3）。
     _tts.unbindReader();
     final location = _location;
@@ -121,6 +205,7 @@ class _ReaderPageState extends State<ReaderPage> {
             cfi: location.cfi,
             chapterIndex: location.chapterIndex,
             fraction: location.fraction,
+            page: _recordPage(location),
             savedAt: DateTime.now(),
           ),
         ),
@@ -133,17 +218,9 @@ class _ReaderPageState extends State<ReaderPage> {
         ),
       );
     }
-    final seconds = DateTime.now().difference(_openedAt).inSeconds;
-    if (_opened && seconds >= 5) {
-      unawaited(
-        _activity.logDuration(
-          bookId: widget.bookId,
-          durationSec: seconds,
-          mode: ReaderActivityMode.reading,
-          at: _openedAt,
-        ),
-      );
-    }
+    // 结束计时并写入最后一段可见时长（被覆盖期间不计入）。
+    _readingClock.stop();
+    _flushReadingDuration();
     _bridge.dispose();
     super.dispose();
   }
@@ -177,6 +254,7 @@ class _ReaderPageState extends State<ReaderPage> {
         port: _ttsPort,
         chapterTitleOf: (index) =>
             index < _toc.length ? _toc[index].label : '第${index + 1}章',
+        chapterTitles: [for (final item in _toc) item.label],
       );
       if (!mounted) return;
       // 先读出上次进度再开始加载：WebView 首帧会先报 0 位置，
@@ -221,6 +299,8 @@ class _ReaderPageState extends State<ReaderPage> {
         return;
       }
       _opened = true;
+      // 打开前的可见停留同样属于本次阅读（沿用原口径），这里只确保计时在跑。
+      _syncReadingClock();
       // renderer 就绪后再注入一次样式（模式切换依赖 renderer 属性）。
       await _bridge.setStyle(style);
       // 再次绑定：若听书会话仍在后台，补挂高亮/续读下一章。
@@ -229,12 +309,11 @@ class _ReaderPageState extends State<ReaderPage> {
         port: _ttsPort,
         chapterTitleOf: (index) =>
             index < _toc.length ? _toc[index].label : '第${index + 1}章',
+        chapterTitles: [for (final item in _toc) item.label],
       );
-      // 听书会话仍在后台：定位到朗读断点段落（打开后高亮滚动即落到位）。
+      // 听书会话仍在后台：以朗读段落为锚点定位正文（未就绪时自动重试）。
       if (listening && mounted) {
-        await Future<void>.delayed(const Duration(milliseconds: 240));
-        if (!mounted) return;
-        await _bridge.highlightParagraph(_tts.paragraphIndex);
+        unawaited(_anchorToTtsParagraph());
       }
       _recordHistory(
         book,
@@ -273,22 +352,51 @@ class _ReaderPageState extends State<ReaderPage> {
     }
   }
 
-  /// 底栏页码：PDF 用页码侧车（精确），EPUB/TXT 用 JS 估算的全书页码。
+  /// 页码文案：翻页模式给出「当前页 / 总页数」，滚动模式无静态分页返回 null。
+  ///
+  /// - PDF：用页码侧车（[PdfPageMap]）把章内进度换算成原始 PDF 页码，总页数精确；
+  /// - EPUB/TXT：当前页是渲染器实测的屏页，总页数按当前章「字数/屏」密度折算。
   String? _pageLabel() {
+    if (_typography.value.flow != ReaderFlow.paged) return null;
+    final location = _location;
+    if (location == null) return null;
     final map = _pdfPageMap;
     if (map != null && map.pageCount > 0) {
-      final chapter = map.chapterAt(_location?.chapterIndex ?? 0);
+      final chapter = map.chapterAt(location.chapterIndex);
       if (chapter == null) return null;
-      final current = chapter.startPage == chapter.endPage
-          ? '${chapter.startPage}'
-          : '${chapter.startPage}–${chapter.endPage}';
-      return '$current / ${map.pageCount}';
+      final span = chapter.endPage - chapter.startPage + 1;
+      if (span <= 0) return null;
+      final offset =
+          (location.fraction.clamp(0.0, 1.0) * span).floor().clamp(0, span - 1);
+      return '${chapter.startPage + offset} / ${map.pageCount}';
     }
-    final location = _location;
-    final page = location?.page;
-    final total = location?.pageCount;
+    final page = location.page;
+    final total = location.pageCount;
     if (page == null || total == null || total <= 0) return null;
     return '$page / $total';
+  }
+
+  /// 页码快照（「最近记录」展示用）：PDF 走侧车换算原始页码，其余取渲染器页码。
+  int? _recordPage(ReaderLocation location) {
+    final map = _pdfPageMap;
+    if (map != null && map.pageCount > 0) {
+      final chapter = map.chapterAt(location.chapterIndex);
+      if (chapter == null) return null;
+      final span = chapter.endPage - chapter.startPage + 1;
+      if (span <= 0) return null;
+      final offset =
+          (location.fraction.clamp(0.0, 1.0) * span).floor().clamp(0, span - 1);
+      return chapter.startPage + offset;
+    }
+    return location.page;
+  }
+
+  /// 页脚页码：只在文案变化时推给 WebView，避免每次翻页多一次桥调用。
+  void _syncPageLabel() {
+    final label = _pageLabel() ?? '';
+    if (label == _lastPageLabel) return;
+    _lastPageLabel = label;
+    unawaited(_bridge.setPageLabel(label));
   }
 
   void _recordHistory(ReaderBook book, int chapterIndex) {
@@ -323,6 +431,7 @@ class _ReaderPageState extends State<ReaderPage> {
   void _onRelocated(ReaderLocation location) {
     if (!mounted) return;
     setState(() => _location = location);
+    _syncPageLabel();
     // 续读目标未到达前（首帧通常报第 0 章），不写进度，避免覆盖断点。
     if (!_resumeSettled) {
       final target = _resumeTarget;
@@ -343,6 +452,7 @@ class _ReaderPageState extends State<ReaderPage> {
           cfi: location.cfi,
           chapterIndex: location.chapterIndex,
           fraction: location.fraction,
+          page: _recordPage(location),
           savedAt: now,
         ),
       ),
@@ -354,23 +464,32 @@ class _ReaderPageState extends State<ReaderPage> {
         fraction: location.fraction,
       ),
     );
-    // 手动翻页/跳章时让听书同步到当前可见段落（TTS 自身滚动不会触发重定位）。
-    // 暂停中也同步断点：恢复朗读时从跳转后的位置继续。
+    // 读写在同一次重定位上完成：页首段落直接来自本次 reloc 事件，
+    // 不再另开定时器二次查询。朗读高亮自身滚动的 reloc 不回写，避免反向拖拽。
+    //
+    // 只在暂停时回写：播放中段落推进由 TTS 自己驱动，跨页/自动滚动产生的
+    // reloc 携带的是「页首段」，回写会触发 repositionTo → _restartLoop，
+    // 把朗读拉回本页第 1 段（读完页末段后回绕）。暂停后再翻页才更新断点。
+    final paragraph = location.paragraphIndex;
     if (_tts.active &&
+        _tts.paused &&
         _tts.bookId == widget.bookId &&
-        !_tts.navigating) {
-      _scheduleTtsSync(location);
+        !_tts.navigating &&
+        !location.ttsScroll &&
+        paragraph != null &&
+        paragraph >= 0 &&
+        location.chapterIndex == _tts.chapterIndex) {
+      unawaited(_tts.repositionTo(location.chapterIndex, paragraph));
     }
   }
 
-  void _scheduleTtsSync(ReaderLocation location) {
-    _ttsSyncTimer?.cancel();
-    _ttsSyncTimer = Timer(const Duration(milliseconds: 600), () async {
-      if (!mounted || !_tts.active || _tts.navigating) return;
-      final paragraph = await _bridge.visibleParagraphIndex();
-      if (!mounted || !_tts.active || _tts.navigating) return;
-      await _tts.repositionTo(location.chapterIndex, paragraph);
-    });
+  /// 以朗读段落为唯一坐标锚定正文：章节未渲染时重试，直到高亮命中。
+  Future<void> _anchorToTtsParagraph() async {
+    for (var attempt = 0; attempt < 12; attempt++) {
+      if (!mounted || !_tts.active || _tts.bookId != widget.bookId) return;
+      if (await _bridge.highlightParagraph(_tts.paragraphIndex)) return;
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
   }
 
   Future<void> _toggleTts(ReaderBook book) async {
@@ -397,8 +516,14 @@ class _ReaderPageState extends State<ReaderPage> {
       chapterTitleOf: (index) =>
           index < _toc.length ? _toc[index].label : '第${index + 1}章',
     );
+    // 起播段落取「页位置同一次测量」的段落索引（与阅读页显示一致），
+    // 不再让 start 内部另调一次 visibleParagraph 形成第二个来源。
+    final para = _location != null && _location!.chapterIndex == chapter
+        ? _location!.paragraphIndex
+        : null;
     await _tts.start(
       chapterIndex: chapter,
+      paraIndex: para,
       fromBookmark: false,
     );
   }
@@ -591,6 +716,8 @@ class _ReaderPageState extends State<ReaderPage> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _bridge.setStyle(style);
+        // 排版变化会重建分栏/页脚：先重设页码，新的页码等 JS 重算后回推。
+        _syncPageLabel();
       });
     }
 
@@ -614,7 +741,8 @@ class _ReaderPageState extends State<ReaderPage> {
               child: InAppWebView(
                 initialUrlRequest: URLRequest(
                   url: WebUri(
-                    'https://$_assetDomain/assets/flutter_assets/assets/reader/index.html',
+                    'https://$_assetDomain/assets/flutter_assets/assets/reader/index.html'
+                    '?rv=2016',
                   ),
                 ),
                 initialSettings: InAppWebViewSettings(
@@ -622,6 +750,10 @@ class _ReaderPageState extends State<ReaderPage> {
                   transparentBackground: true,
                   supportZoom: false,
                   disableContextMenu: true,
+                  // 本地 asset 不缓存：升级 APK 后必须拿到新版 index.html，
+                  // 否则 WebView 会继续用旧桥协议（缺失段落索引字段）。
+                  cacheEnabled: false,
+                  cacheMode: CacheMode.LOAD_NO_CACHE,
                   webViewAssetLoader: WebViewAssetLoader(
                     domain: _assetDomain,
                     pathHandlers: [AssetsPathHandler(path: '/assets/')],
@@ -851,16 +983,23 @@ class _ReaderPageState extends State<ReaderPage> {
                             style: tokens.captionStyle,
                           ),
                           const Spacer(),
-                          // 当前页码 / 总页数（PDF 用页码侧车，其余用 JS 估算）。
-                          if (_pageLabel() != null)
+                          // 页码：翻页模式「当前页 / 总页数」（与常驻页脚同一口径）；
+                          // 滚动模式无静态分页，退化为全书进度百分比。
+                          if (_typography.value.flow == ReaderFlow.scrolled)
+                            Text(
+                              '全书 $percent%',
+                              style: tokens.captionStyle.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            )
+                          else if (_pageLabel() != null)
                             Text(
                               _pageLabel()!,
                               style: tokens.captionStyle.copyWith(
                                 color: scheme.onSurfaceVariant,
                               ),
                             ),
-                          if (_pageLabel() != null)
-                            SizedBox(width: tokens.spaceMd),
+                          SizedBox(width: tokens.spaceMd),
                           TextButton.icon(
                             onPressed: () => _bridge.prev(),
                             icon: const Icon(Icons.chevron_left_rounded),
@@ -911,8 +1050,13 @@ class _BridgeTtsPort implements TtsReaderPort {
   }
 
   @override
-  Future<void> highlight(int paragraphIndex) =>
-      _bridge.highlightParagraph(paragraphIndex);
+  Future<void> highlight(int paragraphIndex, {bool scroll = true}) async {
+    if (scroll) {
+      await _bridge.highlightParagraph(paragraphIndex);
+    } else {
+      await _bridge.markParagraph(paragraphIndex);
+    }
+  }
 
   @override
   Future<void> clearHighlight() => _bridge.clearHighlight();

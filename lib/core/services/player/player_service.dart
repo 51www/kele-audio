@@ -63,7 +63,6 @@ class PlayerService extends ChangeNotifier
     _mode = prefs.mode;
     _quality = prefs.quality;
     _stopAtChapterEnd = prefs.stopAtChapterEnd;
-    _autoNext = prefs.autoNext;
   }
 
   final PlayUrlService playUrl;
@@ -141,7 +140,6 @@ class PlayerService extends ChangeNotifier
   bool _bound = false;
   bool _isVip = false;
   bool _stopAtChapterEnd = false;
-  bool _autoNext = true;
 
   Duration _sleepRemaining = Duration.zero;
   Timer? _sleepTimer;
@@ -188,7 +186,6 @@ class PlayerService extends ChangeNotifier
   bool get bound => _bound;
   bool get isVip => _isVip;
   bool get stopAtChapterEnd => _stopAtChapterEnd;
-  bool get autoNext => _autoNext;
   Duration get sleepRemaining => _sleepRemaining;
   bool get hasSleepTimer => _sleepTimer != null;
 
@@ -715,14 +712,6 @@ class PlayerService extends ChangeNotifier
     notifyListeners();
   }
 
-  /// M5 设置页「后台自动播放下一章」（PRD §5.6.4）：关闭后本章播完即停。
-  Future<void> setAutoNext(bool v) async {
-    if (v == _autoNext) return;
-    _autoNext = v;
-    await prefs.saveAutoNext(v);
-    notifyListeners();
-  }
-
   /// 本地备份还原后重读持久化参数（只更新默认值，不打断当前播放）。
   void reloadPrefs() {
     _rate = prefs.rate;
@@ -734,7 +723,6 @@ class PlayerService extends ChangeNotifier
       _quality = AudioQuality.highestUnlocked(bound: _bound, isVip: _isVip);
     }
     _stopAtChapterEnd = prefs.stopAtChapterEnd;
-    _autoNext = prefs.autoNext;
     notifyListeners();
   }
 
@@ -999,17 +987,6 @@ class PlayerService extends ChangeNotifier
     if (_mode == PlayMode.loopOne) {
       await seek(Duration.zero);
       await play();
-      return;
-    }
-
-    // M5 设置「后台自动播放下一章」关闭：只门控跨章推进，
-    // 单曲循环（重播本章）不受影响（PRD §5.6.4 字面语义）。
-    if (!_autoNext) {
-      await _rewindTail();
-      await pause();
-      unawaited(_advanceProgressToNext());
-      _log('[completed] 自动连播关闭，本章播完已暂停');
-      notifyListeners();
       return;
     }
 

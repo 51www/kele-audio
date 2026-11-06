@@ -19,7 +19,7 @@ const String appVersion = '1.2.0';
 
 /// Tab 3 我的（PRD §5.6）。
 ///
-/// M1 范围：页面骨架 + 二级页入口 + **全局主题切换**（六套自定义皮肤）
+/// M1 范围：页面骨架 + 二级页入口 + **全局主题切换**（三套保留皮肤）
 /// + 工程自检；统计与设置项在 M5 完善。
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -101,13 +101,6 @@ class ProfilePage extends StatelessWidget {
               padding: EdgeInsets.zero,
               child: Column(
                 children: [
-                  _EntryTile(
-                    icon: Icons.history_rounded,
-                    label: '历史收听',
-                    stage: '',
-                    onTap: () => context.push('/profile/history'),
-                  ),
-                  _divider(tokens),
                   _EntryTile(
                     icon: Icons.download_for_offline_outlined,
                     label: '离线缓存',

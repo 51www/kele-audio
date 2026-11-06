@@ -28,6 +28,8 @@ class ReaderLocation {
     required this.cfi,
     this.page,
     this.pageCount,
+    this.paragraphIndex,
+    this.ttsScroll = false,
   });
 
   final int chapterIndex;
@@ -37,6 +39,12 @@ class ReaderLocation {
   /// 全书当前页码 / 总页数（JS 侧按字数估算，拿不到时为 null）。
   final int? page;
   final int? pageCount;
+
+  /// 本次重定位时页首可见段落下标（段落尚未提取时为 null）。
+  final int? paragraphIndex;
+
+  /// 该次重定位是否由朗读高亮滚动触发（是则应忽略，避免反写朗读位置）。
+  final bool ttsScroll;
 }
 
 /// 目录项（`onToc`）。
@@ -194,6 +202,8 @@ class ReaderBridge {
             cfi: p['cfi']?.toString() ?? '',
             page: (p['page'] as num?)?.toInt(),
             pageCount: (p['pageCount'] as num?)?.toInt(),
+            paragraphIndex: (p['paragraph'] as num?)?.toInt(),
+            ttsScroll: p['ttsScroll'] == true,
           ),
         );
       case 'onToc':
@@ -287,6 +297,10 @@ class ReaderBridge {
 
   Future<void> prev() => _send('window.reader.prev()');
 
+  /// 页脚页码：写入渲染器自带的页脚留白（不遮正文、随排版重建后重设）。
+  Future<void> setPageLabel(String label) =>
+      _send('window.reader.setPageLabel(${jsonEncode(label)})');
+
   // ---- M9.3 TTS：段落提取 / 高亮跟随 / 位置查询 -------------------------
 
   /// 当前渲染章节索引（未就绪返回 0）。
@@ -314,8 +328,16 @@ class ReaderBridge {
     return const [];
   }
 
-  Future<void> highlightParagraph(int index) =>
-      _send('window.reader.highlightParagraph($index)');
+  /// 高亮并滚动到指定段落；返回是否真正命中（章节未就绪/节点缺失为 false）。
+  Future<bool> highlightParagraph(int index) => _callTtsMark('highlightParagraph', index);
+
+  /// 只换高亮、不滚动（暂停中翻页同步用，避免把页面拽回长段开头）。
+  Future<bool> markParagraph(int index) => _callTtsMark('markParagraph', index);
+
+  Future<bool> _callTtsMark(String method, int index) async {
+    final raw = await _eval('window.reader.$method($index)');
+    return raw == true || raw?.toString() == 'true';
+  }
 
   Future<void> clearHighlight() => _send('window.reader.clearHighlight()');
 

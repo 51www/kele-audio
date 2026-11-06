@@ -30,7 +30,7 @@ class _FakePort implements TtsReaderPort {
   }
 
   @override
-  Future<void> highlight(int paragraphIndex) async {
+  Future<void> highlight(int paragraphIndex, {bool scroll = true}) async {
     highlights.add(paragraphIndex);
   }
 
@@ -98,6 +98,9 @@ class _GatedTtsEngine implements TtsEngine {
 
   @override
   Future<void> testConnection() async {}
+
+  @override
+  void resetCache() {}
 
   @override
   Future<void> dispose() async {}

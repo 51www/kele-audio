@@ -1,10 +1,12 @@
 import 'dart:convert';
-import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 import '../../domain/reader_book.dart';
 import 'book_file_store.dart';
 import 'book_store.dart';
 import 'epub_importer.dart';
+import 'local_book_cover.dart';
 import 'pdf_importer.dart';
 import 'pdf_page_map.dart';
 import 'reader_activity_store.dart';
@@ -57,6 +59,9 @@ class ReaderImportService {
   final ReaderProgressStore? progress;
 
   static const String bookFileName = 'book.epub';
+
+  /// 旧书补封面是否在进行中（避免书架重复进出时并发跑两轮）。
+  bool _coverBackfillRunning = false;
 
   /// TXT 导入：编码识别 → 清洗 → 切章 → 打包 EPUB。
   Future<ReaderBook> importTxt({
@@ -119,6 +124,8 @@ class ReaderImportService {
 
     final id = EpubBuilder.newBookId();
     await saveReaderBookFile(id, bytes, fileName: bookFileName);
+    // 封面是加分项：解析/落盘失败一律静默跳过，回退书架首字占位。
+    final coverPath = await LocalBookCover.save(id, meta.coverBytes);
 
     final book = ReaderBook(
       id: id,
@@ -127,10 +134,47 @@ class ReaderImportService {
       source: ReaderBookSource.localEpub,
       fileName: bookFileName,
       chapterCount: meta.chapterCount,
+      coverPath: coverPath,
       addedAt: DateTime.now(),
     );
     await books.add(book);
     return book;
+  }
+
+  /// 旧书补封面：只处理缺封面的本地 EPUB，逐本独立失败，不影响其它书。
+  ///
+  /// 由书架页首帧后触发一次；[books] 里已有封面文件的直接跳过。
+  Future<void> backfillLocalCovers() async {
+    if (_coverBackfillRunning) return;
+    _coverBackfillRunning = true;
+    try {
+      for (final book in books.books) {
+        if (book.source != ReaderBookSource.localEpub) continue;
+        final hasCoverFile = await readerBookFileExists(
+          book.id,
+          LocalBookCover.fileName,
+        );
+        if (book.coverPath != null && hasCoverFile) continue;
+
+        Uint8List? raw;
+        try {
+          final bytes = await readReaderBookFile(book.id, book.fileName);
+          if (bytes == null) continue;
+          raw = EpubImporter.readCoverQuietly(bytes);
+        } catch (_) {
+          continue;
+        }
+        if (raw == null) continue;
+
+        final path = await LocalBookCover.save(book.id, raw);
+        if (path == null) continue;
+        await books.upsert(book.copyWith(coverPath: path));
+      }
+    } catch (e) {
+      debugPrint('[reader] 旧书补封面中断：$e');
+    } finally {
+      _coverBackfillRunning = false;
+    }
   }
 
   /// 网页文章导入（抓取 + 切章 + EPUB 快照）。

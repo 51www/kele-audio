@@ -40,10 +40,8 @@ class CoverImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    Widget placeholder() => _LetterCover(
-          title: title,
-          borderRadius: borderRadius,
-        );
+    Widget placeholder() =>
+        _LetterCover(title: title, borderRadius: borderRadius);
 
     final resolved = resolveUrl(url);
     if (resolved.isEmpty) return placeholder();
@@ -76,18 +74,18 @@ class CoverImage extends StatelessWidget {
 extension on Widget {
   /// 图片底衬：加载中/失败时露出主题色渐变而不是黑底。
   Widget _withBackground(ColorScheme scheme) => DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              scheme.primary.withValues(alpha: 0.35),
-              scheme.secondary.withValues(alpha: 0.25),
-            ],
-          ),
-        ),
-        child: this,
-      );
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          scheme.primary.withValues(alpha: 0.35),
+          scheme.secondary.withValues(alpha: 0.25),
+        ],
+      ),
+    ),
+    child: this,
+  );
 }
 
 class _LetterCover extends StatelessWidget {
@@ -124,69 +122,89 @@ class _LetterCover extends StatelessWidget {
   }
 }
 
-/// 发现页双列卡片：封面 + 标题 + UP + 一行元信息。
+/// 发现页双列卡片：16:9 封面（UP 主 / 集数叠在封面底部两角）+ 两行标题。
 ///
-/// 元信息口径：合集卡片有章节数 → 「N 集」；搜索卡片章节虚标（`videos`
-/// 常为 "null"）→ 不显示集数，改显示时长 + 播放量。
+/// 元信息口径：合集卡片有章节数 → 「N 集」；没有章节数的搜索卡片依次回退
+/// 到时长、播放量。叠层文字统一限制为 5 个字符，超出省略。
 class AlbumCard extends StatelessWidget {
   const AlbumCard({super.key, required this.album, this.onTap});
 
   final Album album;
   final VoidCallback? onTap;
 
+  /// 叠层两侧文字的最大字符数。
+  static const int overlayMaxChars = 5;
+
+  /// 卡片文案区（固定两行标题）高度，供网格行高预算共用，避免两处推算分叉。
+  static double titleAreaHeight(AppTokens tokens) =>
+      tokens.bodyStyle.fontSize! * _titleHeight * 2;
+
+  static const double _titleHeight = 1.35;
+
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
+    final radius = BorderRadius.circular(tokens.radiusSm);
+    final leftLabel = _clamp(_leftLabel());
+    final rightLabel = _clampOrNull(_rightLabel());
 
+    // 布局节奏：卡内四周内缩 10px，封面固定 16:9（BoxFit.cover 裁切不变形），
+    // UP 主/集数叠在封面底部左右两角，标题固定在封面下两行高。
     return KeleCard(
       onTap: onTap,
-      padding: EdgeInsets.zero,
+      padding: EdgeInsets.all(tokens.spaceSm + 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 封面固定 16:9，行高由网格按「封面 + 文案区 104px」计算，
-          // 避免文案区按 100px 估算时差 0.875px 触发溢出。
           AspectRatio(
             aspectRatio: 16 / 9,
-            child: CoverImage(
-              url: album.coverUrl,
-              title: album.title,
-              borderRadius: BorderRadius.vertical(
-                top: Radius.circular(tokens.radiusMd - 1),
+            child: ClipRRect(
+              borderRadius: radius,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  CoverImage(url: album.coverUrl, title: album.title),
+                  Positioned(
+                    left: 6,
+                    right: 6,
+                    bottom: 6,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Flexible(
+                          child: _CoverChip(text: leftLabel, alignRight: false),
+                        ),
+                        if (rightLabel != null) ...[
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: _CoverChip(
+                              text: rightLabel,
+                              alignRight: true,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          Padding(
-            padding: EdgeInsets.all(tokens.spaceSm + 2),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  album.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: tokens.bodyStyle.copyWith(
-                    color: scheme.onSurface,
-                    fontWeight: FontWeight.w700,
-                    height: 1.35,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  album.upName.isEmpty ? 'UP 主未知' : album.upName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: tokens.captionStyle,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _metaLine(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: tokens.numStyle,
-                ),
-              ],
+          SizedBox(height: tokens.spaceSm),
+          SizedBox(
+            width: double.infinity,
+            height: titleAreaHeight(tokens),
+            child: Text(
+              album.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: tokens.bodyStyle.copyWith(
+                color: scheme.onSurface,
+                fontWeight: FontWeight.w700,
+                height: _titleHeight,
+              ),
             ),
           ),
         ],
@@ -194,26 +212,75 @@ class AlbumCard extends StatelessWidget {
     );
   }
 
-  String _metaLine() {
-    final parts = <String>[
-      if (album.chapterCount > 0) '${album.chapterCount} 集',
-      if (album.totalDurationSec > 0) _fmtDur(album.totalDurationSec),
-      if (album.playCount > 0) _fmtPlay(album.playCount),
-    ];
-    return parts.isEmpty ? '—' : parts.join(' · ');
+  String _leftLabel() =>
+      album.upName.trim().isEmpty ? '未知UP' : album.upName.trim();
+
+  /// 右侧只叠集数；无章节数（搜索卡片虚标）时不显示，避免占用画面。
+  String? _rightLabel() =>
+      album.chapterCount > 0 ? '${album.chapterCount} 集' : null;
+
+  /// 超过 [AlbumCard.overlayMaxChars] 个字符时，保留前 N-1 个 + 省略号
+  /// （总长仍不超过上限）。
+  static String _clamp(String value) {
+    final chars = value.characters;
+    if (chars.length <= overlayMaxChars) return value;
+    return '${chars.take(overlayMaxChars - 1).join()}…';
   }
 
-  static String _fmtDur(int sec) {
-    if (sec >= 3600) {
-      final h = sec / 3600;
-      return h >= 10 ? '${h.round()} 小时' : '${h.toStringAsFixed(1)} 小时';
-    }
-    return '${(sec / 60).round()} 分钟';
-  }
+  static String? _clampOrNull(String? value) =>
+      value == null ? null : _clamp(value);
+}
 
-  static String _fmtPlay(int play) {
-    if (play >= 100000000) return '${(play / 100000000).toStringAsFixed(1)} 亿播放';
-    if (play >= 10000) return '${(play / 10000).toStringAsFixed(1)} 万播放';
-    return '$play 播放';
+/// 封面底部叠层小标签：半透明黑底 + 白字，保证任意封面上的可读性，
+/// 同时只覆盖底部两角的小块画面。
+class _CoverChip extends StatelessWidget {
+  const _CoverChip({required this.text, required this.alignRight});
+
+  final String text;
+  final bool alignRight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            height: 1.2,
+            fontWeight: FontWeight.w600,
+            shadows: [
+              Shadow(
+                color: Colors.black45,
+                blurRadius: 3,
+                offset: Offset(0, 1),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
+}
+
+/// 双列网格行高预算：卡内 10px 内边距 + 1px 描边 + 16:9 封面 + 8px 间距
+/// + 固定两行标题 + 1px 余量。
+double albumCardExtent(AppTokens tokens, double columnWidth) {
+  final pad = tokens.spaceSm + 2;
+  final coverWidth = columnWidth - pad * 2 - 2;
+  return pad * 2 +
+      2 +
+      coverWidth * 9 / 16 +
+      tokens.spaceSm +
+      AlbumCard.titleAreaHeight(tokens) +
+      1;
 }

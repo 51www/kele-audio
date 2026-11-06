@@ -109,6 +109,9 @@ class TtsHttpEngine implements TtsEngine {
   }
 
   @override
+  void resetCache() {}
+
+  @override
   Future<void> testConnection() async {
     final template = templateProvider();
     if (template == null || template.url.isEmpty) {

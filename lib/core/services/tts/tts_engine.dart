@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 /// 听书引擎类型（docs/reader-design.md §5.1）。
-enum TtsEngineKind { system, edge, http }
+enum TtsEngineKind { system, edge, mimo, http }
 
 extension TtsEngineKindX on TtsEngineKind {
   String get storageValue => name;
@@ -9,6 +9,7 @@ extension TtsEngineKindX on TtsEngineKind {
   String get label => switch (this) {
     TtsEngineKind.system => '系统',
     TtsEngineKind.edge => 'Edge',
+    TtsEngineKind.mimo => 'MiMo',
     TtsEngineKind.http => '自定义 HTTP',
   };
 
@@ -94,6 +95,9 @@ abstract class TtsEngine {
   /// 丢弃合成队列并停止播放。
   Future<void> stop();
 
+  /// 换章时清理该章缓存（无缓存的引擎留空实现）。
+  void resetCache();
+
   /// 设置页连通性自检。
   Future<void> testConnection();
 
@@ -135,6 +139,9 @@ class FakeTtsEngine implements TtsEngine {
 
   @override
   Future<void> stop() async {}
+
+  @override
+  void resetCache() {}
 
   @override
   Future<void> testConnection() async {

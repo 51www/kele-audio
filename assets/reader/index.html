@@ -33,18 +33,38 @@ function post(name, payload) {
 // ---- 渲染器事件 ---------------------------------------------------------
 let lastRange = null
 let lastRelocate = null
+// TTS 自身 scrollToAnchor 引起的重定位标记：避免「高亮滚动」反过来改写朗读段落。
+let ttsScrollUntil = 0
+
+// 上报当前位置：relocate 事件与「排版/窗口尺寸变化后的重算」共用同一份数据，
+// 避免两套口径。页脚页码不在这里拼，由 Dart 统一算好后推入（PDF 用页码侧车）。
+function postLocation(detail) {
+  const d = detail || {}
+  const loc = view.lastLocation || {}
+  const info = estimatePage()
+  const cur = currentContents()
+  // 分栏重排会重建页脚元素，这里顺带把已推入的页码补回去（Dart 侧去重，
+  // 文案不变时不会再推，所以不能只依赖 setPageLabel）。
+  applyPageLabel()
+  post('onRelocated', {
+    index: d.section?.current ?? d.index ?? (cur ? cur.index : 0),
+    fraction: (d.fraction != null && Number.isFinite(Number(d.fraction)))
+      ? Number(d.fraction)
+      : Number(loc.fraction ?? 0),
+    cfi: d.cfi ?? loc.cfi ?? null,
+    page: info ? info.page : null,
+    pageCount: info ? info.pageCount : null,
+    // 与页位置同一次测量得到的可见段落下标（未提取段落时为 null）。
+    paragraph: visibleParagraphIndexInternal(),
+    ttsScroll: Date.now() < ttsScrollUntil,
+  })
+}
+
 view.addEventListener('relocate', e => {
   const d = e.detail || {}
   lastRange = d.range || null
   lastRelocate = d
-  const info = estimatePage()
-  post('onRelocated', {
-    index: d.section?.current ?? d.index ?? d.tocItem?.index ?? null,
-    fraction: d.fraction ?? null,
-    cfi: d.cfi ?? null,
-    page: info ? info.page : null,
-    pageCount: info ? info.pageCount : null,
-  })
+  postLocation(d)
 })
 
 // 章节内点击正文呼出/收起工具栏（链接点击除外）。
@@ -76,30 +96,23 @@ function currentContents() {
 }
 
 // ---- 全书页码（当前页 / 总页）-------------------------------------------
-// foliate 只给「章内」实测页数（page/pages，按列分页）：以当前章「字数/页」
-// 为密度，把各章字数折算成全书页码。滚动模式下 pages 无分页语义，退回
-// foliate 的 location（1500 字/页）；拿不到任何数据时返回 null（不显示）。
+// foliate 只给「章内」实测页数（page/pages，按屏分页）：以当前章的「字数/屏」
+// 为密度，把各章字数折算成全书页码（当前页实测、总页数换算）。
+// 滚动模式没有静态分页，直接返回 null，由 Dart 退化为全书百分比，不造假页码。
 function estimatePage() {
   try {
-    const loc = lastRelocate && lastRelocate.location
-    const locFallback = (loc && Number.isFinite(Number(loc.current)))
-      ? {
-          page: Number(loc.current) + 1,
-          pageCount: Math.max(Number(loc.current) + 1, Number(loc.total) || 0),
-        }
-      : null
-    if (lastStyle && lastStyle.mode === 'scrolled') return locFallback
+    if (lastStyle && lastStyle.mode === 'scrolled') return null
     const r = view.renderer
     const page = Number(r && r.page)
     const pages = Number(r && r.pages)
-    if (!Number.isFinite(page) || !Number.isFinite(pages) || pages <= 0) return locFallback
+    if (!Number.isFinite(page) || !Number.isFinite(pages) || pages <= 0) return null
     const secs = (view.book && view.book.sections) || []
-    if (!secs.length) return locFallback
+    if (!secs.length) return null
     const idx = Number((currentContents() && currentContents().index) || 0)
     const sizes = secs.map(s => Number(s && s.size) || 0)
     const cur = sizes[idx] || 0
-    if (!(cur > 0)) return locFallback
-    const cpp = cur / pages               // 当前章每页字数（实测密度）
+    if (!(cur > 0)) return null
+    const cpp = cur / pages               // 当前章每屏字数（实测密度）
     let before = 0
     let total = 0
     for (let i = 0; i < sizes.length; i++) {
@@ -188,6 +201,13 @@ hr { border-color: var(--reader-line) !important; }
 `
   try { view.style.setProperty('--reader-gap', gapPct + '%') } catch (e) { /* ignore */ }
   try { view.renderer?.style?.setProperty('--reader-gap', gapPct + '%') } catch (e) { /* ignore */ }
+  // 翻页接缝阴影：极轻的中性投影，浅色底用暗投影、深色底用微亮投影，
+  // 只用来暗示前后页层次，不引入新配色。
+  try {
+    view.style.setProperty('--reader-edge', lastStyle.dark
+      ? 'rgba(255, 255, 255, .05)'
+      : 'rgba(0, 0, 0, .05)')
+  } catch (e) { /* ignore */ }
   try { view.renderer?.setStyles(css) } catch (e) { console.warn('setStyles failed', e) }
   document.body.style.background = c.bg || ''
   // 字号/行距改变后需要重新分栏，否则当前页仍是旧版式。
@@ -217,6 +237,27 @@ async function gotoPending() {
 // ---- Dart -> JS API ----------------------------------------------------
 let chunks = []
 let expected = 0
+
+// ---- 页脚页码 -----------------------------------------------------------
+// 页码由 Dart 算好后推入（PDF 用页码侧车，EPUB/TXT 用渲染器实测页数），
+// 写进渲染器自带的页脚留白（--_margin 行）：不遮正文、不改正文排版，
+// 工具栏隐藏（沉浸阅读）时依然常驻。滚动模式没有页脚，Dart 推空串。
+let pageLabel = ''
+function applyPageLabel() {
+  try {
+    const feet = view.renderer?.feet
+    const foot = feet && feet[feet.length - 1]
+    if (!foot) return
+    if (foot.textContent !== pageLabel) foot.textContent = pageLabel
+  } catch (e) { /* ignore */ }
+}
+
+// 版式变化会重建页脚/分栏：等布局稳定后补页码并按新排版重算位置。
+function refreshAfterLayout() {
+  if (!view.book) return
+  applyPageLabel()
+  postLocation(null)
+}
 
 window.reader = {
   beginLoad(size) { chunks = []; expected = Number(size) || 0; return true },
@@ -266,6 +307,13 @@ window.reader = {
     try {
       view.renderer?.setAttribute('flow', (style?.mode === 'scrolled') ? 'scrolled' : 'paginated')
     } catch (e) { /* renderer 未就绪时忽略，open 后再设 */ }
+    setTimeout(refreshAfterLayout, 200)
+    return true
+  },
+  /** 页脚页码文案，如「12 / 340」；空串表示不显示。 */
+  setPageLabel(text) {
+    pageLabel = String(text ?? '')
+    applyPageLabel()
     return true
   },
   requestToc() {
@@ -300,33 +348,58 @@ window.reader = {
     if (extractChapter(false) < 0) return []
     return ttsNodes.map(textOf)
   },
-  highlightParagraph(index) {
-    const i = Number(index)
-    if (extractChapter(false) < 0) return false
-    const node = ttsNodes[i]
-    if (!node) return false
-    clearTtsHighlight()
-    ttsActiveNode = node
-    const accent = (lastStyle?.colors?.accent) || '#B8863B'
-    node.style.backgroundColor = accent + '2E'
-    node.style.borderRadius = '6px'
-    node.style.boxShadow = '0 0 0 4px ' + accent + '1A'
-    try { view.renderer?.scrollToAnchor?.(node) } catch (e) { /* ignore */ }
-    return true
-  },
+  highlightParagraph(index) { return applyTtsHighlight(index, true) },
+  // 只换高亮、不滚动：暂停中翻页时使用，避免把用户拽回长段开头。
+  markParagraph(index) { return applyTtsHighlight(index, false) },
   clearHighlight() { clearTtsHighlight(); return true },
   visibleParagraphIndex() {
     if (extractChapter(false) < 0) return 0
-    const range = lastRange
-    if (!range || typeof range.intersectsNode !== 'function') return 0
-    for (let i = 0; i < ttsNodes.length; i++) {
-      try {
-        if (range.intersectsNode(ttsNodes[i])) return i
-      } catch (e) { /* ignore */ }
-    }
-    return 0
+    return visibleParagraphIndexInternal() ?? 0
   },
 }
+
+function applyTtsHighlight(index, scroll) {
+  const i = Number(index)
+  if (extractChapter(false) < 0) return false
+  const node = ttsNodes[i]
+  if (!node) return false
+  clearTtsHighlight()
+  ttsActiveNode = node
+  const accent = (lastStyle?.colors?.accent) || '#B8863B'
+  node.style.backgroundColor = accent + '2E'
+  node.style.borderRadius = '6px'
+  node.style.boxShadow = '0 0 0 4px ' + accent + '1A'
+  if (scroll) {
+    // 之后的 relocate 由朗读高亮触发，不应回写朗读位置。
+    ttsScrollUntil = Date.now() + 900
+    try { view.renderer?.scrollToAnchor?.(node) } catch (e) { /* ignore */ }
+  }
+  return true
+}
+
+// 当前可见段落（页首段）：只读已缓存的段落节点，不在这里触发提取，
+// 避免章节刚渲染时把不完整的节点列表缓存下来。
+function visibleParagraphIndexInternal() {
+  const c = currentContents()
+  if (!c) return null
+  const chapter = Number(c.index ?? -1)
+  if (chapter !== ttsChapter || !ttsNodes.length) return null
+  const range = lastRange
+  if (!range || typeof range.intersectsNode !== 'function') return null
+  for (let i = 0; i < ttsNodes.length; i++) {
+    try {
+      if (range.intersectsNode(ttsNodes[i])) return i
+    } catch (e) { /* ignore */ }
+  }
+  return null
+}
+
+// 窗口尺寸变化（旋转 / 分屏）：分栏与页码都会变，等布局稳定后重算一次。
+let resizeTimer = null
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(refreshAfterLayout, 250)
+})
 
 // 就绪通知
 post('onReady', { href: location.href })

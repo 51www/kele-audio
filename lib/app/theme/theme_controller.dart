@@ -3,19 +3,22 @@ import 'package:flutter/material.dart';
 import '../../core/api/key_value_store.dart';
 import 'app_palette.dart';
 
-/// 主题皮肤状态：六个自定义预设（`docs/theme.md` 主题 1、3~7，主题2 已移除）。
+/// 主题皮肤状态：三个保留预设（主题 1、5、6；主题 2/3/4/7 已移除）。
 ///
 /// 只有**一个**主题槽位，用户可在设置页/自检卡片自由切换任意主题，
-/// 六套预设都是完整皮肤（含深色的主题3/6/7），切换即换肤（无重启）。
+/// 三套预设都是完整皮肤（含深色的主题6），切换即换肤（无重启）。
 ///
 /// 与儿童模式（M6）的关系（PRD §5.5 + 用户需求）：
 /// - 不区分「一般/儿童」两套主题，儿童模式不锁定主题；
-/// - **进入儿童模式的那一刻自动切换到主题4「春日活力」**（儿童默认皮肤），
+/// - **进入儿童模式的那一刻自动切换到主题5「薄荷春芽」**（儿童默认皮肤），
 ///   之后用户仍可手动切到任意其他主题；
 /// - 退出儿童模式不做强制换肤，保持当前主题。
 ///
-/// 旧「跟随系统 / 浅色 / 深色」设置仅做一次性迁移（深色 → 主题3），
+/// 旧「跟随系统 / 浅色 / 深色」设置仅做一次性迁移（深色 → 主题6 静夜墨灰），
 /// 不再对外暴露 ThemeMode。
+///
+/// 兼容：旧版本可能保存主题 3/4/7 的 id，这类 id 已无对应预设，
+/// 读取时由 [AppThemePreset.fromId] 返回 null → 回退默认主题1，不抛出异常。
 class ThemeController extends ChangeNotifier {
   ThemeController(this._kv);
 
@@ -29,7 +32,7 @@ class ThemeController extends ChangeNotifier {
   static const String childrenKey = 'children_mode';
 
   /// 进入儿童模式时自动应用的主题（儿童默认皮肤）。
-  static const AppThemePreset childrenDefaultPreset = AppThemePreset.springPromo;
+  static const AppThemePreset childrenDefaultPreset = AppThemePreset.mintSpring;
 
   final KeyValueStore _kv;
 
@@ -55,14 +58,14 @@ class ThemeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 读预设 id；无值时回退默认主题1。
-  /// [migrateLegacy] 时兼容旧「浅色/深色」设置：深色 → 主题3 暗夜金橙。
+  /// 读预设 id；无值或为已移除主题（3/4/7）时回退默认主题1。
+  /// [migrateLegacy] 时兼容旧「浅色/深色」设置：深色 → 主题6 静夜墨灰。
   AppThemePreset _readPreset(String key, {bool migrateLegacy = false}) {
     final id = int.tryParse(_kv.getString(key) ?? '');
     final preset = AppThemePreset.fromId(id);
     if (preset != null) return preset;
     if (migrateLegacy && _kv.getString(legacyModeKey) == 'dark') {
-      return AppThemePreset.darkGold;
+      return AppThemePreset.inkNight;
     }
     return AppThemePreset.warmPaper;
   }
@@ -76,14 +79,14 @@ class ThemeController extends ChangeNotifier {
   }
 
   /// 切换儿童模式（M6：关闭时由 UI 先走二次确认弹层，再调这里）。
-  /// 进入时自动切到儿童默认主题4「春日活力」（之后仍可手动改其他主题）。
+  /// 进入时自动切到儿童默认主题5「薄荷春芽」（之后仍可手动改其他主题）。
   Future<void> setChildren(bool value) async {
     if (value == _children) return;
     _children = value;
     notifyListeners();
     await _kv.setString(childrenKey, value ? '1' : '0');
     if (value) {
-      // 进入儿童模式：自动套用儿童默认皮肤（主题4），不锁定、可手动切换。
+      // 进入儿童模式：自动套用儿童默认皮肤（主题5），不锁定、可手动切换。
       await setPreset(childrenDefaultPreset);
     }
   }

@@ -34,6 +34,7 @@ import '../core/services/shelf_controller.dart';
 import '../core/services/tts/tts_engine.dart';
 import '../core/services/tts/tts_engine_edge.dart';
 import '../core/services/tts/tts_engine_http.dart';
+import '../core/services/tts/tts_engine_mimo.dart';
 import '../core/services/tts/tts_engine_system.dart';
 import '../core/services/tts/tts_session.dart';
 import '../core/services/tts/tts_settings_store.dart';
@@ -115,7 +116,7 @@ class AppServices {
   /// 书架（M4）：收藏状态的单一事实源 + shelf×album×play_history 联合查询
   final ShelfController shelf;
 
-  /// 设置页持久化（M5）：仅 Wi-Fi 下载占位开关等
+  /// 设置持久化（M5）：仅 Wi-Fi 下载、发现页显隐等
   final SettingsStore settings;
 
   /// 离线缓存（M8）：整本缓存队列 + 缓存播放联动
@@ -242,6 +243,8 @@ class AppServices {
     );
     await offline.initFlags(kv);
     offline.useAudioProxy = web;
+    // 下载下发前的网络门控：仅 Wi-Fi 下载开关（网络类型走系统原生通道）
+    offline.wifiOnlyProvider = () => settings.wifiOnlyDownload;
 
     // 听书（M9.3）：设置读取 → 播放互斥 → TTS 会话（三档引擎按需创建）。
     final ttsSettings = TtsSettingsStore(kv);
@@ -273,6 +276,10 @@ class AppServices {
       engineFactory: (kind) => switch (kind) {
         TtsEngineKind.system => TtsSystemEngine(),
         TtsEngineKind.edge => TtsEdgeEngine(),
+        TtsEngineKind.mimo => TtsMimoEngine(
+          apiKeyProvider: () => ttsSettings.mimoApiKey,
+          paramsProvider: () => ttsSettings.params,
+        ),
         TtsEngineKind.http => TtsHttpEngine(
           templateProvider: () => ttsSettings.httpTemplate,
         ),

@@ -37,7 +37,10 @@ void main() {
     });
 
     test('未知来源仍回退 TXT（老数据兼容）', () {
-      expect(ReaderBookSourceX.fromStorage('unknown'), ReaderBookSource.localTxt);
+      expect(
+        ReaderBookSourceX.fromStorage('unknown'),
+        ReaderBookSource.localTxt,
+      );
       expect(ReaderBookSourceX.fromStorage(null), ReaderBookSource.localTxt);
     });
 
@@ -198,30 +201,26 @@ void main() {
   });
 
   group('书架网格', () {
-    test('每行固定 2 列（各屏宽一致）', () {
-      expect(shelfGridColumns(240), 2);
-      expect(shelfGridColumns(339), 2);
-      expect(shelfGridColumns(360), 2);
-      expect(shelfGridColumns(800), 2);
-      expect(shelfGridColumns(1200), 2);
+    test('三列等宽（各屏宽一致）', () {
+      expect(shelfGridColumns(240), 3);
+      expect(shelfGridColumns(339), 3);
+      expect(shelfGridColumns(360), 3);
+      expect(shelfGridColumns(800), 3);
+      expect(shelfGridColumns(1200), 3);
     });
 
     test('卡片进度紧凑且百分比优先', () {
-      final pdf = _book(
-        source: ReaderBookSource.localPdf,
-        pdfPageCount: 220,
-      ).copyWith(
-        chapterCount: 10,
-        lastReadAt: DateTime(2026),
-        lastChapterIndex: 4,
-        lastFraction: 0.5,
-      );
+      final pdf = _book(source: ReaderBookSource.localPdf, pdfPageCount: 220)
+          .copyWith(
+            chapterCount: 10,
+            lastReadAt: DateTime(2026),
+            lastChapterIndex: 4,
+            lastFraction: 0.5,
+          );
       expect(pdf.progressBrief, '45% · 220 页');
 
-      final txt = _book(source: ReaderBookSource.localTxt).copyWith(
-        lastReadAt: DateTime(2026),
-        lastFraction: 0.5,
-      );
+      final txt = _book(source: ReaderBookSource.localTxt)
+          .copyWith(lastReadAt: DateTime(2026), lastFraction: 0.5);
       expect(txt.progressBrief, '17% · 1/3 章');
 
       final unread = _book(source: ReaderBookSource.localEpub);
@@ -229,32 +228,19 @@ void main() {
     });
   });
 
-  group('书架分栏归类', () {
-    test('本地来源与网页文章都进「本地」分栏', () {
-      expect(
-        shelfSectionOf(ReaderBookSource.localTxt),
-        ShelfSection.local,
-      );
-      expect(
-        shelfSectionOf(ReaderBookSource.localEpub),
-        ShelfSection.local,
-      );
-      expect(
-        shelfSectionOf(ReaderBookSource.localPdf),
-        ShelfSection.local,
-      );
-      expect(shelfSectionOf(ReaderBookSource.webArticle), ShelfSection.local);
+  group('书架来源归类', () {
+    test('导入来源（含网页文章快照）统一归为本地书', () {
+      expect(shelfOriginOf(ReaderBookSource.localTxt), ShelfOrigin.localBook);
+      expect(shelfOriginOf(ReaderBookSource.localEpub), ShelfOrigin.localBook);
+      expect(shelfOriginOf(ReaderBookSource.localPdf), ShelfOrigin.localBook);
+      expect(shelfOriginOf(ReaderBookSource.webArticle), ShelfOrigin.localBook);
     });
 
-    test('两个分栏的空态文案不同且行动导向明确', () {
-      final local = shelfEmptySpecOf(ShelfSection.local);
-      final favorite = shelfEmptySpecOf(ShelfSection.favorite);
-      expect(local.title, isNot(favorite.title));
-      expect(local.actionLabel, '导入本地文件');
-      expect(favorite.actionLabel, '去发现页逛逛');
-      expect(favorite.message, contains('收藏'));
-      expect(favorite.message, contains('专辑'));
-      expect(favorite.message, isNot(contains('网页')));
+    test('合并后空态文案同时引导导入与收藏', () {
+      expect(shelfEmptySpec.title, '书架还是空的');
+      expect(shelfEmptySpec.actionLabel, '导入本地文件');
+      expect(shelfEmptySpec.message, contains('导入'));
+      expect(shelfEmptySpec.message, contains('加入书架'));
     });
   });
 }

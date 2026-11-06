@@ -21,10 +21,9 @@ import 'tts_settings_section.dart';
 ///
 /// - 儿童模式：开关入口收拢到这里（原发现页顶部开关已移除），
 ///   开启直接生效（自动套儿童默认主题），关闭走二次确认防误触；
-/// - 主题：一般模式 / 儿童模式各一套皮肤（六个预设，默认主题1 / 主题4，立即生效 + 重启保留）；
-/// - 默认音质 / 默认播放模式 / 后台自动播放下一章：接入 M2 播放参数
-///   （同一套 PlayerPrefs key，播放页临时切换与这里共享持久化）；
-/// - 仅 Wi-Fi 下载：开关先占位持久化（下载能力 M8 实现）；
+/// - 主题：单一槽位三套皮肤（默认主题1，儿童模式默认主题5，立即生效 + 重启保留）；
+/// - 默认音质 / 默认播放模式：接入 M2 播放参数（同一套 PlayerPrefs key，
+///   播放页临时切换与这里共享持久化）；后台自动播放下一章固定开启，不再暴露开关；
 /// - 清除图片缓存：内存 + 磁盘（Web 端仅内存）；
 /// - 高级设置：发现页「编辑精选」行显隐 + 分类显隐（「推荐」固定显示）；
 /// - 账号绑定：B 站扫码登录（绑定/解绑 + 资料展示，绑定后解锁高音质音源）；
@@ -120,32 +119,6 @@ class SettingsPage extends StatelessWidget {
                   selected: {player.mode},
                   onSelectionChanged: (s) => player.setMode(s.first),
                 ),
-                const SizedBox(height: 14),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('后台自动播放下一章'),
-                  subtitle: const Text('关闭后本章播完即停（单曲循环不受影响）'),
-                  value: player.autoNext,
-                  onChanged: (v) => player.setAutoNext(v),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(height: tokens.spaceMd),
-          _SectionCard(
-            icon: Icons.download_for_offline_outlined,
-            title: '下载',
-            trailing: const StageTag('M8'),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('仅 Wi-Fi 下载'), 
-                  value: settings.wifiOnlyDownload,
-                  onChanged: (v) => settings.setWifiOnlyDownload(v),
-                ),
-                _kvLine(tokens, '缓存目录', '应用私有目录 audio_cache/'),
               ],
             ),
           ),
@@ -585,17 +558,6 @@ class SettingsPage extends StatelessWidget {
       ..hideCurrentSnackBar()
       ..showSnackBar(const SnackBar(content: Text('图片缓存已清除')));
   }
-
-  Widget _kvLine(AppTokens tokens, String k, String v) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(width: 72, child: Text(k, style: tokens.captionStyle)),
-            Expanded(child: Text(v, style: tokens.captionStyle)),
-          ],
-        ),
-      );
 }
 
 /// 音质档位选择（Q1 锁态控件）：
@@ -809,13 +771,11 @@ class _SectionCard extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.child,
-    this.trailing,
   });
 
   final IconData icon;
   final String title;
   final Widget child;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -830,7 +790,6 @@ class _SectionCard extends StatelessWidget {
               Icon(icon, size: 18, color: scheme.primary),
               const SizedBox(width: 8),
               Expanded(child: Text(title, style: tokens.sectionStyle)),
-              ?trailing,
             ],
           ),
           const SizedBox(height: 12),

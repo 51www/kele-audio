@@ -119,6 +119,9 @@ class TtsSystemEngine implements TtsEngine {
     await Future<void>.delayed(const Duration(milliseconds: 120));
   }
 
+  @override
+  void resetCache() {}
+
   /// 平台可用中文音色（设置页选择系统音色用）。
   Future<List<TtsVoice>> listVoices() async {
     try {

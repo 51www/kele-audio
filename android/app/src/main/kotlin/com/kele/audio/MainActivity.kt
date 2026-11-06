@@ -9,6 +9,8 @@ import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -164,6 +166,33 @@ class MainActivity : AudioServiceActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+
+        // 网络类型（M8 离线缓存「仅 Wi-Fi 下载」门控；已有 ACCESS_NETWORK_STATE 权限）
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.kele.audio/network",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "type" -> result.success(currentNetworkType())
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /// 当前网络类型：wifi / ethernet / mobile / none / unknown。
+    private fun currentNetworkType(): String {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return "none"
+            when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+                else -> "unknown"
+            }
+        } catch (e: Exception) {
+            "unknown"
         }
     }
 

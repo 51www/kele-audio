@@ -8,8 +8,11 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/dev_flags.dart';
+import '../../app/di.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../app/widgets/common.dart';
+import '../../app/widgets/local_cover_image.dart';
+import '../../app/widgets/recent_records.dart';
 import '../../core/api/album_source.dart';
 import '../../core/data/dao_demo.dart';
 import '../../core/data/daos.dart';
@@ -20,19 +23,21 @@ import '../../core/services/player/player_service.dart';
 import '../../core/services/reader/book_store.dart';
 import '../../core/services/reader/pdf_quality.dart';
 import '../../core/services/reader/reader_import_service.dart';
+import '../../core/services/reader/reader_progress_store.dart';
+import '../../core/services/recent_records.dart';
 import '../../core/services/shelf_controller.dart';
 import '../discover/album_card.dart';
 import '../reader/web_import_sheet.dart';
 import 'shelf_tab.dart';
 
-/// Tab 2 书架（PRD §5.3，M4 接入）。
+/// Tab 2 书架（PRD §5.3，M4 接入；分栏已合并为单一网格）。
 ///
 /// 结构：
-/// - 在听置顶区：30 天内有收听且未听完的专辑，卡片 + 进度条，点击续播；
-/// - 收藏列表：封面 / 章节进度（已听 x/y）/ 最后收听时间；
-/// - 排序：最近收听 / 收藏时间 / 标题；
-/// - 长按多选删除、左滑删除（带撤销）；
-/// - 空态引导跳发现页。
+/// - 三列等宽网格：本地书与收藏专辑一起按同一套排序展示；
+/// - 来源靠封面内角标区分（本地书显示格式，收藏专辑显示来源图标）；
+/// - 排序：最近 / 收藏时间 / 标题（两类条目共用）；
+/// - 长按多选删除（含全选），本地书删除时同时清理本地文件；
+/// - 空态引导。
 ///
 /// 数据来自 [ShelfController.buildViews]（shelf × album × play_history 联合查询），
 /// 每次 build 同步重读，保证切回页面 / 收藏状态变化后读到最新进度。
@@ -47,35 +52,59 @@ enum _SortMode { recent, collected, title }
 
 extension _SortModeX on _SortMode {
   String get label => switch (this) {
-    _SortMode.recent => '最近收听',
+    _SortMode.recent => '最近',
     _SortMode.collected => '收藏时间',
     _SortMode.title => '标题',
   };
 }
 
+/// 合并列表的统一条目：本地书 + 收藏专辑，排序/多选共用同一套逻辑。
+sealed class _ShelfEntry {
+  int get recentAt;
+  int get collectedAt;
+  String get title;
+}
+
+class _BookEntry extends _ShelfEntry {
+  _BookEntry(this.book);
+
+  final ReaderBook book;
+
+  @override
+  int get recentAt => (book.lastReadAt ?? book.addedAt).millisecondsSinceEpoch;
+
+  @override
+  int get collectedAt => book.addedAt.millisecondsSinceEpoch;
+
+  @override
+  String get title => book.title;
+}
+
+class _AlbumEntry extends _ShelfEntry {
+  _AlbumEntry(this.view);
+
+  final ShelfView view;
+
+  @override
+  int get recentAt => view.lastPlayedAt;
+
+  @override
+  int get collectedAt => view.collectedAt;
+
+  @override
+  String get title => view.title;
+}
+
 class _ShelfPageState extends State<ShelfPage> {
   _SortMode _sort = _SortMode.recent;
 
-  // ── 分栏（M10 追加）：本地导入的书 / 在线收藏 ──
-  ShelfSection _section = ShelfSection.local;
   final ScrollController _scroll = ScrollController();
-  final Map<ShelfSection, double> _scrollOffsets = {
-    ShelfSection.local: 0,
-    ShelfSection.favorite: 0,
-  };
 
-  // 多选删除态
+  // 多选删除态（合并列表后专辑与本地书各用一个集合，顶部统一计数）
   bool _selecting = false;
-  final Set<String> _selected = {};
+  final Set<String> _selectedAlbums = {};
+  final Set<String> _selectedBooks = {};
 
-  // ── 本地书（M9.1）：独立排序与多选，与上面的 B 站收藏互不感知 ──
-  ReaderSortMode _localSort = ReaderSortMode.recent;
-  bool _localSelecting = false;
-  final Set<String> _localSelected = {};
-
-  // 收藏分栏里的网页文章（非本地来源）；章节标题行已移除，固定按最近更新
-  final ReaderSortMode _favBookSort = ReaderSortMode.recent;
-  final Set<String> _favBookSelected = {};
   bool _importing = false;
 
   // M1 数据层自检（保留：M1 准出证据，且 widget_test 依赖其文案）
@@ -89,31 +118,19 @@ class _ShelfPageState extends State<ShelfPage> {
     // 旧版本备份/空壳收藏：进书架后静默补抓专辑元数据（最多 5 张，失败不打扰，
     // 点击卡片时再给出「重试」入口）。
     WidgetsBinding.instance.addPostFrameCallback((_) => _backfillAlbumMeta());
+    // 旧版本导入的本地 EPUB 没有封面：首帧后静默补一次（单本失败跳过）。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _backfillLocalCovers());
+  }
+
+  Future<void> _backfillLocalCovers() async {
+    if (!mounted) return;
+    await context.read<ReaderImportService>().backfillLocalCovers();
   }
 
   @override
   void dispose() {
     _scroll.dispose();
     super.dispose();
-  }
-
-  /// 切换分栏：记住当前滚动位置，切回时恢复（列表按需重建，不重复加载）。
-  void _switchSection(ShelfSection next) {
-    if (next == _section) return;
-    _scrollOffsets[_section] = _scroll.hasClients ? _scroll.offset : 0;
-    setState(() {
-      _section = next;
-      _selecting = false;
-      _selected.clear();
-      _favBookSelected.clear();
-      _localSelecting = false;
-      _localSelected.clear();
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scroll.hasClients) return;
-      final max = _scroll.position.maxScrollExtent;
-      _scroll.jumpTo(_scrollOffsets[next]!.clamp(0, max));
-    });
   }
 
   Future<void> _runDemo() async {
@@ -138,24 +155,28 @@ class _ShelfPageState extends State<ShelfPage> {
       final messenger = ScaffoldMessenger.of(context);
       messenger
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(
-          content: Text('正在获取专辑信息…'),
-          duration: Duration(seconds: 2),
-        ));
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('正在获取专辑信息…'),
+            duration: Duration(seconds: 2),
+          ),
+        );
       album = await _fetchAlbumMeta(albumId);
       messenger.hideCurrentSnackBar();
       if (album == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(
-            content: const Text('本地缺少这本专辑的信息（旧版备份未包含）。可重试补抓，或到发现页重新搜索后收藏。'),
-            action: SnackBarAction(
-              label: '重试',
-              onPressed: () => _resume(albumId),
+          ..showSnackBar(
+            SnackBar(
+              content: const Text('本地缺少这本专辑的信息（旧版备份未包含）。可重试补抓，或到发现页重新搜索后收藏。'),
+              action: SnackBarAction(
+                label: '重试',
+                onPressed: () => _resume(albumId),
+              ),
+              duration: const Duration(seconds: 8),
             ),
-            duration: const Duration(seconds: 8),
-          ));
+          );
         return;
       }
       if (mounted) setState(() {});
@@ -206,7 +227,7 @@ class _ShelfPageState extends State<ShelfPage> {
     if (changed && mounted) setState(() {});
   }
 
-  // ───────────────────────────────────────────────────── 本地书（M9.1）
+  // ───────────────────────────────────────────────── 本地书（M9.1）
   void _toast(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -216,41 +237,13 @@ class _ShelfPageState extends State<ShelfPage> {
   Widget _cancelSelectionAction() => TextButton(
     onPressed: () => setState(() {
       _selecting = false;
-      _selected.clear();
-      _favBookSelected.clear();
-      _localSelecting = false;
-      _localSelected.clear();
+      _selectedAlbums.clear();
+      _selectedBooks.clear();
     }),
     child: const Text('取消'),
   );
 
-  Widget _readerSortAction() => PopupMenuButton<ReaderSortMode>(
-    tooltip: '本地书排序',
-    icon: const Icon(Icons.sort_rounded),
-    onSelected: (m) => setState(() => _localSort = m),
-    itemBuilder: (_) => [
-      for (final m in ReaderSortMode.values)
-        PopupMenuItem(
-          value: m,
-          child: Row(
-            children: [
-              if (_localSort == m)
-                Icon(
-                  Icons.check_rounded,
-                  size: 18,
-                  color: Theme.of(context).colorScheme.primary,
-                )
-              else
-                const SizedBox(width: 18),
-              const SizedBox(width: 8),
-              Text(m.label),
-            ],
-          ),
-        ),
-    ],
-  );
-
-  Widget _albumSortAction() => PopupMenuButton<_SortMode>(
+  Widget _sortAction() => PopupMenuButton<_SortMode>(
     tooltip: '排序',
     icon: const Icon(Icons.sort_rounded),
     onSelected: (m) => setState(() => _sort = m),
@@ -276,21 +269,37 @@ class _ShelfPageState extends State<ShelfPage> {
     ],
   );
 
-  Future<void> _deleteSelectedLocal() =>
-      _deleteSelectedBooks(_localSelected, title: '删除本地书');
+  void _toggleBook(String id) => setState(() {
+    if (!_selectedBooks.remove(id)) _selectedBooks.add(id);
+  });
 
-  /// 收藏分栏的多选删除：专辑与网页文章分开清理，确认后统一执行。
-  Future<void> _deleteFavoriteSelected() async {
-    final albumIds = [..._selected];
-    final bookIds = [..._favBookSelected];
+  void _toggleAlbum(String id) => setState(() {
+    if (!_selectedAlbums.remove(id)) _selectedAlbums.add(id);
+  });
+
+  void _startSelectingBook(String id) => setState(() {
+    _selecting = true;
+    _selectedBooks.add(id);
+  });
+
+  void _startSelectingAlbum(String id) => setState(() {
+    _selecting = true;
+    _selectedAlbums.add(id);
+  });
+
+  /// 合并列表的多选删除：收藏专辑移出书架，本地书同时删除本地文件。
+  Future<void> _deleteSelected() async {
+    final albumIds = [..._selectedAlbums];
+    final bookIds = [..._selectedBooks];
     if (albumIds.isEmpty && bookIds.isEmpty) return;
+    final total = albumIds.length + bookIds.length;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('从收藏移除'),
+        title: const Text('从书架删除'),
         content: Text(
-          '将移除 ${albumIds.length + bookIds.length} 项'
-          '${bookIds.isEmpty ? '。' : '，其中 ${bookIds.length} 篇文章会同时删除本地文件。'}',
+          '将删除 $total 项'
+          '${bookIds.isEmpty ? '。' : '，其中 ${bookIds.length} 本本地书会同时删除本地文件。'}',
         ),
         actions: [
           TextButton(
@@ -299,7 +308,7 @@ class _ShelfPageState extends State<ShelfPage> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('移除'),
+            child: const Text('删除'),
           ),
         ],
       ),
@@ -316,17 +325,16 @@ class _ShelfPageState extends State<ShelfPage> {
       for (final id in bookIds) {
         final book = store.byId(id);
         if (book == null) continue;
-        await store.remove(id);
         await service.purge(book);
       }
     }
     if (!mounted) return;
     setState(() {
       _selecting = false;
-      _selected.clear();
-      _favBookSelected.clear();
+      _selectedAlbums.clear();
+      _selectedBooks.clear();
     });
-    _toast('已移除 ${albumIds.length + bookIds.length} 项');
+    _toast('已删除 $total 项');
   }
 
   Future<void> _showImportMenu() async {
@@ -436,7 +444,8 @@ class _ShelfPageState extends State<ShelfPage> {
     if (file.size > PdfLimits.maxFileBytes) {
       await _showPdfNotice(
         title: 'PDF 过大',
-        message: '当前上限 100 MB，该文件约 '
+        message:
+            '当前上限 100 MB，该文件约 '
             '${(file.size / 1024 / 1024).toStringAsFixed(1)} MB，暂不支持导入。',
       );
       return;
@@ -519,7 +528,8 @@ class _ShelfPageState extends State<ShelfPage> {
       } else if (e.kind == ReaderImportError.pdfScanned) {
         await _showPdfNotice(
           title: '暂不支持扫描件 PDF',
-          message: '该文件没有可抽取的文字层（每页都是图片）。\n'
+          message:
+              '该文件没有可抽取的文字层（每页都是图片）。\n'
               '当前版本不做 OCR，无法重排阅读或朗读；'
               '请使用带文字层的 PDF，或先用其他工具 OCR 后再导入。',
         );
@@ -650,60 +660,25 @@ class _ShelfPageState extends State<ShelfPage> {
     }
   }
 
-  /// 删除选中的本地书；[selection] 决定作用范围（本地书 / 收藏文章）。
-  Future<void> _deleteSelectedBooks(
-    Set<String> selection, {
-    required String title,
-  }) async {
-    if (selection.isEmpty) return;
-    final ids = [...selection];
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(title),
-        content: Text('将删除 ${ids.length} 本书籍文件、阅读进度与阅读记录，且不可撤销。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    final store = context.read<ReaderBookStore>();
-    final service = context.read<ReaderImportService>();
-    for (final id in ids) {
-      final book = store.byId(id);
-      if (book != null) await service.purge(book);
-    }
-    if (!mounted) return;
-    setState(() {
-      if (identical(selection, _localSelected)) {
-        _localSelecting = false;
-      }
-      selection.clear();
-    });
-    _toast('已删除 ${ids.length} 本');
-  }
-
   // ───────────────────────────────────────────────────────── 排序
-  List<ShelfView> _sorted(List<ShelfView> views) {
-    final list = [...views];
+  /// 合并列表排序：本地书与收藏专辑共用三种口径，避免两套逻辑分叉。
+  List<_ShelfEntry> _sortedEntries(
+    List<ShelfView> views,
+    List<ReaderBook> books,
+  ) {
+    final entries = <_ShelfEntry>[
+      for (final view in views) _AlbumEntry(view),
+      for (final book in books) _BookEntry(book),
+    ];
     switch (_sort) {
       case _SortMode.recent:
-        list.sort((a, b) => b.lastPlayedAt.compareTo(a.lastPlayedAt));
+        entries.sort((a, b) => b.recentAt.compareTo(a.recentAt));
       case _SortMode.collected:
-        list.sort((a, b) => b.collectedAt.compareTo(a.collectedAt));
+        entries.sort((a, b) => b.collectedAt.compareTo(a.collectedAt));
       case _SortMode.title:
-        list.sort((a, b) => a.title.compareTo(b.title));
+        entries.sort((a, b) => a.title.compareTo(b.title));
     }
-    return list;
+    return entries;
   }
 
   @override
@@ -713,95 +688,70 @@ class _ShelfPageState extends State<ShelfPage> {
     // watch：收藏状态变化（详情/播放页 toggle）实时反映到书架
     final shelf = context.watch<ShelfController>();
     final db = context.read<LocalDatabase>();
+    final bookStore = context.watch<ReaderBookStore>();
 
     final views = shelf.buildViews();
-    final listening = views.where((v) => v.inListening).toList()
-      ..sort((a, b) => b.lastPlayedAt.compareTo(a.lastPlayedAt));
-    final sorted = _sorted(views);
+    // 本地书来源统一走 [shelfOriginOf]，避免页面里再散落一套归类判断。
+    final localBooks = <ReaderBook>[
+      for (final book in bookStore.books)
+        if (shelfOriginOf(book.source) != null) book,
+    ];
+    final entries = _sortedEntries(views, localBooks);
+    final albumIds = [for (final view in views) view.item.albumId];
+    final bookIds = [for (final book in localBooks) book.id];
+    final selectedCount = _selectedAlbums.length + _selectedBooks.length;
+    final allSelected = entries.isNotEmpty && selectedCount == entries.length;
 
-    // 本地书（M9.1）：独立数据源，与上面的 B 站收藏互不感知。
-    final bookStore = context.watch<ReaderBookStore>();
-    final localActive = _section == ShelfSection.local;
-    final localBooks = bookStore
-        .sorted(_localSort)
-        .where((book) => shelfSectionOf(book.source) == ShelfSection.local)
-        .toList();
-    final favoriteBooks = bookStore
-        .sorted(_favBookSort)
-        .where((book) => shelfSectionOf(book.source) == ShelfSection.favorite)
-        .toList();
+    // 续读条：复用现有阅读 / 播放进度，取最近 1 条未读完的书或专辑。
+    final continueRecord = RecentRecordsService(
+      books: bookStore,
+      progress: context.read<ReaderProgressStore>(),
+      daos: context.read<Daos>(),
+      kv: context.read<AppServices>().kv,
+    ).latestUnfinished();
 
     return SafeArea(
       bottom: false,
       child: ListView(
         controller: _scroll,
+        // 底部留白与常驻播放条保持独立安全间距（播放条在页面之外挂载）。
         padding: EdgeInsets.only(bottom: tokens.spaceLg),
         children: [
           PageHeader(
             title: '书架',
-            actions: localActive
-                ? (_localSelecting
-                      ? [
-                          _cancelSelectionAction(),
-                        ]
-                      : [
-                          IconButton(
-                            tooltip: '导入本地书',
-                            onPressed: _importing ? null : _showImportMenu,
-                            icon: _importing
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.library_add_outlined),
-                          ),
-                          IconButton(
-                            tooltip: '选择删除',
-                            onPressed: () => setState(() {
-                              _localSelecting = true;
-                              _localSelected.clear();
-                            }),
-                            icon: const Icon(Icons.checklist_rounded),
-                          ),
-                          _readerSortAction(),
-                        ])
-                : (_selecting
-                      ? [_cancelSelectionAction()]
-                      : [
-                          IconButton(
-                            tooltip: '选择删除',
-                            onPressed: () => setState(() {
-                              _selecting = true;
-                              _selected.clear();
-                              _favBookSelected.clear();
-                            }),
-                            icon: const Icon(Icons.checklist_rounded),
-                          ),
-                          _albumSortAction(),
-                        ]),
+            actions: _selecting
+                ? [_cancelSelectionAction()]
+                : [
+                    IconButton(
+                      tooltip: '导入',
+                      onPressed: _importing ? null : _showImportMenu,
+                      icon: _importing
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.library_add_outlined),
+                    ),
+                    IconButton(
+                      tooltip: '选择删除',
+                      onPressed: () => setState(() {
+                        _selecting = true;
+                        _selectedAlbums.clear();
+                        _selectedBooks.clear();
+                      }),
+                      icon: const Icon(Icons.checklist_rounded),
+                    ),
+                    _sortAction(),
+                  ],
           ),
 
-          // ── 分栏切换：本地 / 收藏 ─────────────────────────────────
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              tokens.spaceMd,
-              0,
-              tokens.spaceMd,
-              tokens.spaceSm,
+          // ── 续读条：最近一条未读完的书 / 专辑（最多 1 条）───────
+          if (!_selecting && continueRecord != null)
+            ContinueRecordBar(
+              record: continueRecord,
+              onTap: () => openRecentRecord(context, continueRecord),
             ),
-            child: SegmentedButton<ShelfSection>(
-              segments: [
-                for (final section in ShelfSection.values)
-                  ButtonSegment(value: section, label: Text(section.label)),
-              ],
-              selected: {_section},
-              showSelectedIcon: false,
-              onSelectionChanged: (value) => _switchSection(value.first),
-            ),
-          ),
 
           // ── 多选删除操作条 ───────────────────────────────────────
           if (_selecting)
@@ -810,7 +760,7 @@ class _ShelfPageState extends State<ShelfPage> {
                 tokens.spaceMd,
                 0,
                 tokens.spaceMd,
-                tokens.spaceSm,
+                tokens.spaceMd,
               ),
               child: KeleCard(
                 padding: const EdgeInsets.symmetric(
@@ -819,41 +769,27 @@ class _ShelfPageState extends State<ShelfPage> {
                 ),
                 child: Row(
                   children: [
-                    Text(
-                      '已选 ${_selected.length + _favBookSelected.length} 项',
-                      style: tokens.bodyStyle,
-                    ),
+                    Text('已选 $selectedCount 项', style: tokens.bodyStyle),
                     const Spacer(),
                     TextButton(
                       onPressed: () => setState(() {
-                        final allSelected =
-                            _selected.length == views.length &&
-                            _favBookSelected.length == favoriteBooks.length;
                         if (allSelected) {
-                          _selected.clear();
-                          _favBookSelected.clear();
+                          _selectedAlbums.clear();
+                          _selectedBooks.clear();
                         } else {
-                          _selected
+                          _selectedAlbums
                             ..clear()
-                            ..addAll(views.map((v) => v.item.albumId));
-                          _favBookSelected
+                            ..addAll(albumIds);
+                          _selectedBooks
                             ..clear()
-                            ..addAll(favoriteBooks.map((b) => b.id));
+                            ..addAll(bookIds);
                         }
                       }),
-                      child: Text(
-                        _selected.length == views.length &&
-                                _favBookSelected.length == favoriteBooks.length
-                            ? '取消全选'
-                            : '全选',
-                      ),
+                      child: Text(allSelected ? '取消全选' : '全选'),
                     ),
                     const SizedBox(width: 8),
                     FilledButton.tonal(
-                      onPressed:
-                          _selected.isEmpty && _favBookSelected.isEmpty
-                          ? null
-                          : _deleteFavoriteSelected,
+                      onPressed: selectedCount == 0 ? null : _deleteSelected,
                       child: const Text('删除'),
                     ),
                   ],
@@ -861,209 +797,74 @@ class _ShelfPageState extends State<ShelfPage> {
               ),
             ),
 
-          // ── 在听置顶区（仅收藏分栏） ──────────────────────────────
-          if (!localActive && listening.isNotEmpty) ...[
+          // ── 合并网格：本地书 + 收藏专辑 ───────────────────────────
+          if (entries.isEmpty)
             Padding(
-              padding: EdgeInsets.fromLTRB(
-                tokens.spaceMd,
-                tokens.spaceLg,
-                tokens.spaceMd,
-                0,
+              padding: EdgeInsets.symmetric(horizontal: tokens.spaceMd),
+              child: EmptyState(
+                icon: Icons.library_books_outlined,
+                title: shelfEmptySpec.title,
+                message: shelfEmptySpec.message,
+                actionLabel: shelfEmptySpec.actionLabel,
+                onAction: _showImportMenu,
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.graphic_eq_rounded,
-                    color: scheme.primary,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Text('在听', style: tokens.sectionStyle),
-                  const SizedBox(width: 8),
-                  StageTag('续播', tone: StageTone.accent),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 150,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: EdgeInsets.symmetric(horizontal: tokens.spaceMd),
-                itemCount: listening.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 12),
-                itemBuilder: (context, i) =>
-                    _ListeningCard(view: listening[i], onTap: _resume),
-              ),
-            ),
-          ],
-
-          // ── 本地书（M9.1） ─────────────────────────────────────────
-          if (localActive) ...[
-            if (_localSelecting)
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  tokens.spaceMd,
-                  tokens.spaceSm,
-                  tokens.spaceMd,
-                  0,
-                ),
-                child: KeleCard(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  child: Row(
-                    children: [
-                      Text(
-                        '已选 ${_localSelected.length} 本',
-                        style: tokens.bodyStyle,
-                      ),
-                      const Spacer(),
-                      TextButton(
-                        onPressed: () => setState(() {
-                          if (_localSelected.length == localBooks.length) {
-                            _localSelected.clear();
-                          } else {
-                            _localSelected
-                              ..clear()
-                              ..addAll(localBooks.map((b) => b.id));
-                          }
-                        }),
-                        child: Text(
-                          _localSelected.length == localBooks.length
-                              ? '取消全选'
-                              : '全选',
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton.tonal(
-                        onPressed: _localSelected.isEmpty
-                            ? null
-                            : _deleteSelectedLocal,
-                        child: const Text('删除'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            if (localBooks.isNotEmpty)
-              _ShelfGrid(
-                itemCount: localBooks.length,
-                itemBuilder: (context, index) {
-                  final book = localBooks[index];
-                  return _LocalBookCard(
-                    book: book,
-                    missing: bookStore.isMissing(book.id),
-                    selecting: _localSelecting,
-                    selected: _localSelected.contains(book.id),
-                    onTap: () {
-                      if (_localSelecting) {
-                        setState(() {
-                          if (_localSelected.contains(book.id)) {
-                            _localSelected.remove(book.id);
-                          } else {
-                            _localSelected.add(book.id);
-                          }
-                        });
-                      } else {
-                        _openLocalBook(book);
-                      }
-                    },
-                    onLongPress: () => setState(() {
-                      _localSelecting = true;
-                      _localSelected.add(book.id);
-                    }),
-                  );
-                },
-              ),
-            if (localBooks.isEmpty)
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: tokens.spaceMd),
-                child: _SectionEmptyState(
-                  spec: shelfEmptySpecOf(ShelfSection.local),
-                  icon: Icons.library_books_outlined,
-                  onAction: _showImportMenu,
-                ),
-              ),
-          ],
-
-          // ── 收藏的文章（网页文章等非本地来源；当前归类规则下为空） ──
-          if (!localActive && favoriteBooks.isNotEmpty)
+            )
+          else
             _ShelfGrid(
-              itemCount: favoriteBooks.length,
+              itemCount: entries.length,
               itemBuilder: (context, index) {
-                final book = favoriteBooks[index];
-                return _LocalBookCard(
-                  book: book,
-                  missing: bookStore.isMissing(book.id),
-                  selecting: _selecting,
-                  selected: _favBookSelected.contains(book.id),
-                  onTap: () {
-                    if (_selecting) {
-                      setState(() {
-                        if (_favBookSelected.contains(book.id)) {
-                          _favBookSelected.remove(book.id);
+                final entry = entries[index];
+                switch (entry) {
+                  case _BookEntry(:final book):
+                    final missing = bookStore.isMissing(book.id);
+                    return _ShelfCard(
+                      cover: _BookCover(book: book),
+                      badge: _CoverBadge.text(book.source.label),
+                      title: book.title,
+                      progress: missing ? '文件缺失，请重新导入' : book.progressBrief,
+                      progressColor: missing ? scheme.error : scheme.primary,
+                      selecting: _selecting,
+                      selected: _selectedBooks.contains(book.id),
+                      onTap: () {
+                        if (_selecting) {
+                          _toggleBook(book.id);
                         } else {
-                          _favBookSelected.add(book.id);
+                          _openLocalBook(book);
                         }
-                      });
-                    } else {
-                      _openLocalBook(book);
-                    }
-                  },
-                  onLongPress: () => setState(() {
-                    _selecting = true;
-                    _favBookSelected.add(book.id);
-                  }),
-                );
+                      },
+                      onLongPress: () => _startSelectingBook(book.id),
+                    );
+                  case _AlbumEntry(:final view):
+                    return _ShelfCard(
+                      cover: CoverImage(url: view.coverUrl, title: view.title),
+                      badge: const _CoverBadge.icon(
+                        Icons.headphones_rounded,
+                        semanticLabel: '收藏专辑',
+                      ),
+                      title: view.title,
+                      progress: view.totalChapters > 0
+                          ? '已听 ${view.finishedCount}/${view.totalChapters}'
+                                ' · ${view.upName}'
+                          : '尚未收听 · ${view.upName}',
+                      progressColor: scheme.primary,
+                      selecting: _selecting,
+                      selected: _selectedAlbums.contains(view.item.albumId),
+                      onTap: () {
+                        if (_selecting) {
+                          _toggleAlbum(view.item.albumId);
+                        } else {
+                          _resume(view.item.albumId);
+                        }
+                      },
+                      onLongPress: () =>
+                          _startSelectingAlbum(view.item.albumId),
+                    );
+                }
               },
             ),
 
-          // ── 收藏列表（仅收藏分栏） ───────────────────────────────
-          if (!localActive) ...[
-            if (sorted.isEmpty && favoriteBooks.isEmpty)
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: tokens.spaceMd),
-                child: _SectionEmptyState(
-                  spec: shelfEmptySpecOf(ShelfSection.favorite),
-                  icon: Icons.favorite_border_rounded,
-                  onAction: () => context.go('/discover'),
-                ),
-              )
-            else if (sorted.isNotEmpty)
-              _ShelfGrid(
-                itemCount: sorted.length,
-                itemBuilder: (context, index) {
-                  final v = sorted[index];
-                  return _AlbumShelfCard(
-                    view: v,
-                    selecting: _selecting,
-                    selected: _selected.contains(v.item.albumId),
-                    onTap: () {
-                      if (_selecting) {
-                        setState(() {
-                          if (_selected.contains(v.item.albumId)) {
-                            _selected.remove(v.item.albumId);
-                          } else {
-                            _selected.add(v.item.albumId);
-                          }
-                        });
-                      } else {
-                        _resume(v.item.albumId);
-                      }
-                    },
-                    onLongPress: () => setState(() {
-                      _selecting = true;
-                      _selected.add(v.item.albumId);
-                    }),
-                  );
-                },
-              ),
-          ],
-
           // ── 本地数据层自检（M1 准出证据；DevFlags 开启才渲染） ────
-          if (localActive && DevFlags.showPanels)
+          if (DevFlags.showPanels)
             Padding(
               padding: EdgeInsets.fromLTRB(
                 tokens.spaceMd,
@@ -1181,68 +982,10 @@ class _ShelfPageState extends State<ShelfPage> {
   }
 }
 
-/// 在听置顶区卡片：封面 + 标题 + 进度条，点击续播。
-class _ListeningCard extends StatelessWidget {
-  const _ListeningCard({required this.view, required this.onTap});
-
-  final ShelfView view;
-  final void Function(String albumId) onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = AppTokens.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: 140,
-      child: KeleCard(
-        onTap: () => onTap(view.item.albumId),
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(tokens.radiusSm),
-              child: SizedBox(
-                width: double.infinity,
-                height: 64,
-                child: CoverImage(url: view.coverUrl, title: view.title),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              view.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: tokens.bodyStyle.copyWith(
-                fontWeight: FontWeight.w700,
-                color: scheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 6),
-            LinearProgressIndicator(
-              value: view.lastChapterPercent / 100,
-              minHeight: 4,
-              borderRadius: BorderRadius.circular(2),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              view.totalChapters > 0
-                  ? '已听 ${view.finishedCount}/${view.totalChapters}'
-                  : '尚未收听',
-              style: tokens.captionStyle,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 书架网格容器：固定每行 2 列，卡片等高。
+/// 书架网格：固定三列等宽，列间距与左右安全边距相等。
 ///
-/// 行高 = 封面（3:4）+ 文本区；文本区固定「上 8 / 标题 2 行 / 间隔 4 /
-/// 进度 1 行 / 下 8」的高度，并多留 2px 余量，避免字体度量差异触发
-/// 0.x px 的溢出警告条。
+/// 行高 = 满铺封面（3:4）+ 文案区（标题 + 紧凑进度），卡片内部不额外留白，
+/// 行间距明显大于封面与标题之间的间距，整页节奏一致。
 class _ShelfGrid extends StatelessWidget {
   const _ShelfGrid({required this.itemCount, required this.itemBuilder});
 
@@ -1255,17 +998,12 @@ class _ShelfGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = shelfGridColumns(constraints.maxWidth);
-        // 列/行间距与页边距同为 spaceMd：四周留白一致，保持呼吸感。
         final gap = tokens.spaceMd;
         final columnWidth =
-            (constraints.maxWidth -
-                tokens.spaceMd * 2 -
-                gap * (columns - 1)) /
+            (constraints.maxWidth - tokens.spaceMd * 2 - gap * (columns - 1)) /
             columns;
-        final captionLine = tokens.captionStyle.fontSize! * 1.4;
-        final textHeight = 8 + _cardTitleHeight(tokens) * 2 + 4 + captionLine +
-            8 +
-            2;
+        // +1px 余量，避免字体度量差异触发 0.x px 的溢出告警。
+        final mainAxisExtent = columnWidth * 4 / 3 + _shelfTextHeight() + 1;
         return Padding(
           padding: EdgeInsets.fromLTRB(
             tokens.spaceMd,
@@ -1281,9 +1019,9 @@ class _ShelfGrid extends StatelessWidget {
             itemCount: itemCount,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
-              mainAxisSpacing: gap,
+              mainAxisSpacing: tokens.spaceLg,
               crossAxisSpacing: gap,
-              mainAxisExtent: columnWidth * 4 / 3 + textHeight,
+              mainAxisExtent: mainAxisExtent,
             ),
             itemBuilder: itemBuilder,
           ),
@@ -1293,8 +1031,150 @@ class _ShelfGrid extends StatelessWidget {
   }
 }
 
-/// 卡片标题单行高度（与卡片内 `Text` 的 height 1.3 保持一致）。
-double _cardTitleHeight(AppTokens tokens) => tokens.bodyStyle.fontSize! * 1.3;
+/// 卡片正文高度（标题间距 6 + 单行标题 + 3 + 单行进度），与卡片内 SizedBox 同步。
+const double _shelfTitleSize = 13;
+const double _shelfProgressSize = 11.5;
+
+double _shelfTextHeight() =>
+    6 + _shelfTitleSize * 1.3 + 3 + _shelfProgressSize * 1.4;
+
+/// 统一书架卡片：满铺裁切封面 + 单行标题（+ 单行紧凑进度）。
+///
+/// 无描边、无阴影、无悬浮位移；标题左对齐封面左边缘，卡内无额外内边距。
+class _ShelfCard extends StatelessWidget {
+  const _ShelfCard({
+    required this.cover,
+    required this.badge,
+    required this.title,
+    required this.progress,
+    required this.progressColor,
+    required this.selecting,
+    required this.selected,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final Widget cover;
+
+  /// 封面内角标：不占文本行，也不改变卡片等高。
+  final Widget badge;
+
+  final String title;
+  final String progress;
+  final Color progressColor;
+  final bool selecting;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = AppTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: selecting ? null : onLongPress,
+        borderRadius: BorderRadius.circular(tokens.radiusSm),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AspectRatio(
+              aspectRatio: 3 / 4,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(tokens.radiusSm),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    cover,
+                    Positioned(right: 4, bottom: 4, child: badge),
+                    if (selecting)
+                      Positioned(
+                        left: 4,
+                        top: 4,
+                        child: _SelectDot(selected: selected),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              height: _shelfTitleSize * 1.3,
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: _shelfTitleSize,
+                  height: 1.3,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurface,
+                ),
+              ),
+            ),
+            const SizedBox(height: 3),
+            SizedBox(
+              width: double.infinity,
+              height: _shelfProgressSize * 1.4,
+              child: Text(
+                progress,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tokens.captionStyle.copyWith(
+                  fontSize: _shelfProgressSize,
+                  height: 1.4,
+                  color: progressColor,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 封面内角标：半透明底色保证在任何封面上都清晰可读。
+class _CoverBadge extends StatelessWidget {
+  const _CoverBadge.text(this.text) : icon = null, semanticLabel = null;
+
+  const _CoverBadge.icon(this.icon, {this.semanticLabel}) : text = null;
+
+  final String? text;
+  final IconData? icon;
+  final String? semanticLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      label: semanticLabel,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          color: scheme.surface.withValues(alpha: 0.86),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: text != null
+            ? Text(
+                text!,
+                style: TextStyle(
+                  fontSize: 10,
+                  height: 1.2,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurface,
+                ),
+              )
+            : Icon(icon, size: 12, color: scheme.onSurface),
+      ),
+    );
+  }
+}
 
 /// 多选态勾选圈：叠在封面左上角，带半透明底保证在任何封面上可见。
 class _SelectDot extends StatelessWidget {
@@ -1314,112 +1194,8 @@ class _SelectDot extends StatelessWidget {
       ),
       child: Icon(
         selected ? Icons.check_circle_rounded : Icons.circle_outlined,
-        size: 20,
+        size: 18,
         color: selected ? scheme.primary : tokens.onHairline,
-      ),
-    );
-  }
-}
-
-/// 收藏专辑网格卡片：3:4 真实封面（居中裁切）+ 两行标题 + 单行进度。
-class _AlbumShelfCard extends StatelessWidget {
-  const _AlbumShelfCard({
-    required this.view,
-    required this.selecting,
-    required this.selected,
-    required this.onTap,
-    required this.onLongPress,
-  });
-
-  final ShelfView view;
-  final bool selecting;
-  final bool selected;
-  final VoidCallback onTap;
-  final VoidCallback onLongPress;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = AppTokens.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final titleStyle = tokens.bodyStyle.copyWith(
-      height: 1.3,
-      fontWeight: FontWeight.w700,
-      color: scheme.onSurface,
-    );
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: selecting ? null : onLongPress,
-        borderRadius: BorderRadius.circular(tokens.radiusMd),
-        child: KeleCard(
-          padding: EdgeInsets.zero,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Stack(
-                children: [
-                  AspectRatio(
-                    aspectRatio: 3 / 4,
-                    child: CoverImage(
-                      url: view.coverUrl,
-                      title: view.title,
-                      borderRadius: BorderRadius.vertical(
-                        top: Radius.circular(tokens.radiusMd - 1),
-                      ),
-                    ),
-                  ),
-                  if (selecting)
-                    Positioned(
-                      left: 6,
-                      top: 6,
-                      child: _SelectDot(selected: selected),
-                    ),
-                ],
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: double.infinity,
-                      height: _cardTitleHeight(tokens) * 2,
-                      child: Text(
-                        view.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: titleStyle,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: view.totalChapters > 0
-                                ? '已听 ${view.finishedCount}/${view.totalChapters}'
-                                : '尚未收听',
-                            style: tokens.captionStyle.copyWith(
-                              color: scheme.primary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          TextSpan(
-                            text: ' · ${view.upName}',
-                            style: tokens.captionStyle,
-                          ),
-                        ],
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -1429,107 +1205,8 @@ enum _ImportAction { localFile, web }
 
 enum _MissingAction { reimport, refetch }
 
-/// 本地书网格卡片：3:4 封面占位 + 格式角标 + 两行标题 + 单行进度。
-///
-/// 网格下取消左滑删除（横向滑动与网格滚动/选择手势冲突，窄卡片误删率高），
-/// 保留长按进入多选，由顶部操作条统一删除。
-class _LocalBookCard extends StatelessWidget {
-  const _LocalBookCard({
-    required this.book,
-    required this.missing,
-    required this.selecting,
-    required this.selected,
-    required this.onTap,
-    required this.onLongPress,
-  });
-
-  final ReaderBook book;
-  final bool missing;
-  final bool selecting;
-  final bool selected;
-  final VoidCallback onTap;
-  final VoidCallback onLongPress;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = AppTokens.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final titleStyle = tokens.bodyStyle.copyWith(
-      height: 1.3,
-      fontWeight: FontWeight.w700,
-      color: scheme.onSurface,
-    );
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: selecting ? null : onLongPress,
-        borderRadius: BorderRadius.circular(tokens.radiusMd),
-        child: KeleCard(
-          padding: EdgeInsets.zero,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Stack(
-                children: [
-                  AspectRatio(
-                    aspectRatio: 3 / 4,
-                    child: _BookCover(book: book),
-                  ),
-                  Positioned(
-                    right: 6,
-                    bottom: 6,
-                    child: InfoChip(
-                      book.source.label,
-                      tone: StageTone.accent,
-                    ),
-                  ),
-                  if (selecting)
-                    Positioned(
-                      left: 6,
-                      top: 6,
-                      child: _SelectDot(selected: selected),
-                    ),
-                ],
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: double.infinity,
-                      height: _cardTitleHeight(tokens) * 2,
-                      child: Text(
-                        book.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: titleStyle,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      missing ? '文件缺失，请重新导入' : book.progressBrief,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: tokens.captionStyle.copyWith(
-                        color: missing ? scheme.error : scheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 本地书封面：M9.1 尚未提取封面（[ReaderBook.coverPath] 恒为 null），
-/// 因此用主题渐变 + 书名首字占位，不做纯空白。
+/// 本地书封面：优先展示 EPUB 解析出的真实封面（`books/{id}/cover.jpg`），
+/// 没有封面（TXT/PDF/网页/解析失败）时回退主题渐变 + 书名首字占位。
 class _BookCover extends StatelessWidget {
   const _BookCover({required this.book});
 
@@ -1537,7 +1214,13 @@ class _BookCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tokens = AppTokens.of(context);
+    final placeholder = _letterCover(context);
+    final coverPath = book.coverPath;
+    if (coverPath == null || coverPath.isEmpty) return placeholder;
+    return localCoverImage(path: coverPath, placeholder: placeholder);
+  }
+
+  Widget _letterCover(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final initial = book.title.trim().isEmpty
         ? '书'
@@ -1554,9 +1237,6 @@ class _BookCover extends StatelessWidget {
             scheme.secondary.withValues(alpha: 0.65),
           ],
         ),
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(tokens.radiusMd - 1),
-        ),
       ),
       child: Text(
         initial,
@@ -1568,26 +1248,4 @@ class _BookCover extends StatelessWidget {
       ),
     );
   }
-}
-
-/// 分栏空态（复用全局 EmptyState 视觉规范）。
-class _SectionEmptyState extends StatelessWidget {
-  const _SectionEmptyState({
-    required this.spec,
-    required this.icon,
-    required this.onAction,
-  });
-
-  final ShelfEmptySpec spec;
-  final IconData icon;
-  final VoidCallback onAction;
-
-  @override
-  Widget build(BuildContext context) => EmptyState(
-    icon: icon,
-    title: spec.title,
-    message: spec.message,
-    actionLabel: spec.actionLabel,
-    onAction: onAction,
-  );
 }

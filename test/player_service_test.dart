@@ -789,43 +789,23 @@ void main() {
 
   // ────────────────────────────────────────────── M5 设置页接线
 
-  test('M5 自动连播开关：关闭后本章播完即停（单曲循环不受影响）', () async {
-    final h = makeHarness();
+  test('M5 自动连播固定开启：本地旧值「关闭」不生效，播完自动进下一章', () async {
+    final kv = MemoryKeyValueStore();
+    // 模拟旧版本把开关关掉后落库的旧值 '0'
+    await kv.setString(PlayerPrefs.keyAutoNext, '0');
+    final h = Harness(kv);
     final p = await h.start();
     final chapters = makeChapters();
 
-    await p.setAutoNext(false);
-    expect(p.autoNext, isFalse);
-
-    // 中间章播完 → 不开下一章
     await p.playAlbum(makeAlbum(), chapters: chapters);
     h.engine.durationC.add(const Duration(seconds: 100));
     h.engine.positionC.add(const Duration(seconds: 98));
     await settle();
     h.engine.completedC.add(null);
     await settle(5);
-    expect(h.engine.opens.length, 1, reason: '自动连播关闭不得开新章');
-    expect(p.playing, isFalse, reason: '本章播完须暂停');
-
-    // 持久化：重启后仍为关
-    final p2 = await h.restart();
-    expect(p2.autoNext, isFalse);
-
-    // 单曲循环是重播本章、非「下一章」，不受开关影响（seek 归零续播，不开新章）
-    await p2.setMode(PlayMode.loopOne);
-    await p2.playAlbum(makeAlbum(), chapters: chapters, startIndex: 0);
-    h.engine.durationC.add(const Duration(seconds: 100));
-    h.engine.positionC.add(const Duration(seconds: 98));
-    await settle();
-    final opensBefore = h.engine.opens.length;
-    final seeksBefore = h.engine.seeks.length;
-    h.engine.completedC.add(null);
-    await settle(5);
-    expect(h.engine.opens.length, opensBefore, reason: '单曲循环不换章');
-    expect(h.engine.seeks.length, greaterThan(seeksBefore),
-        reason: '单曲循环须回退重播');
-    expect(p2.index, 0, reason: '单曲循环不得切章');
-    expect(p2.playing, isTrue, reason: '单曲循环须继续播');
+    expect(h.engine.opens.length, 2, reason: '固定开启须自动开下一章');
+    expect(p.index, 1, reason: '应推进到第 2 章');
+    expect(p.playing, isTrue, reason: '连播不应暂停');
 
     await h.dispose();
   });

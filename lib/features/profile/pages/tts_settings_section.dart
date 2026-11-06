@@ -220,6 +220,62 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
     if (confirmed == true) await settings.removeTemplate(template.id);
   }
 
+  Future<void> _editMimoKey(TtsSettingsStore settings) async {
+    final controller = TextEditingController();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('MiMo 朗读 API Key'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              settings.hasMimoApiKey
+                  ? '当前：${settings.maskedMimoKey}（粘贴新 Key 可覆盖）'
+                  : '当前未配置 Key',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'API Key',
+                hintText: '粘贴 MiMo API Key',
+                helperText: '仅保存在本机，不上传；日志中不会回显完整 Key',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    final key = controller.text.trim();
+    if (key.isEmpty) {
+      if (mounted) setState(() => _status = 'Key 为空，未保存');
+      return;
+    }
+    await settings.setMimoApiKey(key);
+    if (mounted) setState(() => _status = 'MiMo Key 已保存');
+  }
+
+  Future<void> _clearMimoKey(TtsSettingsStore settings) async {
+    await settings.clearMimoApiKey();
+    if (mounted) setState(() => _status = '已清除本机 MiMo Key');
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
@@ -231,14 +287,18 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
       children: [
         Text('朗读引擎', style: tokens.captionStyle),
         const SizedBox(height: 8),
-        SegmentedButton<TtsEngineKind>(
-          showSelectedIcon: false,
-          segments: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
             for (final kind in TtsEngineKind.values)
-              ButtonSegment(value: kind, label: Text(kind.label)),
+              ChoiceChip(
+                label: Text(kind.label),
+                selected: settings.engine == kind,
+                showCheckmark: false,
+                onSelected: (_) => settings.setEngine(kind),
+              ),
           ],
-          selected: {settings.engine},
-          onSelectionChanged: (value) => settings.setEngine(value.first),
         ),
         const SizedBox(height: 14),
         if (settings.engine == TtsEngineKind.system) ...[
@@ -320,6 +380,36 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
             ],
           ),
         ],
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text('MiMo 朗读 API Key', style: tokens.bodyStyle),
+          subtitle: Text(
+            settings.hasMimoApiKey
+                ? '已配置 ${settings.maskedMimoKey}'
+                : '未配置，MiMo 朗读不可用',
+            style: tokens.captionStyle,
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextButton(
+                onPressed: () => _editMimoKey(settings),
+                child: Text(settings.hasMimoApiKey ? '更换' : '粘贴'),
+              ),
+              if (settings.hasMimoApiKey)
+                TextButton(
+                  onPressed: () => _clearMimoKey(settings),
+                  child: const Text('清除'),
+                ),
+            ],
+          ),
+        ),
+        Text(
+          '音色在听书播放页「朗读引擎」弹窗里选择，切换后从下一片生效。'
+          'Key 也可在构建时用 --dart-define=MIMO_API_KEY=... 注入；'
+          '接口没有 speed 参数，语速用播放器倍速近似。',
+          style: tokens.captionStyle.copyWith(fontSize: 11),
+        ),
         if (settings.engine == TtsEngineKind.http) ...[
           Row(
             children: [

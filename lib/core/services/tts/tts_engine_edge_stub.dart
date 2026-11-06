@@ -20,6 +20,9 @@ class TtsEdgeEngine implements TtsEngine {
   Future<void> stop() async {}
 
   @override
+  void resetCache() {}
+
+  @override
   Future<void> testConnection() async {
     throw const TtsException('unsupported', 'Web 端不支持 Edge 听书');
   }

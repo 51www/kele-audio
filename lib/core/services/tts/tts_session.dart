@@ -19,8 +19,8 @@ abstract class TtsReaderPort {
   /// 确保指定章节已渲染并提取正文段落（纯文本）。
   Future<List<String>> paragraphsOf(int chapterIndex);
 
-  /// 高亮并滚动到指定段落。
-  Future<void> highlight(int paragraphIndex);
+  /// 高亮指定段落；[scroll] 为 true 时同时滚动到该段。
+  Future<void> highlight(int paragraphIndex, {bool scroll = true});
 
   Future<void> clearHighlight();
 
@@ -64,8 +64,14 @@ class TtsSession extends ChangeNotifier {
   TtsEngineKind _engineKind = TtsEngineKind.edge;
 
   List<String> _paragraphs = const [];
+
+  /// 当前 [_paragraphs] 所属章节（-1 = 无缓存）。
+  int _paragraphsChapter = -1;
   int _chapterIndex = 0;
   int _paraIndex = 0;
+
+  /// 阅读页最近一次下发的章节目录文案（离线时播放页仍能显示目录）。
+  List<String> _chapterLabels = const [];
 
   bool _active = false;
   bool _navigating = false;
@@ -103,8 +109,22 @@ class TtsSession extends ChangeNotifier {
   Duration get sleepRemaining => _sleepRemaining;
   bool get hasSleepTimer => _sleepTimer != null || _stopAfterChapter;
   bool get stopAfterChapter => _stopAfterChapter;
-  String get chapterTitle =>
-      _chapterTitleOf?.call(_chapterIndex) ?? '第${_chapterIndex + 1}章';
+
+  /// 阅读页是否仍挂载（关闭阅读页后无法抽取新章节正文）。
+  bool get readerBound => _port != null;
+
+  /// 章节目录文案（缺省时调用方回退「第 N 章」）。
+  List<String> get chapterLabels => _chapterLabels;
+
+  String get chapterTitle {
+    final custom = _chapterTitleOf?.call(_chapterIndex);
+    if (custom != null && custom.isNotEmpty) return custom;
+    if (_chapterIndex >= 0 && _chapterIndex < _chapterLabels.length) {
+      return _chapterLabels[_chapterIndex];
+    }
+    return '第${_chapterIndex + 1}章';
+  }
+
   String get bookTitle => _book?.title ?? '';
 
   /// 阅读页打开时绑定端口（退出页面只解绑，不中断朗读）。
@@ -112,7 +132,17 @@ class TtsSession extends ChangeNotifier {
     required ReaderBook book,
     required TtsReaderPort port,
     required String Function(int index) chapterTitleOf,
+    List<String>? chapterTitles,
   }) {
+    // 换书：清掉上一本的目录与段落缓存，避免断点/文案串书。
+    if (_bookId != book.id) {
+      _chapterLabels = const [];
+      _paragraphs = const [];
+      _paragraphsChapter = -1;
+    }
+    if (chapterTitles != null && chapterTitles.isNotEmpty) {
+      _chapterLabels = List<String>.unmodifiable(chapterTitles);
+    }
     _book = book;
     _bookId = book.id;
     _port = port;
@@ -131,6 +161,15 @@ class TtsSession extends ChangeNotifier {
   void unbindReader() {
     _port = null;
     _chapterTitleOf = null;
+  }
+
+  /// 阅读页解析出目录后同步给会话：关掉阅读页后播放页/播放条仍显示章节名。
+  void updateChapterTitles(String bookId, List<String> labels) {
+    if (bookId != _bookId || labels.isEmpty) return;
+    final next = List<String>.unmodifiable(labels);
+    if (listEquals(next, _chapterLabels)) return;
+    _chapterLabels = next;
+    notifyListeners();
   }
 
   // ---------------------------------------------------------------- 播放控制
@@ -189,6 +228,17 @@ class TtsSession extends ChangeNotifier {
   Future<void> resume({int? chapterOverride}) async {
     if (!_active) return;
     if (!_paused && _playing) return;
+    if (_port == null &&
+        (_paragraphsChapter != _chapterIndex || _paragraphs.isEmpty)) {
+      // 没有阅读页、也没有本章正文缓存：无法抽取新章，保持暂停，
+      // 由播放页提示「回到阅读页继续」（bindReader 会从 pendingChapter 续读）。
+      _pendingChapter = _chapterIndex;
+      _paused = true;
+      _playing = false;
+      _publishMedia();
+      notifyListeners();
+      return;
+    }
     _paused = false;
     _error = null;
     if (chapterOverride != null) _chapterIndex = chapterOverride;
@@ -235,6 +285,39 @@ class TtsSession extends ChangeNotifier {
     await _restartLoop();
   }
 
+  /// 章级跳转（播放页「上一章 / 下一章」与目录点选）。
+  ///
+  /// 阅读页挂载时直接换章续读；阅读页已关闭时无法抽取新章正文，
+  /// 这里只记录目标章并暂停，回到阅读页后由 [bindReader] 从该章续读。
+  Future<void> jumpChapter(int target) async {
+    final book = _book;
+    if (!_active || book == null) return;
+    final maxIndex = book.chapterCount > 0 ? book.chapterCount - 1 : 0;
+    final index = target.clamp(0, maxIndex);
+    if (index == _chapterIndex) return;
+    _chapterIndex = index;
+    _paraIndex = 0;
+    _pendingChapter = null;
+    _paragraphs = const [];
+    _paragraphsChapter = -1;
+    _engine?.resetCache();
+    if (_port == null) {
+      _pendingChapter = index;
+      if (!_paused) await pause();
+      await _saveBookmark(book: book, chapter: index, para: 0, chapterCount: 0);
+      _publishMedia();
+      notifyListeners();
+      return;
+    }
+    await _restartLoop();
+  }
+
+  /// 相对跳章（-1 上一章 / +1 下一章）。
+  Future<void> stepChapter(int delta) async {
+    if (delta == 0) return;
+    await jumpChapter(_chapterIndex + delta);
+  }
+
   /// 用户手动翻页/跳章：TTS 位置同步（先停再取新章段落）。
   ///
   /// 暂停中只更新断点位置、不开讲，等用户恢复时从新位置开始。
@@ -246,7 +329,13 @@ class TtsSession extends ChangeNotifier {
     _paraIndex = paragraphIndex;
     _pendingChapter = null;
     notifyListeners();
-    if (_paused) return;
+    if (_paused) {
+      // 暂停中不开口，但高亮必须跟到新的真值段落；否则阅读页高亮
+      // 会停在旧段，而播放页段数已变，两边看起来「对不上」。
+      // 不滚动：翻页是用户在浏览，只在已可见的段落上换高亮。
+      await _syncHighlight(scroll: false);
+      return;
+    }
     await _restartLoop();
   }
 
@@ -291,7 +380,18 @@ class TtsSession extends ChangeNotifier {
     await _engine?.stop();
     await _engine?.dispose();
     _engine = null;
-    await _ensureEngine();
+    try {
+      await _ensureEngine();
+    } catch (e) {
+      // 新引擎不可用（如系统语音缺失）：落到可读错误态，允许用户再切回其它引擎。
+      _error = e is TtsException ? e.message : '$e';
+      _playing = false;
+      _paused = true;
+      _playStartedAt = null;
+      _publishMedia();
+      notifyListeners();
+      return;
+    }
     await _restartLoop();
   }
 
@@ -342,19 +442,40 @@ class TtsSession extends ChangeNotifier {
   // ---------------------------------------------------------------- 朗读主循环
 
   Future<void> _run(int runId, int chapter, int para) async {
-    final port = _port;
     final book = _book;
-    if (port == null || book == null) return;
+    if (book == null) return;
     try {
       while (_active && runId == _runId) {
-        _navigating = true;
-        final list = await port.paragraphsOf(chapter);
-        _navigating = false;
-        if (!_active || runId != _runId) return;
-        if (list.isEmpty) {
-          throw const TtsException('empty_chapter', '本章没有可朗读的正文');
+        // 每章重新读取：朗读过程中阅读页可能挂载/关闭。
+        final port = _port;
+        List<String> list;
+        if (port != null) {
+          _navigating = true;
+          list = await port.paragraphsOf(chapter);
+          _navigating = false;
+          if (!_active || runId != _runId) return;
+          if (list.isEmpty) {
+            throw const TtsException('empty_chapter', '本章没有可朗读的正文');
+          }
+          _paragraphs = list;
+          _paragraphsChapter = chapter;
+        } else {
+          // 阅读页关闭后无法抽取段落：仅能续读已缓存的当前章，
+          // 跨章需回阅读页载入正文（由 bindReader 的 pendingChapter 续读）。
+          if (_paragraphsChapter != chapter || _paragraphs.isEmpty) {
+            _navigating = false;
+            _chapterIndex = chapter;
+            _pendingChapter = chapter;
+            _playing = false;
+            _paused = true;
+            await _accumulate();
+            _playStartedAt = null;
+            _publishMedia();
+            notifyListeners();
+            return;
+          }
+          list = _paragraphs;
         }
-        _paragraphs = list;
         var index = para;
         if (index == 9999) index = list.length - 1;
         if (index < 0) index = 0;
@@ -431,6 +552,7 @@ class TtsSession extends ChangeNotifier {
         }
         chapter++;
         para = 0;
+        _engine?.resetCache();
         if (_port == null) {
           _pendingChapter = chapter;
           _paused = true;
@@ -525,17 +647,17 @@ class TtsSession extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------- 高亮
-  Future<void> _syncHighlight() async {
+  Future<void> _syncHighlight({bool scroll = true}) async {
     if (!_active) return;
-    await _highlight(_paraIndex);
+    await _highlight(_paraIndex, scroll: scroll);
   }
 
-  Future<void> _highlight(int index) async {
+  Future<void> _highlight(int index, {bool scroll = true}) async {
     final port = _port;
     if (port == null) return;
     try {
       _navigating = true;
-      await port.highlight(index);
+      await port.highlight(index, scroll: scroll);
     } catch (e) {
       debugPrint('[tts] 高亮失败：$e');
     } finally {

@@ -7,6 +7,7 @@ import '../../../app/widgets/common.dart';
 import '../../../core/data/daos.dart';
 import '../../../core/domain/records.dart';
 import '../../../core/services/offline/offline_cache_service.dart';
+import '../../../core/services/settings_store.dart';
 
 /// 离线缓存管理页（M8 / PRD §5.6.3）。
 ///
@@ -20,6 +21,7 @@ class DownloadsPage extends StatelessWidget {
     final tokens = AppTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
     final cache = context.watch<OfflineCacheService>();
+    final settings = context.watch<SettingsStore>();
     final tasks = cache.tasks();
 
     // 按专辑分组，组内按加入顺序
@@ -32,7 +34,7 @@ class DownloadsPage extends StatelessWidget {
       appBar: AppBar(title: const Text('离线缓存')),
       body: Column(
         children: [
-          _buildSummary(context, tokens, scheme, cache, tasks.length),
+          _buildSummary(context, tokens, scheme, cache, settings, tasks.length),
           Expanded(
             child: tasks.isEmpty
                 ? const EmptyState(
@@ -66,6 +68,7 @@ class DownloadsPage extends StatelessWidget {
     AppTokens tokens,
     ColorScheme scheme,
     OfflineCacheService cache,
+    SettingsStore settings,
     int taskCount,
   ) {
     final mb = cache.totalBytes / 1024 / 1024;
@@ -105,9 +108,17 @@ class DownloadsPage extends StatelessWidget {
               tokens,
               icon: Icons.wifi_rounded,
               label: '仅 Wi-Fi 下载',
-              value: true, // Web 预览恒允许；原生端由 SettingsStore 控制
-              onChanged: null,
+              value: settings.wifiOnlyDownload,
+              onChanged: (v) => settings.setWifiOnlyDownload(v),
             ),
+            if (cache.wifiOnlyBlocked && settings.wifiOnlyDownload)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  OfflineCacheService.wifiOnlyBlockedMessage,
+                  style: tokens.captionStyle.copyWith(color: scheme.error),
+                ),
+              ),
             _switchRow(
               context,
               tokens,

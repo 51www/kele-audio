@@ -335,18 +335,21 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                             // M8 离线缓存：整本入队（状态进度见 我的 → 离线缓存）
                             onPressed: _chapters.isEmpty
                                 ? null
-                                : () {
-                                    context
+                                : () async {
+                                    final ok = await context
                                         .read<OfflineCacheService>()
                                         .cacheAlbum(
                                           album,
                                           _chapters,
                                         );
+                                    if (!context.mounted) return;
                                     ScaffoldMessenger.of(context)
                                       ..hideCurrentSnackBar()
                                       ..showSnackBar(SnackBar(
-                                        content: Text(
-                                            '已加入缓存队列：${album.title}（${_chapters.length} 章）'),
+                                        content: Text(ok
+                                            ? '已加入缓存队列：${album.title}（${_chapters.length} 章）'
+                                            : OfflineCacheService
+                                                .wifiOnlyBlockedMessage),
                                         margin: const EdgeInsets.fromLTRB(
                                             16, 0, 16, 96),
                                       ));

@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../app/di.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../app/widgets/common.dart';
+import '../../../app/widgets/recent_records.dart';
 import '../../../core/data/daos.dart';
 import '../../../core/services/listen_stats.dart';
 import '../../../core/services/player/player_service.dart';
+import '../../../core/services/reader/book_store.dart';
 import '../../../core/services/reader/reader_activity_store.dart';
+import '../../../core/services/reader/reader_progress_store.dart';
+import '../../../core/services/recent_records.dart';
 
 /// 听书统计页（M8 / PRD §5.6.1）。
 ///
@@ -30,30 +33,35 @@ class _StatsPageState extends State<StatsPage> {
     return '${time.year}-$month-$day';
   }
 
+  /// 记录服务：复用现有书架 / 阅读进度 / 播放历史，不另建持久化。
+  RecentRecordsService _recentService() => RecentRecordsService(
+    books: context.read<ReaderBookStore>(),
+    progress: context.read<ReaderProgressStore>(),
+    daos: context.read<Daos>(),
+    kv: context.read<AppServices>().kv,
+  );
+
+  Future<void> _clearRecentRecords() async {
+    await _recentService().clear();
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final services = context.read<AppServices>();
     final daos = context.read<Daos>();
 
     // watch PlayerService：播放落进度（play_log 落盘）后自动刷新
     context.watch<PlayerService>();
+    // watch 本地书：阅读进度 / lastReadAt 变化后刷新「最近记录」。
+    context.watch<ReaderBookStore>();
     final readerActivity = context.watch<ReaderActivityStore>();
+    final recent = _recentService().build();
     final entries = daos.playLogs.all();
     final stats = ListenStats.fromEntries(entries);
     final monthSec = StatsAgg.monthSec(entries);
     final trend = StatsAgg.dailyTrend(entries, days: _monthly ? 30 : 7);
-    final topCategories = StatsAgg.topCategories(
-      entries,
-      nameOf: (id) => services.content.byId(id)?.name ??
-          services.childrenContent.byId(id)?.name ??
-          (id.isEmpty ? '未分类' : id),
-    );
-    final topAlbums = StatsAgg.topAlbums(
-      entries,
-      nameOf: (id) => daos.albums.get(id)?.title ?? '未知专辑',
-    );
     final trendTotalSec = trend.fold<int>(0, (s, e) => s + e.sec);
     final totalMin = (trendTotalSec / 60).round();
     final avgMin = (trendTotalSec / 60 / trend.length).round();
@@ -79,13 +87,16 @@ class _StatsPageState extends State<StatsPage> {
     var listenTotal = 0;
     for (final log in readerActivity.log) {
       readTotal += log.mode == ReaderActivityMode.reading ? log.durationSec : 0;
-      listenTotal +=
-          log.mode == ReaderActivityMode.listening ? log.durationSec : 0;
+      listenTotal += log.mode == ReaderActivityMode.listening
+          ? log.durationSec
+          : 0;
       if (log.date.compareTo(weekStartKey) >= 0) {
-        readWeek +=
-            log.mode == ReaderActivityMode.reading ? log.durationSec : 0;
-        listenWeek +=
-            log.mode == ReaderActivityMode.listening ? log.durationSec : 0;
+        readWeek += log.mode == ReaderActivityMode.reading
+            ? log.durationSec
+            : 0;
+        listenWeek += log.mode == ReaderActivityMode.listening
+            ? log.durationSec
+            : 0;
       }
     }
 
@@ -138,12 +149,18 @@ class _StatsPageState extends State<StatsPage> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.menu_book_rounded,
-                        size: 20, color: scheme.primary),
+                    Icon(
+                      Icons.menu_book_rounded,
+                      size: 20,
+                      color: scheme.primary,
+                    ),
                     SizedBox(width: 8),
-                    Text('阅读时长', style: tokens.bodyStyle.copyWith(
-                      fontWeight: FontWeight.w700,
-                    )),
+                    Text(
+                      '阅读时长',
+                      style: tokens.bodyStyle.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const Spacer(),
                     Text('数据只存本机', style: tokens.captionStyle),
                   ],
@@ -176,8 +193,11 @@ class _StatsPageState extends State<StatsPage> {
           KeleCard(
             child: Row(
               children: [
-                Icon(Icons.emoji_events_rounded,
-                    size: 20, color: scheme.primary),
+                Icon(
+                  Icons.emoji_events_rounded,
+                  size: 20,
+                  color: scheme.primary,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text('累计听完 $finished 张专辑', style: tokens.bodyStyle),
@@ -186,6 +206,43 @@ class _StatsPageState extends State<StatsPage> {
               ],
             ),
           ),
+
+          // ── 最近记录（阅读 / 听书，最多 8 条）─────────────────────
+          SectionTitle(
+            '最近记录',
+            padding: EdgeInsets.only(
+              top: tokens.spaceLg,
+              bottom: tokens.spaceXs,
+            ),
+            trailing: TextButton(
+              onPressed: _clearRecentRecords,
+              style: TextButton.styleFrom(
+                foregroundColor: tokens.onHairline,
+                padding: EdgeInsets.zero,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text('清空', style: tokens.captionStyle),
+            ),
+          ),
+          if (recent.isEmpty)
+            Padding(
+              padding: EdgeInsets.symmetric(vertical: tokens.spaceSm),
+              child: Text('还没有阅读或收听记录', style: tokens.captionStyle),
+            )
+          else
+            for (final (index, record) in recent.indexed) ...[
+              RecentRecordTile(
+                record: record,
+                onTap: () => openRecentRecord(context, record),
+              ),
+              if (index < recent.length - 1)
+                Divider(
+                  height: 1,
+                  thickness: 0.5,
+                  color: tokens.hairlineColor,
+                ),
+            ],
 
           // ── 收听趋势（周 / 月切换 + 渐变柱状图）─────────────────
           const SectionTitle('收听趋势'),
@@ -206,8 +263,7 @@ class _StatsPageState extends State<StatsPage> {
                             children: [
                               Text(
                                 '$totalMin',
-                                style: tokens.titleStyle
-                                    .copyWith(fontSize: 24),
+                                style: tokens.titleStyle.copyWith(fontSize: 24),
                               ),
                               const SizedBox(width: 4),
                               Text('分钟', style: tokens.captionStyle),
@@ -227,93 +283,12 @@ class _StatsPageState extends State<StatsPage> {
                   ],
                 ),
                 SizedBox(height: tokens.spaceMd),
-                _TrendChart(
-                  trend: trend,
-                  monthly: _monthly,
-                  tokens: tokens,
-                ),
+                _TrendChart(trend: trend, monthly: _monthly, tokens: tokens),
                 SizedBox(height: tokens.spaceSm),
                 Text('每天收听时长（分钟）', style: tokens.captionStyle),
               ],
             ),
           ),
-
-          // ── 分类 Top3 ────────────────────────────────────────────
-          if (topCategories.isNotEmpty) ...[
-            const SectionTitle('最常听的分类'),
-            KeleCard(
-              padding: EdgeInsets.zero,
-              child: Column(
-                children: [
-                  for (final (i, c) in topCategories.indexed)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      child: Row(
-                        children: [
-                          Text('#${i + 1}', style: tokens.numStyle),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              c.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: tokens.bodyStyle,
-                            ),
-                          ),
-                          Text(
-                            ListenStats.formatDuration(c.sec),
-                            style: tokens.captionStyle,
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-
-          // ── 专辑 Top5 ────────────────────────────────────────────
-          if (topAlbums.isNotEmpty) ...[
-            const SectionTitle('最常听的专辑'),
-            KeleCard(
-              padding: EdgeInsets.zero,
-              child: Column(
-                children: [
-                  for (final (i, a) in topAlbums.indexed)
-                    InkWell(
-                      onTap: () => context.push('/album/${a.id}'),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
-                        ),
-                        child: Row(
-                          children: [
-                            Text('#${i + 1}', style: tokens.numStyle),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                a.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: tokens.bodyStyle,
-                              ),
-                            ),
-                            Text(
-                              ListenStats.formatDuration(a.sec),
-                              style: tokens.captionStyle,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
 
           if (entries.isEmpty)
             Padding(
@@ -387,8 +362,9 @@ class _TrendChart extends StatelessWidget {
                           for (var i = 0; i < 3; i++)
                             Container(
                               height: 1,
-                              color: tokens.hairlineColor
-                                  .withValues(alpha: 0.4),
+                              color: tokens.hairlineColor.withValues(
+                                alpha: 0.4,
+                              ),
                             ),
                         ],
                       ),
@@ -403,8 +379,9 @@ class _TrendChart extends StatelessWidget {
                                   ? Center(
                                       child: Container(
                                         width: 1,
-                                        color: tokens.hairlineColor
-                                            .withValues(alpha: 0.55),
+                                        color: tokens.hairlineColor.withValues(
+                                          alpha: 0.55,
+                                        ),
                                       ),
                                     )
                                   : const SizedBox.shrink(),
@@ -418,8 +395,9 @@ class _TrendChart extends StatelessWidget {
                         for (final e in trend)
                           Expanded(
                             child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 1.5),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 1.5,
+                              ),
                               child: _TrendBar(
                                 sec: e.sec,
                                 maxSec: maxSec,
@@ -582,27 +560,27 @@ class _RangeToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     Widget chip(String label, bool selected, VoidCallback onTap) => InkWell(
+      borderRadius: BorderRadius.circular(tokens.radiusPill),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected ? scheme.primary : Colors.transparent,
           borderRadius: BorderRadius.circular(tokens.radiusPill),
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            decoration: BoxDecoration(
-              color: selected ? scheme.primary : Colors.transparent,
-              borderRadius: BorderRadius.circular(tokens.radiusPill),
-              border: Border.all(
-                color: selected ? Colors.transparent : tokens.hairlineColor,
-              ),
-            ),
-            child: Text(
-              label,
-              style: tokens.captionStyle.copyWith(
-                fontWeight: FontWeight.w600,
-                color: selected ? scheme.onPrimary : tokens.onHairline,
-              ),
-            ),
+          border: Border.all(
+            color: selected ? Colors.transparent : tokens.hairlineColor,
           ),
-        );
+        ),
+        child: Text(
+          label,
+          style: tokens.captionStyle.copyWith(
+            fontWeight: FontWeight.w600,
+            color: selected ? scheme.onPrimary : tokens.onHairline,
+          ),
+        ),
+      ),
+    );
 
     return Row(
       mainAxisSize: MainAxisSize.min,

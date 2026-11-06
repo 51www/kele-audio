@@ -80,9 +80,10 @@ class _CategoryFeedState extends State<CategoryFeed>
     }
 
     try {
-      final data = await context
-          .read<DiscoverSource>()
-          .fetchPage(widget.category, 1);
+      final data = await context.read<DiscoverSource>().fetchPage(
+        widget.category,
+        1,
+      );
       if (!mounted) return;
       setState(() {
         _items
@@ -136,9 +137,10 @@ class _CategoryFeedState extends State<CategoryFeed>
   Future<void> _refresh() async {
     final cache = context.read<DiscoverPageCache>();
     try {
-      final data = await context
-          .read<DiscoverSource>()
-          .fetchPage(widget.category, 1);
+      final data = await context.read<DiscoverSource>().fetchPage(
+        widget.category,
+        1,
+      );
       if (!mounted) return;
       setState(() {
         _items
@@ -165,8 +167,7 @@ class _CategoryFeedState extends State<CategoryFeed>
 
   void _onScroll() {
     if (!_scroll.hasClients || _loadingMore || !_hasMore) return;
-    if (_scroll.position.pixels >=
-        _scroll.position.maxScrollExtent - 320) {
+    if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 320) {
       _loadMore();
     }
   }
@@ -176,9 +177,10 @@ class _CategoryFeedState extends State<CategoryFeed>
     setState(() => _loadingMore = true);
     try {
       final next = _page + 1;
-      final data = await context
-          .read<DiscoverSource>()
-          .fetchPage(widget.category, next);
+      final data = await context.read<DiscoverSource>().fetchPage(
+        widget.category,
+        next,
+      );
       if (!mounted) return;
       final seen = _items.map((a) => a.id).toSet();
       setState(() {
@@ -227,10 +229,10 @@ class _CategoryFeedState extends State<CategoryFeed>
       onRefresh: _refresh,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // 双列卡片按列宽自适应行高（封面 16:9 + 文案区实高）
+          // 双列等宽网格：页边距 = 沟槽 = spaceMd，行高按列宽自适应
+          //（16:9 封面 + 固定两行标题，UP 主/集数已叠进封面）。
           final colW = (constraints.maxWidth - tokens.spaceMd * 3) / 2;
-          // 文案区实高约 100.9px（真机曾溢出 0.875px），预算按 104px 留余量。
-          final childAspect = colW / (colW * 9 / 16 + 104);
+          final childAspect = colW / albumCardExtent(tokens, colW);
           return ListView(
             controller: _scroll,
             padding: EdgeInsets.fromLTRB(
@@ -254,10 +256,8 @@ class _CategoryFeedState extends State<CategoryFeed>
                   childAspectRatio: childAspect,
                 ),
                 itemCount: _items.length,
-                itemBuilder: (context, i) => AlbumCard(
-                  album: _items[i],
-                  onTap: () => _open(_items[i]),
-                ),
+                itemBuilder: (context, i) =>
+                    AlbumCard(album: _items[i], onTap: () => _open(_items[i])),
               ),
               SizedBox(height: tokens.spaceMd),
               if (_loadingMore)
@@ -335,48 +335,52 @@ class _SkeletonGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final shimmer = scheme.onSurface.withValues(alpha: 0.06);
-    return GridView.builder(
-      padding: EdgeInsets.fromLTRB(
-        tokens.spaceMd,
-        tokens.spaceSm,
-        tokens.spaceMd,
-        tokens.spaceLg,
-      ),
-      physics: const AlwaysScrollableScrollPhysics(),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: tokens.spaceMd,
-        crossAxisSpacing: tokens.spaceMd,
-        childAspectRatio: 0.72,
-      ),
-      itemCount: 6,
-      itemBuilder: (_, _) => Container(
-        decoration: BoxDecoration(
-          color: shimmer,
-          borderRadius: BorderRadius.circular(tokens.radiusMd),
-          border: Border.all(color: tokens.hairlineColor),
-        ),
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainer,
-                  borderRadius: BorderRadius.circular(tokens.radiusSm),
-                ),
-              ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final colW = (constraints.maxWidth - tokens.spaceMd * 3) / 2;
+        return GridView.builder(
+          padding: EdgeInsets.fromLTRB(
+            tokens.spaceMd,
+            tokens.spaceSm,
+            tokens.spaceMd,
+            tokens.spaceLg,
+          ),
+          physics: const AlwaysScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: tokens.spaceMd,
+            crossAxisSpacing: tokens.spaceMd,
+            childAspectRatio: colW / albumCardExtent(tokens, colW),
+          ),
+          itemCount: 6,
+          itemBuilder: (_, _) => Container(
+            decoration: BoxDecoration(
+              color: shimmer,
+              borderRadius: BorderRadius.circular(tokens.radiusMd),
+              border: Border.all(color: tokens.hairlineColor),
             ),
-            const SizedBox(height: 10),
-            _line(width: double.infinity, color: shimmer, tokens: tokens),
-            const SizedBox(height: 6),
-            _line(width: 120, color: shimmer, tokens: tokens),
-            const SizedBox(height: 6),
-            _line(width: 80, color: shimmer, tokens: tokens),
-          ],
-        ),
-      ),
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainer,
+                      borderRadius: BorderRadius.circular(tokens.radiusSm),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _line(width: double.infinity, color: shimmer, tokens: tokens),
+                const SizedBox(height: 6),
+                _line(width: 96, color: shimmer, tokens: tokens),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -384,13 +388,12 @@ class _SkeletonGrid extends StatelessWidget {
     required double width,
     required Color color,
     required AppTokens tokens,
-  }) =>
-      Container(
-        width: width,
-        height: 12,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(6),
-        ),
-      );
+  }) => Container(
+    width: width,
+    height: 12,
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(6),
+    ),
+  );
 }

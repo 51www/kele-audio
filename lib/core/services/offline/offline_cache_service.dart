@@ -11,6 +11,7 @@ import '../../domain/album.dart';
 import '../../domain/playback.dart';
 import '../../domain/records.dart';
 import 'audio_store.dart';
+import 'network_probe.dart';
 
 /// 离线缓存服务（M8 / PRD §5.6.3 / §5.8）。
 ///
@@ -68,6 +69,40 @@ class OfflineCacheService extends ChangeNotifier {
   /// 下载档位来源（DI 注入 `() => prefs.quality`，测试可不注入走 132K）。
   AudioQuality Function()? qualityProvider;
 
+  /// 「仅 Wi-Fi 下载」开关读取（DI 注入 `() => settings.wifiOnlyDownload`）。
+  bool Function()? wifiOnlyProvider;
+
+  /// 网络类型探测（默认走系统通道；测试可注入固定结果）。
+  NetworkProbe networkProbe = const PlatformNetworkProbe();
+
+  /// 「仅 Wi-Fi 下载」拦截提示（UI 提示与任务失败原因共用）。
+  static const String wifiOnlyBlockedMessage =
+      '「仅 Wi-Fi 下载」已开启，当前不是 Wi-Fi，已暂停新增下载。'
+      '可在「下载管理」页关闭该开关后重试。';
+
+  bool _wifiOnlyBlocked = false;
+
+  /// 最近一次是否有新任务因「仅 Wi-Fi 下载」被拦截（下载管理页据此提示）。
+  bool get wifiOnlyBlocked => _wifiOnlyBlocked;
+
+  /// 新任务下发前的网络门控。
+  ///
+  /// - 开关关闭：不限网络；
+  /// - 开关开启且网络为 Wi-Fi / 有线：放行；
+  /// - 开关开启且为移动网络 / 无网络：拦截；
+  /// - **无法可靠判断（unknown）：放行并记录日志**——探测能力缺失时
+  ///   宁可让用户下载成功，也不把用户主动发起的下载误拦成「失败」；
+  ///   该开关是流量提示而非安全控制，误拦的代价高于放行。
+  Future<bool> _networkAllowsNewTask() async {
+    if (!(wifiOnlyProvider?.call() ?? false)) return true;
+    final kind = await networkProbe.current();
+    if (kind == NetworkKind.unknown) {
+      _log('网络类型无法判断，按放行处理（仅 Wi-Fi 下载不拦截）');
+      return true;
+    }
+    return kind == NetworkKind.wifi || kind == NetworkKind.ethernet;
+  }
+
   /// 下载档位 = 默认音质**封顶 192K**（Q5b：Hi-Res 不整本下载，流量/体积失控）。
   AudioQuality get _downloadQuality {
     final q = qualityProvider?.call() ?? AudioQuality.q132k;
@@ -124,7 +159,16 @@ class OfflineCacheService extends ChangeNotifier {
   // -------------------------------------------------------------- 入队/控制
 
   /// 整本缓存：未完成的章节全部入队（已 done 的跳过，failed 重新入队）。
-  Future<void> cacheAlbum(Album album, List<Chapter> chapters) async {
+  ///
+  /// 返回 false 表示被「仅 Wi-Fi 下载」拦截（未入队，调用方应提示用户）。
+  Future<bool> cacheAlbum(Album album, List<Chapter> chapters) async {
+    if (!await _networkAllowsNewTask()) {
+      _wifiOnlyBlocked = true;
+      _log(wifiOnlyBlockedMessage);
+      notifyListeners();
+      return false;
+    }
+    _wifiOnlyBlocked = false;
     await daos.downloads.upsertAll([
       for (final c in chapters)
         if (daos.downloads.get(c.id)?.status != DownloadStatus.done)
@@ -140,11 +184,23 @@ class OfflineCacheService extends ChangeNotifier {
     _pausedAlbums.remove(album.id);
     notifyListeners();
     unawaited(_drain());
+    return true;
   }
 
   /// 缓存单章（播放页缓存面板「缓存本章」；已 done 的幂等跳过）。
-  Future<void> cacheChapter(Album album, Chapter chapter) async {
-    if (daos.downloads.get(chapter.id)?.status == DownloadStatus.done) return;
+  ///
+  /// 返回 false 表示被「仅 Wi-Fi 下载」拦截（未入队，调用方应提示用户）。
+  Future<bool> cacheChapter(Album album, Chapter chapter) async {
+    if (daos.downloads.get(chapter.id)?.status == DownloadStatus.done) {
+      return true;
+    }
+    if (!await _networkAllowsNewTask()) {
+      _wifiOnlyBlocked = true;
+      _log(wifiOnlyBlockedMessage);
+      notifyListeners();
+      return false;
+    }
+    _wifiOnlyBlocked = false;
     await daos.downloads.upsert(DownloadTask(
       chapterId: chapter.id,
       albumId: album.id,
@@ -156,6 +212,7 @@ class OfflineCacheService extends ChangeNotifier {
     _pausedAlbums.remove(album.id);
     notifyListeners();
     unawaited(_drain());
+    return true;
   }
 
   /// 暂停一个专辑（取消进行中的请求，剩余 queued 任务原地等待）。
@@ -255,6 +312,19 @@ class OfflineCacheService extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    // 逐项门控：每个任务开始前按「当时」网络判断（队列中途切网也能拦住后续项）。
+    // 已在 running 的任务不会走到这里，不会被中途掐断。
+    if (!await _networkAllowsNewTask()) {
+      await daos.downloads.upsert(
+        _withStatus(task, DownloadStatus.failed, error: wifiOnlyBlockedMessage),
+      );
+      _wifiOnlyBlocked = true;
+      _log('拦截下载（仅 Wi-Fi）：${chapter.title}');
+      notifyListeners();
+      return;
+    }
+    _wifiOnlyBlocked = false;
+
     await daos.downloads.upsert(_withStatus(task, DownloadStatus.running));
     notifyListeners();
 

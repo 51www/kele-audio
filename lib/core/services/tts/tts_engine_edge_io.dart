@@ -180,6 +180,13 @@ class TtsEdgeEngine implements TtsEngine {
     await _cleanupCurrentFile();
   }
 
+  /// 换章清理预合成队列，避免旧章文本占用内存。
+  @override
+  void resetCache() {
+    _prefetched.clear();
+    _prefetching.clear();
+  }
+
   @override
   Future<void> testConnection() async {
     final bytes = await _synthesize('你好，这是朗读连通性测试。');

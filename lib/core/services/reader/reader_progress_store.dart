@@ -13,18 +13,23 @@ class ReaderProgress {
     this.cfi = '',
     this.chapterIndex = 0,
     this.fraction = 0,
+    this.page,
     this.savedAt,
   });
 
   final String cfi;
   final int chapterIndex;
   final double fraction;
+
+  /// 最近阅读页码快照（「最近记录」展示用；滚动模式可能为 null）。
+  final int? page;
   final DateTime? savedAt;
 
   Map<String, dynamic> toJson() => {
     'cfi': cfi,
     'chapterIndex': chapterIndex,
     'fraction': fraction,
+    'page': page,
     'savedAt': savedAt?.toIso8601String(),
   };
 
@@ -33,6 +38,7 @@ class ReaderProgress {
       cfi: json['cfi']?.toString() ?? '',
       chapterIndex: (json['chapterIndex'] as num?)?.toInt() ?? 0,
       fraction: (json['fraction'] as num?)?.toDouble() ?? 0,
+      page: (json['page'] as num?)?.toInt(),
       savedAt: DateTime.tryParse(json['savedAt']?.toString() ?? ''),
     );
   }

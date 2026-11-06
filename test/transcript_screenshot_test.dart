@@ -171,9 +171,9 @@ void main() {
       outPath: 'docs/shortscreen/transcript-follow-warm-paper.png',
     );
     await _capture(
-      preset: AppThemePreset.darkGold,
+      preset: AppThemePreset.inkNight,
       tester: tester,
-      outPath: 'docs/shortscreen/transcript-follow-dark-gold.png',
+      outPath: 'docs/shortscreen/transcript-follow-ink-night.png',
     );
   });
 }

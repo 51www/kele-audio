@@ -70,7 +70,7 @@ void main() {
     // ── Tab 2 书架：空态 + 建表/DAO 读写 Demo ───────────────────────
     await tester.tap(find.text('书架'));
     await tester.pumpAndSettle();
-    expect(find.text('还没有本地书'), findsOneWidget);
+    expect(find.text('书架还是空的'), findsOneWidget);
 
     await scrollTo(tester, find.text('本地数据层 · core/data'));
     expect(find.text('本地数据层 · core/data'), findsOneWidget);
@@ -86,9 +86,9 @@ void main() {
     await scrollTo(tester, find.text('工程自检 · M1 骨架'));
     expect(find.text('工程自检 · M1 骨架'), findsOneWidget);
 
-    await tester.tap(find.text('暗夜金橙'));
+    await tester.tap(find.text('静夜墨灰'));
     await tester.pumpAndSettle();
-    expect(services.theme.preset, AppThemePreset.darkGold);
+    expect(services.theme.preset, AppThemePreset.inkNight);
 
     await tester.tap(find.text('暖纸书卷'));
     await tester.pumpAndSettle();

@@ -2,11 +2,11 @@ import 'package:flutter/foundation.dart';
 
 import '../api/key_value_store.dart';
 
-/// 设置页持久化（M5）。
+/// 设置持久化（M5）。
 ///
-/// - 「仅 Wi-Fi 下载」占位开关（下载能力 M8 实现，先把选择记住）；
+/// - 「仅 Wi-Fi 下载」开关（入口在离线缓存页；离线缓存下发新任务前按网络类型拦截）；
 /// - 发现页显示控制（高级设置）：编辑精选行显隐 + 分类显隐；
-/// - 主题走 `ThemeController`，音质/播放模式/自动连播走 `PlayerPrefs`。
+/// - 主题走 `ThemeController`，音质/播放模式走 `PlayerPrefs`。
 class SettingsStore extends ChangeNotifier {
   SettingsStore(this._kv);
 
