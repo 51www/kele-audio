@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -18,6 +19,7 @@ class _FakePort implements TtsReaderPort {
 
   final List<List<String>> chapters;
   final List<int> highlights = [];
+  final List<({int index, int? start, int? end})> marks = [];
   int chapter = 0;
 
   @override
@@ -30,8 +32,18 @@ class _FakePort implements TtsReaderPort {
   }
 
   @override
-  Future<void> highlight(int paragraphIndex, {bool scroll = true}) async {
+  Future<void> highlight(
+    int paragraphIndex, {
+    bool scroll = true,
+    int? startChar,
+    int? endChar,
+  }) async {
     highlights.add(paragraphIndex);
+    marks.add((
+      index: paragraphIndex,
+      start: startChar,
+      end: endChar,
+    ));
   }
 
   @override
@@ -106,6 +118,36 @@ class _GatedTtsEngine implements TtsEngine {
   Future<void> dispose() async {}
 }
 
+/// 记录合成与预合成文本，用于验证短句切分与「首片段不预取」。
+class _SegmentRecordingEngine implements TtsEngine {
+  final List<String> spoken = [];
+  final List<String> prefetched = [];
+
+  @override
+  String get id => 'recording';
+
+  @override
+  Future<void> start(TtsParams params) async {}
+
+  @override
+  void prefetch(String text) => prefetched.add(text);
+
+  @override
+  Future<void> speak(String text) async => spoken.add(text);
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  void resetCache() {}
+
+  @override
+  Future<void> testConnection() async {}
+
+  @override
+  Future<void> dispose() async {}
+}
+
 ReaderBook _book() => ReaderBook(
       id: 'b1',
       title: '测试书',
@@ -116,36 +158,63 @@ ReaderBook _book() => ReaderBook(
     );
 
 void main() {
-  test('TtsSettingsStore 持久化引擎/音色/语速/HTTP 模板', () async {
+  test('TtsSettingsStore 持久化引擎/音色/语速', () async {
     final kv = MemoryKeyValueStore();
     final store = TtsSettingsStore(kv);
     await store.load();
     expect(store.engine, TtsEngineKind.edge);
 
-    await store.setEngine(TtsEngineKind.http);
+    await store.setEngine(TtsEngineKind.system);
     await store.setEdgeVoice('zh-CN-YunxiNeural');
     await store.setRate(1.5);
     await store.setPitch(0.8);
-    await store.setDefaultListen(true);
-    await store.upsertTemplate(
-      const TtsHttpTemplate(
-        id: 'tpl1',
-        name: '自建',
-        url: 'https://example.com/tts?text={text}&voice={voice}&rate={rate}',
-        headers: {'Authorization': 'Bearer demo'},
-      ),
-    );
 
     final restored = TtsSettingsStore(kv);
     await restored.load();
-    expect(restored.engine, TtsEngineKind.http);
+    expect(restored.engine, TtsEngineKind.system);
     expect(restored.edgeVoice, 'zh-CN-YunxiNeural');
     expect(restored.rate, 1.5);
     expect(restored.pitch, 0.8);
-    expect(restored.defaultListen, isTrue);
-    expect(restored.httpTemplate?.name, '自建');
-    expect(restored.httpTemplate?.headers['Authorization'], 'Bearer demo');
-    expect(restored.httpTemplate?.url.contains('{text}'), isTrue);
+    expect(store.toJson().containsKey('defaultListen'), isFalse);
+  });
+
+  test('旧版 mimo/http 引擎回落 Edge 并清除残留 Key', () async {
+    final kv = MemoryKeyValueStore();
+    await kv.setString(
+      'tts_settings',
+      jsonEncode({
+        'engine': 'mimo',
+        'edgeVoice': 'zh-CN-YunxiNeural',
+        'mimoVoice': 'mimo_default',
+        'templates': <String>[],
+      }),
+    );
+    await kv.setString('mimo_api_key', 'secret');
+
+    final store = TtsSettingsStore(kv);
+    await store.load();
+    expect(store.engine, TtsEngineKind.edge);
+    expect(store.edgeVoice, 'zh-CN-YunxiNeural');
+    expect(kv.getString('mimo_api_key'), isNull);
+  });
+
+  test('activeVoice 随引擎切换到对应音色并可持久化', () async {
+    final kv = MemoryKeyValueStore();
+    final store = TtsSettingsStore(kv);
+    await store.load();
+    expect(store.activeVoice, 'zh-CN-XiaoxiaoNeural');
+
+    await store.setEdgeVoice('zh-CN-YunxiNeural');
+    await store.setSystemVoice('zh-CN-system-voice');
+    expect(store.activeVoice, 'zh-CN-YunxiNeural');
+
+    await store.setEngine(TtsEngineKind.system);
+    expect(store.activeVoice, 'zh-CN-system-voice');
+
+    final restored = TtsSettingsStore(kv);
+    await restored.load();
+    expect(restored.engine, TtsEngineKind.system);
+    expect(restored.activeVoice, 'zh-CN-system-voice');
   });
 
   test('PlaybackArbiter：B 站与 TTS 互斥且切换媒体回调', () async {
@@ -233,6 +302,49 @@ void main() {
     expect(listening, isEmpty);
   });
 
+  test('长段落按短句合成：首句不预取，高亮带段内区间', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    final books = ReaderBookStore(kv);
+    await books.add(_book());
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final port = _FakePort([
+      ['桥头下着雨。风很大，他走进巷子。远处传来钟声。', '第二段'],
+      ['第三章甲', '第三章乙'],
+    ]);
+    final engine = _SegmentRecordingEngine();
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+    );
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+    for (var i = 0; i < 40 && session.active; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    expect(engine.spoken.first, '桥头下着雨。风很大，他走进巷子。');
+    expect(engine.spoken, contains('远处传来钟声。'));
+    expect(engine.spoken.length, greaterThan(4));
+    // 首请求独占合成通道，不被第二句预取抢占。
+    expect(engine.prefetched, isNot(contains(engine.spoken.first)));
+    // 同一段落内的两个短句分别高亮到不同字符区间。
+    expect(port.marks.first.index, 0);
+    expect(port.marks.first.start, 0);
+    expect(port.marks.first.end, engine.spoken.first.length);
+    expect(port.marks[1].index, 0);
+    expect(port.marks[1].start, greaterThan(0));
+  });
+
   group('系统引擎语速映射', () {
     test('默认档 1.0x 映射为正常语速', () {
       expect(TtsSystemEngine.androidRateFor(1.0), 1.0);
@@ -282,11 +394,7 @@ void main() {
       final engine = _GatedTtsEngine();
       final session = await build(settings, engine);
 
-      await session.start(
-        chapterIndex: 0,
-        paraIndex: 0,
-        fromBookmark: false,
-      );
+      await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(engine.spoken, ['第一段']);
       expect(session.playing, isTrue);
@@ -315,11 +423,7 @@ void main() {
       final engine = _GatedTtsEngine(failReload: true);
       final session = await build(settings, engine);
 
-      await session.start(
-        chapterIndex: 0,
-        paraIndex: 0,
-        fromBookmark: false,
-      );
+      await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(session.playing, isTrue);
 
@@ -341,11 +445,7 @@ void main() {
       final engine = _GatedTtsEngine(deadOnSpeak: true);
       final session = await build(settings, engine);
 
-      await session.start(
-        chapterIndex: 0,
-        paraIndex: 0,
-        fromBookmark: false,
-      );
+      await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       expect(session.error, isNull);
@@ -364,11 +464,7 @@ void main() {
       final engine = _GatedTtsEngine(deadOnStart: true);
       final session = await build(settings, engine);
 
-      await session.start(
-        chapterIndex: 0,
-        paraIndex: 0,
-        fromBookmark: false,
-      );
+      await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
 
       expect(session.error, contains('不可用'));
       expect(session.paused, isTrue);

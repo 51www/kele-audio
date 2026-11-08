@@ -3,8 +3,16 @@ import 'dart:math' as math;
 /// 本地书来源（M9.1）：
 /// - [localTxt]：本地 TXT，导入时切章并转成内部 EPUB；
 /// - [localEpub]：本地 EPUB，校验后原样落盘；
+/// - [localPdf]：本地 PDF，抽取文字层后转成内部 EPUB；
+/// - [localMobi]：本地 MOBI / AZW，解出文本层后转成内部 EPUB；
 /// - [webArticle]：网页文章，抓取正文后生成 EPUB 快照。
-enum ReaderBookSource { localTxt, localEpub, localPdf, webArticle }
+enum ReaderBookSource {
+  localTxt,
+  localEpub,
+  localPdf,
+  localMobi,
+  webArticle,
+}
 
 extension ReaderBookSourceX on ReaderBookSource {
   /// 存储用字符串（JSON 落盘）。
@@ -15,6 +23,7 @@ extension ReaderBookSourceX on ReaderBookSource {
     ReaderBookSource.localTxt => 'TXT',
     ReaderBookSource.localEpub => 'EPUB',
     ReaderBookSource.localPdf => 'PDF',
+    ReaderBookSource.localMobi => 'MOBI',
     ReaderBookSource.webArticle => '网页',
   };
 
@@ -26,6 +35,7 @@ extension ReaderBookSourceX on ReaderBookSource {
       this == ReaderBookSource.localTxt ||
       this == ReaderBookSource.localEpub ||
       this == ReaderBookSource.localPdf ||
+      this == ReaderBookSource.localMobi ||
       this == ReaderBookSource.webArticle;
 
   static ReaderBookSource fromStorage(String? value) {
@@ -64,7 +74,7 @@ extension PdfReadQualityX on PdfReadQuality {
 
 /// 本地书领域模型（docs/reader-design.md §2.1）。
 ///
-/// 书籍文件统一落盘为 EPUB（`books/{id}/book.epub`），三类来源因此共用
+/// 书籍文件统一落盘为 EPUB（`books/{id}/book.epub`），各类来源因此共用
 /// 同一条阅读/朗读管线；本模型只保存元数据与进度冗余字段。
 class ReaderBook {
   const ReaderBook({

@@ -66,6 +66,14 @@ class TtsSystemEngine implements TtsEngine {
       } catch (e) {
         debugPrint('[tts:system] setVoice 失败（沿用系统默认）：$e');
       }
+    } else {
+      // 从具体音色切回「跟随系统默认」：重设语言让平台恢复默认语音，
+      // 否则引擎实例会一直沿用上一次 setVoice 的音色。
+      try {
+        await _tts.setLanguage('zh-CN');
+      } catch (e) {
+        debugPrint('[tts:system] 恢复默认语音失败：$e');
+      }
     }
     await _tts.setSpeechRate(androidRateFor(params.rate) / 2.0);
     await _tts.setPitch(params.pitch);
@@ -122,10 +130,13 @@ class TtsSystemEngine implements TtsEngine {
   @override
   void resetCache() {}
 
-  /// 平台可用中文音色（设置页选择系统音色用）。
-  Future<List<TtsVoice>> listVoices() async {
+  /// 只读音色探测器：不 setLanguage、不 stop，避免打断正在朗读的引擎实例。
+  static final FlutterTts _voiceProbe = FlutterTts();
+
+  /// 平台可用中文音色（设置页 / 听书播放页共用，只读）。
+  static Future<List<TtsVoice>> availableVoices() async {
     try {
-      final raw = await _tts.getVoices;
+      final raw = await _voiceProbe.getVoices;
       final list = <TtsVoice>[];
       if (raw is List) {
         for (final item in raw) {
@@ -143,6 +154,9 @@ class TtsSystemEngine implements TtsEngine {
       return const [];
     }
   }
+
+  /// 平台可用中文音色（实例便捷方法）。
+  Future<List<TtsVoice>> listVoices() => availableVoices();
 
   @override
   Future<void> testConnection() async {

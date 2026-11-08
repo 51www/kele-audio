@@ -30,6 +30,10 @@ class TtsEdgeEngine implements TtsEngine {
   final Map<String, Uint8List> _prefetched = {};
   final Set<String> _prefetching = {};
 
+  /// 预合成代际：切参数 / 切章 / 停止后自增，让在途请求的结果作废，
+  /// 避免用旧音色、旧语速合成的音频被后续 speak 命中。
+  int _cacheGeneration = 0;
+
   File? _currentFile;
 
   @override
@@ -62,9 +66,17 @@ class TtsEdgeEngine implements TtsEngine {
 
   @override
   Future<void> start(TtsParams params) async {
+    // 播放页切换音色 / 语速也会走到这里：旧参数的预合成音频必须先作废。
+    _invalidatePrefetch();
     _params = params;
     _ensurePlayer();
     await _player!.setRate(1.0);
+  }
+
+  void _invalidatePrefetch() {
+    _cacheGeneration++;
+    _prefetched.clear();
+    _prefetching.clear();
   }
 
   static String _cleanError(Object error) {
@@ -97,10 +109,13 @@ class TtsEdgeEngine implements TtsEngine {
   void prefetch(String text) {
     if (text.trim().isEmpty) return;
     if (_prefetched.containsKey(text) || _prefetching.contains(text)) return;
+    final generation = _cacheGeneration;
     _prefetching.add(text);
     unawaited(
       _synthesize(text)
           .then((bytes) {
+            // 参数或会话已变，在途结果直接丢弃。
+            if (generation != _cacheGeneration) return;
             _prefetched[text] = bytes;
             // 只保留最近两段预合成，避免长章节堆积内存。
             while (_prefetched.length > 2) {
@@ -170,8 +185,7 @@ class TtsEdgeEngine implements TtsEngine {
     _token++;
     _pending?.complete();
     _pending = null;
-    _prefetched.clear();
-    _prefetching.clear();
+    _invalidatePrefetch();
     try {
       await _player?.stop();
     } catch (e) {
@@ -180,12 +194,9 @@ class TtsEdgeEngine implements TtsEngine {
     await _cleanupCurrentFile();
   }
 
-  /// 换章清理预合成队列，避免旧章文本占用内存。
+  /// 换章清理预合成队列，避免旧章文本占用内存或旧音频被误用。
   @override
-  void resetCache() {
-    _prefetched.clear();
-    _prefetching.clear();
-  }
+  void resetCache() => _invalidatePrefetch();
 
   @override
   Future<void> testConnection() async {

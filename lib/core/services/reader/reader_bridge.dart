@@ -329,13 +329,44 @@ class ReaderBridge {
   }
 
   /// 高亮并滚动到指定段落；返回是否真正命中（章节未就绪/节点缺失为 false）。
-  Future<bool> highlightParagraph(int index) => _callTtsMark('highlightParagraph', index);
+  /// [startChar]/[endChar] 给定时只高亮段内这一短句区间。
+  Future<bool> highlightParagraph(
+    int index, {
+    int? startChar,
+    int? endChar,
+  }) =>
+      _callTtsMark(
+        'highlightParagraph',
+        index,
+        startChar: startChar,
+        endChar: endChar,
+      );
 
   /// 只换高亮、不滚动（暂停中翻页同步用，避免把页面拽回长段开头）。
-  Future<bool> markParagraph(int index) => _callTtsMark('markParagraph', index);
+  Future<bool> markParagraph(
+    int index, {
+    int? startChar,
+    int? endChar,
+  }) =>
+      _callTtsMark(
+        'markParagraph',
+        index,
+        startChar: startChar,
+        endChar: endChar,
+      );
 
-  Future<bool> _callTtsMark(String method, int index) async {
-    final raw = await _eval('window.reader.$method($index)');
+  Future<bool> _callTtsMark(
+    String method,
+    int index, {
+    int? startChar,
+    int? endChar,
+  }) async {
+    final args = <String>[index.toString()];
+    if (startChar != null && endChar != null && endChar > startChar) {
+      args.add(startChar.toString());
+      args.add(endChar.toString());
+    }
+    final raw = await _eval('window.reader.$method(${args.join(',')})');
     return raw == true || raw?.toString() == 'true';
   }
 

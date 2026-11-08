@@ -858,6 +858,10 @@ export class Paginator extends HTMLElement {
         this.#animToken++
         const page = Math.round(Math.abs(origin) / size)
         const lastPage = Math.max(1, pages - 2)
+        // 章末/章首若还有相邻章节，必须留出可拖动的跨章余量：
+        // 只给橡皮筋时位移不足页宽的 18%，慢拖判不出「翻过去」，跨章就翻不动。
+        const crossNext = page >= lastPage && this.#adjacentIndex(1) != null
+        const crossPrev = page <= 1 && this.#adjacentIndex(-1) != null
         this.#touchState = {
             x: touch.screenX, y: touch.screenY,
             t: e.timeStamp,
@@ -867,9 +871,9 @@ export class Paginator extends HTMLElement {
             size,
             page,
             lastPage,
-            // 章内可翻动的余量；到章首/章尾只留橡皮筋，不露出整页空白。
-            forward: page < lastPage ? size : 0,
-            backward: page > 1 ? size : 0,
+            // 章内翻整页；跨章时给 0.45 页宽用于触发切章，书首/书尾仍只回弹。
+            forward: page < lastPage ? size : (crossNext ? size * 0.45 : 0),
+            backward: page > 1 ? size : (crossPrev ? size * 0.45 : 0),
             preloaded: 0,
             pinched: false,
         }
@@ -972,17 +976,27 @@ export class Paginator extends HTMLElement {
         const index = this.#adjacentIndex(dir)
         if (index == null) return
         state.preloaded = dir
-        try { this.sections[index].load?.() } catch (e) { /* ignore */ }
+        // 预加载失败不影响正式切章，也不能留下未处理的 Promise rejection。
+        try {
+            Promise.resolve(this.sections[index].load?.()).catch(() => {})
+        } catch (e) { /* ignore */ }
     }
     // 松手吸附：step=0 回弹到原位；越到章界则直接切相邻章（不滑出空白页）。
     async #settleDrag(state, step) {
         if (!this.#view || !this.sections?.length) return
         const { size, pages } = this
         const sign = this.#rtl ? -1 : 1
+        // 切章被占用或失败时回弹到原位，避免停在拖出的偏移上「翻不动」。
         if (step > 0 && state.page >= state.lastPage
-            && this.#adjacentIndex(1) != null) return this.#turnSection(1)
+            && this.#adjacentIndex(1) != null) {
+            if (await this.#turnSection(1)) return
+            step = 0
+        }
         if (step < 0 && state.page <= 1
-            && this.#adjacentIndex(-1) != null) return this.#turnSection(-1)
+            && this.#adjacentIndex(-1) != null) {
+            if (await this.#turnSection(-1)) return
+            step = 0
+        }
         const lastPage = Math.max(1, pages - 2)
         const targetPage = Math.max(1, Math.min(lastPage, state.page + step))
         this.#locked = true
@@ -993,12 +1007,15 @@ export class Paginator extends HTMLElement {
         }
     }
     async #turnSection(dir) {
-        if (this.#locked) return
+        if (this.#locked) return false
         const index = this.#adjacentIndex(dir)
-        if (index == null) return
+        if (index == null) return false
         this.#locked = true
         try {
-            await this.#goTo({ index, anchor: dir < 0 ? () => 1 : () => 0 })
+            return await this.#goTo({ index, anchor: dir < 0 ? () => 1 : () => 0 })
+        } catch (e) {
+            console.warn(e)
+            return false
         } finally {
             this.#locked = false
         }
@@ -1188,22 +1205,31 @@ export class Paginator extends HTMLElement {
         return index >= 0 && index <= this.sections.length - 1
     }
     async #goTo({ index, anchor, select}) {
-        if (index === this.#index) await this.#display({ index, anchor, select })
-        else {
-            const oldIndex = this.#index
-            const onLoad = detail => {
-                this.sections[oldIndex]?.unload?.()
-                this.setStyles(this.#styles)
-                this.dispatchEvent(new CustomEvent('load', { detail }))
-            }
-            await this.#display(Promise.resolve(this.sections[index].load())
-                .then(src => ({ index, src, anchor, onLoad, select }))
-                .catch(e => {
-                    console.warn(e)
-                    console.warn(new Error(`Failed to load section ${index}`))
-                    return {}
-                }))
+        // 目标章节无效时直接放弃：切章失败不能把 #index 写坏，
+        // 否则后续 #adjacentIndex 全部返回 null，整本书都翻不动。
+        if (index == null || !this.#canGoToIndex(index) || !this.sections[index]) return false
+        if (index === this.#index) {
+            await this.#display({ index, anchor, select })
+            return true
         }
+        const oldIndex = this.#index
+        const onLoad = detail => {
+            this.sections[oldIndex]?.unload?.()
+            this.setStyles(this.#styles)
+            this.dispatchEvent(new CustomEvent('load', { detail }))
+        }
+        const loaded = await Promise.resolve()
+            .then(() => this.sections[index].load())
+            .then(src => ({ index, src, anchor, onLoad, select }))
+            .catch(e => {
+                console.warn(e)
+                console.warn(new Error(`Failed to load section ${index}`))
+                return null
+            })
+        // 加载失败保持当前章节与页位置，允许稍后重试，不再 #display({})。
+        if (!loaded?.src) return false
+        await this.#display(loaded)
+        return true
     }
     async goTo(target) {
         if (this.#locked) return
@@ -1248,20 +1274,31 @@ export class Paginator extends HTMLElement {
         return this.#adjacentIndex(1) == null && this.page >= this.pages - 2
     }
     #adjacentIndex(dir) {
+        if (!Number.isInteger(this.#index)) return null
         for (let index = this.#index + dir; this.#canGoToIndex(index); index += dir)
-            if (this.sections[index]?.linear !== 'no') return index
+            // spine 里可能有解析失败的空项，跳过以免切章时 load() 抛异常。
+            if (this.sections[index] && this.sections[index].linear !== 'no') return index
+        return null
     }
     async #turnPage(dir, distance) {
         if (this.#locked) return
         this.#locked = true
-        const prev = dir === -1
-        const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance))
-        if (shouldGo) await this.#goTo({
-            index: this.#adjacentIndex(dir),
-            anchor: prev ? () => 1 : () => 0,
-        })
-        if (shouldGo || !this.hasAttribute('animated')) await wait(100)
-        this.#locked = false
+        try {
+            const prev = dir === -1
+            const shouldGo = await (prev
+                ? this.#scrollPrev(distance) : this.#scrollNext(distance))
+            if (shouldGo) {
+                const index = this.#adjacentIndex(dir)
+                if (index != null) await this.#goTo({
+                    index,
+                    anchor: prev ? () => 1 : () => 0,
+                })
+            }
+            if (shouldGo || !this.hasAttribute('animated')) await wait(100)
+        } finally {
+            // 跨章加载异常也必须解锁，否则整本书再也翻不动。
+            this.#locked = false
+        }
     }
     prev(distance) {
         return this.#turnPage(-1, distance)

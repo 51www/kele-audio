@@ -33,8 +33,6 @@ import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
 import '../core/services/tts/tts_engine.dart';
 import '../core/services/tts/tts_engine_edge.dart';
-import '../core/services/tts/tts_engine_http.dart';
-import '../core/services/tts/tts_engine_mimo.dart';
 import '../core/services/tts/tts_engine_system.dart';
 import '../core/services/tts/tts_session.dart';
 import '../core/services/tts/tts_settings_store.dart';
@@ -134,7 +132,7 @@ class AppServices {
   /// 阅读历史与时长埋点（M9.1 建立，M9.2/M9.3 写入）
   final ReaderActivityStore readerActivity;
 
-  /// 三路导入编排（TXT / EPUB / 网页）
+  /// 本地书导入编排（TXT / EPUB / PDF / MOBI / 网页）
   final ReaderImportService readerImport;
 
   /// 阅读排版设置（M9.2，`reader_typography`）
@@ -169,25 +167,22 @@ class AppServices {
     final config = await ApiConfigLoader.load(
       store: kv,
       isWeb: web,
-      bundledJson: () async => rootBundle.loadString(
-        'assets/api/api_config.json',
-      ),
+      bundledJson: () async =>
+          rootBundle.loadString('assets/api/api_config.json'),
     );
 
     // 内容源配置（M3）：内置 JSON → 远端覆盖，损坏静默回退内置分类
     final content = await ContentConfigLoader.load(
       store: kv,
-      bundledJson: () async => rootBundle.loadString(
-        'assets/api/content_config.json',
-      ),
+      bundledJson: () async =>
+          rootBundle.loadString('assets/api/content_config.json'),
     );
 
     // 儿童白名单配置（M6 / PRD §7.3）：同构加载链路，独立远端缓存 key
     final childrenContent = await ContentConfigLoader.load(
       store: kv,
-      bundledJson: () async => rootBundle.loadString(
-        'assets/api/children_config.json',
-      ),
+      bundledJson: () async =>
+          rootBundle.loadString('assets/api/children_config.json'),
       builtIn: ContentConfig.childrenBuiltIn,
       cacheKey: ContentConfigLoader.childrenRemoteCacheKey,
     );
@@ -246,7 +241,7 @@ class AppServices {
     // 下载下发前的网络门控：仅 Wi-Fi 下载开关（网络类型走系统原生通道）
     offline.wifiOnlyProvider = () => settings.wifiOnlyDownload;
 
-    // 听书（M9.3）：设置读取 → 播放互斥 → TTS 会话（三档引擎按需创建）。
+    // 听书（M9.3）：设置读取 → 播放互斥 → TTS 会话（系统 / Edge 按需创建）。
     final ttsSettings = TtsSettingsStore(kv);
     await ttsSettings.load();
     final arbiter = PlaybackArbiter(media: mediaBridge ?? NoopMediaBridge());
@@ -276,13 +271,6 @@ class AppServices {
       engineFactory: (kind) => switch (kind) {
         TtsEngineKind.system => TtsSystemEngine(),
         TtsEngineKind.edge => TtsEdgeEngine(),
-        TtsEngineKind.mimo => TtsMimoEngine(
-          apiKeyProvider: () => ttsSettings.mimoApiKey,
-          paramsProvider: () => ttsSettings.params,
-        ),
-        TtsEngineKind.http => TtsHttpEngine(
-          templateProvider: () => ttsSettings.httpTemplate,
-        ),
       },
     );
 

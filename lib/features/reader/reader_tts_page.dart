@@ -9,10 +9,9 @@ import '../../app/theme/app_tokens.dart';
 import '../../app/widgets/local_cover_image.dart';
 import '../../core/services/reader/book_store.dart';
 import '../../core/services/reader/reader_bridge.dart';
-import '../../core/services/tts/mimo_tts_client.dart';
 import '../../core/services/tts/tts_engine.dart';
+import '../../core/services/tts/tts_engine_system.dart';
 import '../../core/services/tts/tts_session.dart';
-import '../profile/pages/settings_page.dart';
 import 'reader_toc_sheet.dart';
 
 /// 本地书听书播放页（M9.6 精简形态）。
@@ -270,48 +269,44 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
     await _setRate(rate);
   }
 
-  /// 音色清单优先用接口 400 探测结果（缓存到本地）；失败保持内置 9 个兜底。
-  Future<void> _probeMimoVoices() async {
-    final settings = _tts.settings;
-    if (!settings.hasMimoApiKey) return;
-    try {
-      final voices = await MimoTtsClient().probeVoices(
-        apiKey: settings.mimoApiKey,
-      );
-      await settings.setMimoVoices(voices);
-      debugPrint('[tts:mimo] 音色探测成功：${voices.length} 个已缓存');
-    } catch (e) {
-      debugPrint('[tts:mimo] 音色探测失败，沿用内置清单：$e');
-    }
-  }
-
+  /// 引擎与音色一体设置：选引擎不关闭弹窗，可接着挑音色。
   Future<void> _openEngineSheet() async {
-    final settings = _tts.settings;
-    if (_tts.engineKind == TtsEngineKind.mimo &&
-        settings.hasMimoApiKey &&
-        !settings.hasCachedMimoVoices) {
-      unawaited(_probeMimoVoices());
-    }
-    var openSettingsRequested = false;
-    final kind = await _showCompactSheet<TtsEngineKind>(
-      title: '朗读引擎',
+    // 只读探测，不触碰正在朗读的系统引擎。
+    final systemVoices = await TtsSystemEngine.availableVoices();
+    if (!mounted) return;
+    await _showCompactSheet<void>(
+      title: '朗读引擎与音色',
       scrollable: true,
       builder: (sheetContext, tokens) {
-        var expanded = _tts.engineKind == TtsEngineKind.mimo;
-        var probing = false;
-        String? notice;
-        String? missingKey;
-
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             final scheme = Theme.of(ctx).colorScheme;
-            Widget item(
+            final settings = _tts.settings;
+            final kind = _tts.engineKind;
+
+            Future<void> selectEngine(TtsEngineKind value) async {
+              if (value == _tts.engineKind) return;
+              await _switchEngine(value);
+              if (ctx.mounted) setSheetState(() {});
+            }
+
+            Future<void> selectVoice(String id) async {
+              if (kind == TtsEngineKind.system) {
+                await settings.setSystemVoice(id);
+              } else {
+                await settings.setEdgeVoice(id);
+              }
+              // 与语速调节同一口径：立即重载参数并从当前段重读。
+              await _tts.reloadParams();
+              if (ctx.mounted) setSheetState(() {});
+            }
+
+            Widget engineItem(
               TtsEngineKind value,
               IconData icon,
-              String desc, {
-              VoidCallback? onTap,
-            }) {
-              final selected = _tts.engineKind == value;
+              String desc,
+            ) {
+              final selected = kind == value;
               return ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
@@ -336,159 +331,86 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
                 trailing: selected
                     ? Icon(Icons.check_rounded, size: 18, color: scheme.primary)
                     : null,
-                onTap: onTap ?? () => Navigator.of(sheetContext).pop(value),
+                onTap: () => unawaited(selectEngine(value)),
               );
             }
 
-            void startMimo() {
-              if (!settings.hasMimoApiKey) {
-                // 缺 Key 不静默切换，给出明确提示与设置入口。
-                setSheetState(() {
-                  expanded = true;
-                  missingKey = '未配置 MiMo API Key，请先到设置页填写';
-                  notice = null;
-                });
-                return;
-              }
-              setSheetState(() {
-                expanded = true;
-                missingKey = null;
-                notice = null;
-              });
-              unawaited(
-                _switchEngine(TtsEngineKind.mimo).whenComplete(() {
-                  if (sheetContext.mounted) setSheetState(() {});
-                }),
-              );
-              if (!settings.hasCachedMimoVoices && !probing) {
-                setSheetState(() => probing = true);
-                unawaited(
-                  _probeMimoVoices().whenComplete(() {
-                    if (sheetContext.mounted) {
-                      setSheetState(() => probing = false);
-                    }
-                  }),
-                );
-              }
-            }
+            final voices = kind == TtsEngineKind.system
+                ? <TtsVoice>[
+                    const TtsVoice(id: '', name: '跟随系统默认'),
+                    ...systemVoices,
+                  ]
+                : edgeZhVoices;
+            final activeVoice = settings.activeVoice;
 
             return Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 当前引擎随选中态刷新（放外层 hint 会在切换后仍显示旧引擎）。
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '当前 ${_tts.engineKind.label}',
-                    style: tokens.captionStyle.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
+                Text('朗读引擎', style: tokens.captionStyle),
                 SizedBox(height: tokens.spaceXs),
-                item(
+                engineItem(
                   TtsEngineKind.system,
                   Icons.phone_android_rounded,
                   '离线可用，音色随系统',
                 ),
-                item(TtsEngineKind.edge, Icons.cloud_outlined, '在线合成，音色更自然'),
-                item(
-                  TtsEngineKind.mimo,
-                  Icons.auto_awesome_rounded,
-                  '小米 MiMo，9 种中文音色',
-                  onTap: startMimo,
+                engineItem(
+                  TtsEngineKind.edge,
+                  Icons.cloud_outlined,
+                  '在线合成，音色更自然',
                 ),
-                if (expanded) ...[
-                  if (missingKey != null) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            missingKey!,
-                            style: tokens.captionStyle.copyWith(
-                              color: scheme.error,
-                            ),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            // 先关闭弹窗，等它真正出栈后再跳设置，
-                            // 避免弹窗收起动画期间 push 被路由栈吞掉。
-                            openSettingsRequested = true;
-                            Navigator.of(sheetContext).pop();
-                          },
-                          child: const Text('去设置'),
-                        ),
-                      ],
-                    ),
-                  ],
-                  SizedBox(height: tokens.spaceXs),
-                  Align(
-                    alignment: Alignment.centerLeft,
+                SizedBox(height: tokens.spaceSm),
+                Text(
+                  '音色（切换后即时重读当前段）',
+                  style: tokens.captionStyle,
+                ),
+                SizedBox(height: tokens.spaceXs),
+                if (kind == TtsEngineKind.system && systemVoices.isEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: tokens.spaceXs),
                     child: Text(
-                      '音色（切换后从下一片生效）',
+                      '未读取到系统中文音色，可保持「跟随系统默认」。',
                       style: tokens.captionStyle.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final voice in settings.mimoVoiceOptions)
-                        ChoiceChip(
-                          label: Text(voice.name),
-                          selected: settings.mimoVoice == voice.id,
-                          showCheckmark: false,
-                          visualDensity: VisualDensity.compact,
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          labelStyle: tokens.captionStyle,
-                          labelPadding: const EdgeInsets.symmetric(
-                            horizontal: 8,
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final voice in voices)
+                      ChoiceChip(
+                        label: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 150),
+                          child: Text(
+                            voice.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          onSelected: (_) async {
-                            await settings.setMimoVoice(voice.id);
-                            if (!sheetContext.mounted) return;
-                            setSheetState(() {
-                              notice = '已切换到「${voice.name}」，从下一片朗读生效';
-                            });
-                          },
                         ),
-                    ],
-                  ),
-                  if (probing) ...[
-                    const SizedBox(height: 6),
-                    const LinearProgressIndicator(minHeight: 2),
+                        selected: activeVoice == voice.id,
+                        showCheckmark: false,
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        labelStyle: tokens.captionStyle,
+                        labelPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                        ),
+                        onSelected: (_) {
+                          if (activeVoice != voice.id) {
+                            unawaited(selectVoice(voice.id));
+                          }
+                        },
+                      ),
                   ],
-                  if (notice != null) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      notice!,
-                      style: tokens.captionStyle.copyWith(color: scheme.primary),
-                    ),
-                  ],
-                ],
+                ),
               ],
             );
           },
         );
       },
     );
-    if (!mounted) return;
-    if (openSettingsRequested) {
-      // 用独立 MaterialPageRoute 打开设置：从 /listen 直接 push 设置分支
-      // 会让 StatefulShellRoute 误切分支并退回阅读页，这里绕开分支切换。
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
-      );
-      return;
-    }
-    if (kind == null) return;
-    await _switchEngine(kind);
   }
 
   Future<void> _openSleepSheet() async {
@@ -738,7 +660,7 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
           child: _ToolButton(
             icon: Icons.graphic_eq_rounded,
             label: session.engineKind.label,
-            tooltip: '朗读引擎',
+            tooltip: '朗读引擎与音色',
             onTap: _openEngineSheet,
           ),
         ),
@@ -796,7 +718,7 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
 }
 
 /// 本地书封面：有真实封面（`books/{id}/cover.jpg`）就铺满方形展示，
-/// 没有（TXT/PDF/网页/解析失败）则回退主题渐变 + 书名首字。
+/// 没有（TXT/PDF/MOBI/网页/解析失败）则回退主题渐变 + 书名首字。
 class _BookCoverPlaceholder extends StatelessWidget {
   const _BookCoverPlaceholder({
     required this.title,

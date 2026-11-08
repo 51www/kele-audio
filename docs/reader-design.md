@@ -32,9 +32,8 @@ lib/
         ├── tts_engine.dart               # 引擎抽象（接口 + TtsVoice/TtsParams）
         ├── tts_engine_system.dart        # flutter_tts
         ├── tts_engine_edge.dart          # edgetts-dart 合成 + media_kit 播放
-        ├── tts_engine_http.dart          # 自定义 HTTP TTS URL 模板
         ├── tts_session.dart              # 段落队列/逐段播放/高亮回调/进度
-        └── tts_settings_store.dart       # 引擎/音色/语速/模板持久化
+        └── tts_settings_store.dart       # 引擎/音色/语速持久化
 
 assets/reader/
 ├── index.html                            # WebView 入口页（内嵌桥接脚本）
@@ -71,7 +70,7 @@ assets/reader/
 | `reader_typography` | 排版设置（字号/行距/边距/翻页模式/主题覆盖） |
 | `reader_history` | 阅读活动记录（bookId/章节名/方式 阅读\|听书/时间），历史页「阅读」分组数据源 |
 | `reader_log` | 阅读时长埋点（date/bookId/durationSec/方式），统计页「阅读时长」数据源 |
-| `tts_settings` | 引擎类型、音色、语速、音调、HTTP 模板列表 |
+| `tts_settings` | 引擎类型、音色、语速、音调 |
 
 书籍文件：`path_provider`getApplicationDocumentsDirectory()`/books/{id}/book.epub`。删除书籍时同步删目录。
 
@@ -154,37 +153,39 @@ sequenceDiagram
 
 ```dart
 abstract class TtsEngine {
-  String get id;                                  // system / edge / http
-  Future<List<TtsVoice>> listVoices();            // 供设置页选择（http 档可为空列表）
+  String get id;                                  // system / edge
+  Future<List<TtsVoice>> listVoices();            // 供设置页选择
   Future<void> start(TtsParams params);           // 语速/音调/音色
   Future<void> speak(String text);                // 单段合成并播放
   Future<void> stop();                            // 丢弃合成队列并停止播放
   bool get isSpeaking;
   Stream<TtsEvent> get events;                    // done / error / progress
-  Future<void> testConnection();                  // 设置页连通性自检（edge/http 档）
+  Future<void> testConnection();                  // 设置页连通性自检（edge 档）
   Future<void> dispose();
 }
 ```
 
-三档实现要点：
+两档实现要点：
 
 - **system**：`flutter_tts`；`setLanguage(zh-CN)`、`setVoice`、`setSpeechRate`（0.5~3.0 映射到平台速率）、`setPitch`；段落完成靠 `completionHandler`；
-- **edge**：`edgetts-dart` WebSocket 合成 mp3 片段，经**独立 media_kit Player 实例**播放（不与 B 站播放共用 `PlayerService`，避免状态互踩）；预合成下一段（队列深度 2）消除段间停顿；
-- **http**：URL 模板支持占位符 `{text}`（URL 编码）、`{voice}`、`{rate}`，支持配置自定义请求头；响应为音频流直接交播放层；模板管理支持多条（增删改 + 试听）。协议设计参考 legado「在线朗读引擎」，仅借鉴 URL 约定，不参考其代码。
+- **edge**：`edgetts-dart` WebSocket 合成 mp3 片段，经**独立 media_kit Player 实例**播放（不与 B 站播放共用 `PlayerService`，避免状态互踩）；预合成下一段（队列深度 2）消除段间停顿。
 
 ### 5.2 段落管线（`tts_session.dart`）
 
 ```mermaid
 flowchart LR
-    A[进入听书] --> B[requestParagraphs 当前章]
-    B --> C[段落队列 paraIndex=i<br/>预合成 i+1]
-    C --> D[engine.speak 段落 i]
-    D --> E[dart→JS highlightParagraph i<br/>scrollIntoView 自动跟随]
-    E --> F[onParaDone i]
-    F -->|还有段落| C
-    F -->|章末| G[下一章 requestParagraphs<br/>章号+1 续读]
+    A[进入听书] --> B[extractParagraphs 当前章]
+    B --> C[段落 paraIndex=i<br/>切成一两句短片段]
+    C --> D[engine.speak 片段 s<br/>首片段不预合成]
+    D --> E[dart→JS highlightParagraph i,start,end<br/>句级高亮 + 自动跟随]
+    E --> F[片段完成 → 预合成下一短句]
+    F -->|还有片段| D
+    F -->|段末| G[下一段落 i+1]
+    G -->|章末| H[下一章 extractParagraphs<br/>章号+1 续读]
 ```
 
+- 段落下标仍是断点、进度与 UI 的唯一坐标；短片段（最多两句 / ≤80 字）只用于合成与高亮，首请求体量更小、出声更快；
+- 句级高亮按片段在原段落中的字符区间定位，仅在片段落在单个文本节点内时生效，否则回退整段高亮，避免改动 EPUB 的 DOM / CFI；
 - 段落断点 `lastTtsParaIndex` 随进度落盘，再次进入可从断点续听；
 - 用户手动翻页/跳章时 TTS 同步切换到新位置（先 stop 再重取段落）；
 - 阅读页退出但 TTS 继续在后台运行（见 §5.3），再次进入阅读页恢复高亮同步。
@@ -199,11 +200,10 @@ flowchart LR
 
 `settings_page.dart` 新增「本地书 · 听书」分组：
 
-- 听书引擎选择（系统 / Edge / 自定义 HTTP）；
+- 听书引擎选择（系统 / Edge）；
 - 系统引擎：音色列表（flutter_tts `getVoices` 过滤 zh）+ 语速/音调滑杆；
 - Edge 引擎：音色列表（内置常用 zh 音色清单 + 动态获取）+ 语速/音调 + 「连通性自检」+ 每个音色试听按钮；
-- HTTP 引擎：模板列表管理（增删改 + 试听）；
-- 默认行为：进入书籍默认「阅读」或「继续听书」。
+- 默认行为：进入书籍默认静读，点右上角耳机开始朗读；不提供「默认继续听书」开关。
 
 ## 7. 书架集成与业务闭环（M9.1/M9.2/M9.3 贯穿）
 
@@ -218,7 +218,7 @@ flowchart LR
 ├── PageHeader「书架」  actions: [＋导入(新增)] [选择删除] [排序]
 ├── 在听置顶区            （现有，零改动，仅 B 站在听内容）
 ├── ★ 本地书分区（新增）   （无书时整个隐藏）
-│     ├── 行卡片 = 封面 + 标题 + 来源角标(TXT/EPUB/网页) + 已读 x/y 章·xx% + 最后阅读时间
+│     ├── 行卡片 = 封面 + 标题 + 来源角标(TXT/EPUB/PDF/MOBI/网页) + 已读 x/y 章·xx% + 最后阅读时间
 │     ├── 默认按最近阅读排序，第一本即「继续阅读」入口（不另做置顶区）
 │     ├── 独立排序（最近阅读/导入时间/标题）与多选删除，交互样式复用 _ShelfRow 一套
 │     │   （左滑撤销/长按多选），但操作对象是 ReaderBookStore，与 ShelfController 互不感知

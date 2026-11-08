@@ -42,6 +42,7 @@ class ProfilePage extends StatelessWidget {
         padding: EdgeInsets.only(bottom: tokens.spaceLg),
         children: [
           PageHeader(title: '我的', subtitle: '收藏与进度只存这台设备'),
+          SizedBox(height: tokens.spaceMd),
 
           // ── 收听摘要（M5：play_log 聚合；完整统计 M8） ──────────────
           Padding(

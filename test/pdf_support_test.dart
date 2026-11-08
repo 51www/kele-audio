@@ -233,6 +233,7 @@ void main() {
       expect(shelfOriginOf(ReaderBookSource.localTxt), ShelfOrigin.localBook);
       expect(shelfOriginOf(ReaderBookSource.localEpub), ShelfOrigin.localBook);
       expect(shelfOriginOf(ReaderBookSource.localPdf), ShelfOrigin.localBook);
+      expect(shelfOriginOf(ReaderBookSource.localMobi), ShelfOrigin.localBook);
       expect(shelfOriginOf(ReaderBookSource.webArticle), ShelfOrigin.localBook);
     });
 

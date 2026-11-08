@@ -45,7 +45,7 @@ class RecentRecord {
   /// 封面地址（本地书暂无封面，留空走类型角标占位）。
   final String coverUrl;
 
-  /// 本地书来源角标（TXT / EPUB / PDF / 网页）。
+  /// 本地书来源角标（TXT / EPUB / PDF / MOBI / 网页）。
   final String badgeLabel;
 
   /// 阅读页码（拿不到时为 null）。

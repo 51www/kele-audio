@@ -5,7 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 /// 书籍文件落盘（IO 平台）：`documents/books/{id}/{fileName}`。
 ///
-/// 三类来源在入库前都已统一为 EPUB，因此阅读/朗读管线只认一个文件。
+/// 各类来源在入库前都已统一为 EPUB，因此阅读/朗读管线只认一个文件。
 Future<Directory> readerBookDir(String id) async {
   final base = await getApplicationDocumentsDirectory();
   return Directory('${base.path}${Platform.pathSeparator}books'

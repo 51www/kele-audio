@@ -11,7 +11,7 @@ extension ShelfOriginX on ShelfOrigin {
 }
 
 /// 来源归类唯一入口：
-/// - localTxt / localEpub / localPdf / webArticle → 本地书（网页文章抓取后
+/// - localTxt / localEpub / localPdf / localMobi / webArticle → 本地书（网页文章抓取后
 ///   同样以 EPUB 快照落盘，维持导入后即可见）；
 /// - 其余 → null（当前没有不进入书架的本地来源）。
 ShelfOrigin? shelfOriginOf(ReaderBookSource source) =>
@@ -35,6 +35,6 @@ class ShelfEmptySpec {
 
 const ShelfEmptySpec shelfEmptySpec = ShelfEmptySpec(
   title: '书架还是空的',
-  message: '导入 TXT / EPUB / PDF，或在专辑详情页点「加入书架」，\n内容会一起排在这里。扫描件 PDF（无文字层）暂不支持。',
+  message: '导入 TXT / EPUB / PDF / MOBI，或在专辑详情页点「加入书架」，\n内容会一起排在这里。扫描件 PDF（无文字层）暂不支持。',
   actionLabel: '导入本地文件',
 );

@@ -21,6 +21,7 @@ import '../../core/domain/album.dart';
 import '../../core/domain/reader_book.dart';
 import '../../core/services/player/player_service.dart';
 import '../../core/services/reader/book_store.dart';
+import '../../core/services/reader/mobi_importer.dart';
 import '../../core/services/reader/pdf_quality.dart';
 import '../../core/services/reader/reader_import_service.dart';
 import '../../core/services/reader/reader_progress_store.dart';
@@ -47,6 +48,9 @@ class ShelfPage extends StatefulWidget {
   @override
   State<ShelfPage> createState() => _ShelfPageState();
 }
+
+/// MOBI 容器家族的扩展名（AZW 与 MOBI 同为 PalmDB；AZW3 / KF8 是另一种容器）。
+const Set<String> _mobiExtensions = {'mobi', 'azw'};
 
 enum _SortMode { recent, collected, title }
 
@@ -348,7 +352,7 @@ class _ShelfPageState extends State<ShelfPage> {
             ListTile(
               leading: const Icon(Icons.description_outlined),
               title: const Text('导入本地文件'),
-              subtitle: const Text('TXT / EPUB / PDF（仅文字层）'),
+              subtitle: const Text('TXT / EPUB / PDF / MOBI（PDF 仅文字层）'),
               onTap: () =>
                   Navigator.of(sheetContext).pop(_ImportAction.localFile),
             ),
@@ -377,7 +381,7 @@ class _ShelfPageState extends State<ShelfPage> {
     // Web 端 file_picker 只有 bytes，仍保留 withData。
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: const ['txt', 'epub', 'pdf'],
+      allowedExtensions: const ['txt', 'epub', 'pdf', 'mobi', 'azw'],
       withData: kIsWeb,
     );
     final file = result?.files.isEmpty == false ? result!.files.first : null;
@@ -385,12 +389,17 @@ class _ShelfPageState extends State<ShelfPage> {
     if (!mounted) return;
 
     final extension = (file.extension ?? '').toLowerCase();
+    final isMobi = _mobiExtensions.contains(extension);
     if (extension == 'pdf') {
       await _importPdf(file);
       return;
     }
-    if (extension != 'txt' && extension != 'epub') {
-      if (mounted) _toast('仅支持 TXT / EPUB / PDF 文件');
+    if (extension != 'txt' && extension != 'epub' && !isMobi) {
+      if (mounted) _toast('仅支持 TXT / EPUB / PDF / MOBI 文件');
+      return;
+    }
+    if (isMobi && file.size > MobiImporter.maxFileBytes) {
+      if (mounted) _toast('MOBI 文件过大（上限 64 MB）');
       return;
     }
 
@@ -415,6 +424,8 @@ class _ShelfPageState extends State<ShelfPage> {
       final ReaderBook book;
       if (extension == 'txt') {
         book = await service.importTxt(bytes: bytes, fileName: file.name);
+      } else if (isMobi) {
+        book = await service.importMobi(bytes: bytes, fileName: file.name);
       } else {
         book = await service.importEpub(bytes: bytes, fileName: file.name);
       }
@@ -1206,7 +1217,7 @@ enum _ImportAction { localFile, web }
 enum _MissingAction { reimport, refetch }
 
 /// 本地书封面：优先展示 EPUB 解析出的真实封面（`books/{id}/cover.jpg`），
-/// 没有封面（TXT/PDF/网页/解析失败）时回退主题渐变 + 书名首字占位。
+/// 没有封面（TXT/PDF/MOBI/网页/解析失败）时回退主题渐变 + 书名首字占位。
 class _BookCover extends StatelessWidget {
   const _BookCover({required this.book});
 

@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 /// 听书引擎类型（docs/reader-design.md §5.1）。
-enum TtsEngineKind { system, edge, mimo, http }
+enum TtsEngineKind { system, edge }
 
 extension TtsEngineKindX on TtsEngineKind {
   String get storageValue => name;
@@ -9,8 +9,6 @@ extension TtsEngineKindX on TtsEngineKind {
   String get label => switch (this) {
     TtsEngineKind.system => '系统',
     TtsEngineKind.edge => 'Edge',
-    TtsEngineKind.mimo => 'MiMo',
-    TtsEngineKind.http => '自定义 HTTP',
   };
 
   static TtsEngineKind fromStorage(String? value) {
@@ -80,7 +78,7 @@ class TtsException implements Exception {
 /// TTS 引擎抽象（docs/reader-design.md §5.1）。
 ///
 /// 一次只朗读一段文本：`speak` 在**该段播放完成**后返回；
-/// [prefetch] 可提前合成下一段（Edge/HTTP 减少段间停顿）。
+/// [prefetch] 可提前合成下一段（Edge 减少段间停顿）。
 abstract class TtsEngine {
   String get id;
 

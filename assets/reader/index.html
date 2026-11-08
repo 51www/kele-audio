@@ -90,6 +90,8 @@ const PARA_SELECTOR = 'p,li,blockquote,dd,dt,h1,h2,h3,h4,h5,h6'
 let ttsChapter = -1
 let ttsNodes = []
 let ttsActiveNode = null
+// 句级高亮的临时 span（只包一两句，移除时原样还原正文节点）。
+let ttsActiveSpan = null
 
 function currentContents() {
   try { return (view.renderer?.getContents?.() || [])[0] || null } catch (e) { return null }
@@ -147,10 +149,24 @@ function extractChapter(force) {
   ttsNodes = nodes
   ttsChapter = chapter
   ttsActiveNode = null
+  // 章节 DOM 已重建，旧句级 span 不再属于当前文档，不能留着下次还原。
+  ttsActiveSpan = null
   return chapter
 }
 
 function clearTtsHighlight() {
+  // 先把句级高亮的临时 span 拆掉：子节点原样放回，不 normalize，
+  // 下一次高亮会重新遍历文本节点，避免缓存的节点引用失效。
+  if (ttsActiveSpan) {
+    const parent = ttsActiveSpan.parentNode
+    if (parent) {
+      while (ttsActiveSpan.firstChild) {
+        parent.insertBefore(ttsActiveSpan.firstChild, ttsActiveSpan)
+      }
+      parent.removeChild(ttsActiveSpan)
+    }
+    ttsActiveSpan = null
+  }
   if (!ttsActiveNode) return
   ttsActiveNode.style.backgroundColor = ''
   ttsActiveNode.style.borderRadius = ''
@@ -212,6 +228,8 @@ hr { border-color: var(--reader-line) !important; }
   document.body.style.background = c.bg || ''
   // 字号/行距改变后需要重新分栏，否则当前页仍是旧版式。
   try { view.renderer?.expand?.() } catch (e) { /* ignore */ }
+  // 分栏会重建页脚元素，主题色要在重建后重新落到页码上。
+  stylePageFeet()
 }
 
 async function gotoPending() {
@@ -243,7 +261,25 @@ let expected = 0
 // 写进渲染器自带的页脚留白（--_margin 行）：不遮正文、不改正文排版，
 // 工具栏隐藏（沉浸阅读）时依然常驻。滚动模式没有页脚，Dart 推空串。
 let pageLabel = ''
+// foliate 的页脚在 shadow DOM 内，注入到正文 iframe 的主题 CSS 作用不到它：
+// 默认只继承页面文字色且带 opacity .6，浅色/深色底都可能与背景糊在一起。
+// 因此按当前主题显式给页码设色、去掉透明度衰减，沉浸阅读时也清晰可辨。
+function stylePageFeet() {
+  const c = lastStyle && lastStyle.colors
+  const color = c && (c.muted || c.fg)
+  if (!color) return
+  try {
+    const feet = view.renderer?.feet || []
+    for (const foot of feet) {
+      foot.style.color = color
+      foot.style.opacity = '1'
+      foot.style.fontWeight = '600'
+    }
+  } catch (e) { /* ignore */ }
+}
+
 function applyPageLabel() {
+  stylePageFeet()
   try {
     const feet = view.renderer?.feet
     const foot = feet && feet[feet.length - 1]
@@ -348,9 +384,13 @@ window.reader = {
     if (extractChapter(false) < 0) return []
     return ttsNodes.map(textOf)
   },
-  highlightParagraph(index) { return applyTtsHighlight(index, true) },
+  highlightParagraph(index, start, end) {
+    return applyTtsHighlight(index, true, start, end)
+  },
   // 只换高亮、不滚动：暂停中翻页时使用，避免把用户拽回长段开头。
-  markParagraph(index) { return applyTtsHighlight(index, false) },
+  markParagraph(index, start, end) {
+    return applyTtsHighlight(index, false, start, end)
+  },
   clearHighlight() { clearTtsHighlight(); return true },
   visibleParagraphIndex() {
     if (extractChapter(false) < 0) return 0
@@ -358,21 +398,82 @@ window.reader = {
   },
 }
 
-function applyTtsHighlight(index, scroll) {
+// 把 textOf() 归一化后的字符区间映射回 DOM。只在片段完整落在单个文本节点内时
+// 返回 Range：跨节点抽取会拆开 <em>/<span> 等结构，影响 EPUB 的排版与 CFI。
+function sentenceRange(node, start, end) {
+  const walker = document.createTreeWalker(
+    node, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
+  const chars = []
+  let pendingSpace = false
+  let current
+  while ((current = walker.nextNode())) {
+    if (current.nodeType === Node.ELEMENT_NODE) {
+      // innerText 会在 <br> 处换行，归一化后等价于一个空格。
+      if (current.tagName === 'BR' && chars.length) pendingSpace = true
+      continue
+    }
+    const data = current.data || ''
+    for (let i = 0; i < data.length; i++) {
+      const ch = data[i]
+      if (/\s/.test(ch)) {
+        if (chars.length) pendingSpace = true
+        continue
+      }
+      if (pendingSpace) {
+        chars.push({ ch: ' ', node: current, offset: i })
+        pendingSpace = false
+      }
+      chars.push({ ch, node: current, offset: i })
+    }
+  }
+  // 与 textOf 的 trim 对齐。
+  let first = 0
+  let last = chars.length - 1
+  while (first <= last && chars[first].ch === ' ') first++
+  while (last >= first && chars[last].ch === ' ') last--
+  const from = chars[first + Math.max(0, start)]
+  const to = chars[first + Math.max(1, Math.min(last - first + 1, end)) - 1]
+  if (!from || !to || from.node !== to.node || from.ch === ' ' || to.ch === ' ') {
+    return null
+  }
+  const range = document.createRange()
+  range.setStart(from.node, from.offset)
+  range.setEnd(to.node, to.offset + 1)
+  return range
+}
+
+function applyTtsHighlight(index, scroll, start, end) {
   const i = Number(index)
   if (extractChapter(false) < 0) return false
   const node = ttsNodes[i]
   if (!node) return false
   clearTtsHighlight()
-  ttsActiveNode = node
   const accent = (lastStyle?.colors?.accent) || '#B8863B'
-  node.style.backgroundColor = accent + '2E'
-  node.style.borderRadius = '6px'
-  node.style.boxShadow = '0 0 0 4px ' + accent + '1A'
+  const hasRange = Number.isFinite(start) && Number.isFinite(end) && end > start
+  const range = hasRange ? sentenceRange(node, Number(start), Number(end)) : null
+  let target = node
+  if (range) {
+    try {
+      const span = document.createElement('span')
+      span.style.backgroundColor = accent + '2E'
+      span.style.borderRadius = '4px'
+      span.style.boxShadow = '0 0 0 3px ' + accent + '1A'
+      span.appendChild(range.extractContents())
+      range.insertNode(span)
+      ttsActiveSpan = span
+      target = span
+    } catch (e) { /* 抽取失败时退回整段高亮 */ }
+  }
+  if (!ttsActiveSpan) {
+    ttsActiveNode = node
+    node.style.backgroundColor = accent + '2E'
+    node.style.borderRadius = '6px'
+    node.style.boxShadow = '0 0 0 4px ' + accent + '1A'
+  }
   if (scroll) {
     // 之后的 relocate 由朗读高亮触发，不应回写朗读位置。
     ttsScrollUntil = Date.now() + 900
-    try { view.renderer?.scrollToAnchor?.(node) } catch (e) { /* ignore */ }
+    try { view.renderer?.scrollToAnchor?.(target) } catch (e) { /* ignore */ }
   }
   return true
 }

@@ -12,7 +12,7 @@ import '../theme/app_tokens.dart';
 
 /// 一条记录的封面：44dp（3:4）或 32dp（续读条）。
 ///
-/// 本地书暂无封面文件，用**类型角标占位**（TXT / EPUB / PDF / 网页），
+/// 本地书暂无封面文件，用**类型角标占位**（TXT / EPUB / PDF / MOBI / 网页），
 /// 不留空白方块。
 class RecentRecordCover extends StatelessWidget {
   const RecentRecordCover({super.key, required this.record, this.width = 44});

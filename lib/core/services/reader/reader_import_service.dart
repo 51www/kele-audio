@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 
@@ -7,6 +8,7 @@ import 'book_file_store.dart';
 import 'book_store.dart';
 import 'epub_importer.dart';
 import 'local_book_cover.dart';
+import 'mobi_importer.dart';
 import 'pdf_importer.dart';
 import 'pdf_page_map.dart';
 import 'reader_activity_store.dart';
@@ -45,8 +47,8 @@ class WebImportOutcome {
   final String? notice;
 }
 
-/// 三路导入的编排层（docs/reader-design.md §3）：
-/// TXT / EPUB / 网页 → 统一 EPUB 落盘 → 元数据入库。
+/// 本地书导入的编排层（docs/reader-design.md §3）：
+/// TXT / EPUB / PDF / MOBI / 网页 → 统一 EPUB 落盘 → 元数据入库。
 class ReaderImportService {
   ReaderImportService({
     required this.books,
@@ -134,6 +136,61 @@ class ReaderImportService {
       source: ReaderBookSource.localEpub,
       fileName: bookFileName,
       chapterCount: meta.chapterCount,
+      coverPath: coverPath,
+      addedAt: DateTime.now(),
+    );
+    await books.add(book);
+    return book;
+  }
+
+  /// MOBI 导入：PalmDB / PalmDOC 解析 → 章节文本 → 打包成内部 EPUB。
+  Future<ReaderBook> importMobi({
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    if (bytes.isEmpty) {
+      throw const ReaderImportException(ReaderImportError.emptyFile, '文件为空');
+    }
+    final fallbackTitle = _titleFromFileName(fileName);
+    // 大 MOBI 的解压 / HTML 清洗放后台 isolate，避免导入时主线程卡顿；
+    // Web 端无 isolate，退回同步解析（本地书导入本来就只在 Android 开放）。
+    final outcome = kIsWeb
+        ? _parseMobiSync(bytes, fallbackTitle)
+        : await Isolate.run<Object>(
+            () => _parseMobiSync(bytes, fallbackTitle),
+          );
+    if (outcome is MobiImportException) {
+      throw ReaderImportException(
+        _mapMobiError(outcome.problem),
+        outcome.message,
+      );
+    }
+    final parsed = outcome as MobiImportResult;
+
+    final epub = EpubBuilder.build(
+      title: parsed.title,
+      author: parsed.author,
+      chapters: [
+        for (final chapter in parsed.chapters)
+          EpubChapter(
+            title: chapter.title,
+            html: EpubBuilder.textToHtml(chapter.content),
+          ),
+      ],
+    );
+
+    final id = EpubBuilder.newBookId();
+    await saveReaderBookFile(id, epub, fileName: bookFileName);
+    // 封面是加分项：提取 / 落盘失败一律静默跳过，回退书架首字占位。
+    final coverPath = await LocalBookCover.save(id, parsed.coverBytes);
+
+    final book = ReaderBook(
+      id: id,
+      title: parsed.title,
+      author: parsed.author,
+      source: ReaderBookSource.localMobi,
+      fileName: bookFileName,
+      chapterCount: parsed.chapters.length,
       coverPath: coverPath,
       addedAt: DateTime.now(),
     );
@@ -313,6 +370,18 @@ class ReaderImportService {
         PdfImportProblem.unreadable => ReaderImportError.invalidContent,
       };
 
+  static ReaderImportError _mapMobiError(MobiImportProblem problem) {
+    return switch (problem) {
+      MobiImportProblem.notMobi => ReaderImportError.unsupportedFormat,
+      MobiImportProblem.unsupportedCompression =>
+        ReaderImportError.unsupportedFormat,
+      MobiImportProblem.encrypted => ReaderImportError.unsupportedFormat,
+      MobiImportProblem.tooLarge => ReaderImportError.tooLarge,
+      MobiImportProblem.broken => ReaderImportError.invalidContent,
+      MobiImportProblem.empty => ReaderImportError.invalidContent,
+    };
+  }
+
   /// 确认删除：清理书籍文件、进度、历史与时长日志。
   Future<void> purge(ReaderBook book) async {
     await deleteReaderBookDir(book.id);
@@ -337,5 +406,15 @@ class ReaderImportService {
     final dot = base.lastIndexOf('.');
     final title = dot > 0 ? base.substring(0, dot) : base;
     return title.trim().isEmpty ? '未命名书籍' : title.trim();
+  }
+}
+
+/// 返回 [MobiImportResult] 或 [MobiImportException]：isolate 中不直接抛异常，
+/// 避免被包装成 RemoteError 而丢失错误类型与提示文案。
+Object _parseMobiSync(Uint8List bytes, String fallbackTitle) {
+  try {
+    return MobiImporter.parse(bytes, fallbackTitle: fallbackTitle);
+  } on MobiImportException catch (e) {
+    return e;
   }
 }

@@ -10,6 +10,7 @@ import '../reader/book_store.dart';
 import '../reader/reader_activity_store.dart';
 import 'tts_engine.dart';
 import 'tts_settings_store.dart';
+import 'tts_text_splitter.dart';
 
 /// 阅读页提供给 TTS 的端口：取段落、高亮、读取当前位置。
 abstract class TtsReaderPort {
@@ -19,8 +20,14 @@ abstract class TtsReaderPort {
   /// 确保指定章节已渲染并提取正文段落（纯文本）。
   Future<List<String>> paragraphsOf(int chapterIndex);
 
-  /// 高亮指定段落；[scroll] 为 true 时同时滚动到该段。
-  Future<void> highlight(int paragraphIndex, {bool scroll = true});
+  /// 高亮指定段落；给定 [startChar]/[endChar] 时只高亮段内这一区间（一两句）。
+  /// [scroll] 为 true 时同时滚动到该段。
+  Future<void> highlight(
+    int paragraphIndex, {
+    bool scroll = true,
+    int? startChar,
+    int? endChar,
+  });
 
   Future<void> clearHighlight();
 
@@ -485,45 +492,77 @@ class TtsSession extends ChangeNotifier {
         _publishMedia();
         notifyListeners();
 
+        const splitter = TtsTextSplitter();
         for (var i = index; i < list.length; i++) {
           if (!_active || runId != _runId) return;
-          while (_paused) {
-            _pauseGate ??= Completer<void>();
-            await _pauseGate!.future;
-            if (!_active || runId != _runId) return;
-          }
           _paraIndex = i;
-          notifyListeners();
-          await _highlight(i);
-          if (i + 1 < list.length) _engine?.prefetch(list[i + 1]);
+          // 朗读期间 _playing 保持 true：短句间不再逐句 rebuild 整页，
+          // 也避免段间短暂 false 时点播放键被当成 resume 而重开一轮朗读。
           _playing = true;
           _publishMedia();
           notifyListeners();
-          try {
-            await _engine?.speak(list[i]);
-          } on TtsException catch (e) {
+          // 整段不再一次性送给引擎：切成一两句话的短片段，首请求体量更小，
+          // 高亮也能精确到句；段落下标仍是断点/进度/UI 的唯一坐标。
+          final segments = splitter.split(list[i]);
+          if (segments.isEmpty) continue;
+          for (var s = 0; s < segments.length; s++) {
+            if (!_active || runId != _runId) return;
+            while (_paused) {
+              _pauseGate ??= Completer<void>();
+              await _pauseGate!.future;
+              if (!_active || runId != _runId) return;
+            }
+            final segment = segments[s];
+            await _highlight(
+              i,
+              startChar: segment.start,
+              endChar: segment.end,
+            );
+            String? next;
+            if (s + 1 < segments.length) {
+              next = segments[s + 1].text;
+            } else if (i + 1 < list.length) {
+              final following = splitter.split(list[i + 1]);
+              if (following.isNotEmpty) next = following.first.text;
+            }
+            final firstSegment = s == 0 && i == index;
+            // 首个朗读单元不与首请求同时发预合成，避免抢占首次 WebSocket；
+            // 稍后补一次预取，第一句尽快出声且第二句不用干等。
+            if (next != null && !firstSegment) _engine?.prefetch(next);
+            final speaking = _engine?.speak(segment.text);
+            if (next != null && firstSegment) {
+              final nextText = next;
+              unawaited(
+                Future<void>.delayed(const Duration(milliseconds: 200)).then((_) {
+                  if (_active && runId == _runId) _engine?.prefetch(nextText);
+                }),
+              );
+            }
+            try {
+              await speaking;
+            } on TtsException catch (e) {
+              if (!_active || runId != _runId) return;
+              if (_abortedByPause) {
+                _abortedByPause = false;
+                s--;
+                continue;
+              }
+              // 合成/临时占用失败：静默暂停并留在当前短句，不弹红字。
+              if (e.code != 'speak_failed') _error = e.message;
+              _playing = false;
+              _paused = true;
+              await _accumulate();
+              _playStartedAt = null;
+              notifyListeners();
+              return;
+            }
             if (!_active || runId != _runId) return;
             if (_abortedByPause) {
               _abortedByPause = false;
-              i--;
+              s--;
               continue;
             }
-            // 合成/临时占用失败：静默暂停并留在当前段，不弹红字；初始化失败才提示引擎不可用。
-            if (e.code != 'speak_failed') _error = e.message;
-            _playing = false;
-            _paused = true;
-            await _accumulate();
-            _playStartedAt = null;
-            notifyListeners();
-            return;
           }
-          if (!_active || runId != _runId) return;
-          if (_abortedByPause) {
-            _abortedByPause = false;
-            i--;
-            continue;
-          }
-          _playing = false;
           await _saveBookmark(
             book: book,
             chapter: chapter,
@@ -652,12 +691,22 @@ class TtsSession extends ChangeNotifier {
     await _highlight(_paraIndex, scroll: scroll);
   }
 
-  Future<void> _highlight(int index, {bool scroll = true}) async {
+  Future<void> _highlight(
+    int index, {
+    bool scroll = true,
+    int? startChar,
+    int? endChar,
+  }) async {
     final port = _port;
     if (port == null) return;
     try {
       _navigating = true;
-      await port.highlight(index, scroll: scroll);
+      await port.highlight(
+        index,
+        scroll: scroll,
+        startChar: startChar,
+        endChar: endChar,
+      );
     } catch (e) {
       debugPrint('[tts] 高亮失败：$e');
     } finally {

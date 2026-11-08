@@ -20,7 +20,6 @@ import '../../core/services/reader/reader_typography.dart';
 import '../../core/services/reader/pdf_page_map.dart';
 import '../../core/services/reader/reading_duration_clock.dart';
 import '../../core/services/tts/tts_session.dart';
-import '../../core/services/tts/tts_settings_store.dart';
 import 'reader_settings_sheet.dart';
 import 'reader_toc_sheet.dart';
 import 'reader_tts_bar.dart';
@@ -321,20 +320,6 @@ class _ReaderPageState extends State<ReaderPage>
             ? _tts.chapterIndex
             : (saved?.chapterIndex ?? book.lastChapterIndex),
       );
-      // M9.4「进入书籍默认继续听书」：有听书断点才自动续读。
-      if (!mounted) return;
-      final ttsSettings = context.read<TtsSettingsStore>();
-      if (ttsSettings.defaultListen &&
-          book.ttsAllowed &&
-          !_tts.active &&
-          book.lastTtsParaIndex != null) {
-        unawaited(
-          _tts.start(
-            chapterIndex: book.lastChapterIndex,
-            paraIndex: book.lastTtsParaIndex,
-          ),
-        );
-      }
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -549,6 +534,21 @@ class _ReaderPageState extends State<ReaderPage>
     return location == null
         ? book.progressText
         : '第${location.chapterIndex + 1}/${book.chapterCount} 章 · $percent%';
+  }
+
+  /// 沉浸阅读左上角章节信息：优先目录里的真实章节名，缺失时退化为章序号；
+  /// PDF 沿用页码侧车的「第 N 页」文案，与顶栏/页脚口径一致。
+  String _chapterLabel(ReaderBook book, ReaderLocation? location) {
+    final index = location?.chapterIndex ?? book.lastChapterIndex;
+    final map = _pdfPageMap;
+    if (book.source == ReaderBookSource.localPdf && map != null) {
+      return map.labelForChapter(index);
+    }
+    if (index >= 0 && index < _toc.length) {
+      final label = _toc[index].label.trim();
+      if (label.isNotEmpty) return label;
+    }
+    return '第${index + 1}章';
   }
 
   /// PDF 页码跳转：页码 → 章节（每 20 页一章）→ 阅读器跳章。
@@ -912,6 +912,47 @@ class _ReaderPageState extends State<ReaderPage>
                 ),
               ),
             ),
+            // 沉浸阅读（顶栏隐藏）时左上角常驻章节 + 全书进度：
+            // 落在渲染器的页眉留白里，渐隐衬底保证滚动模式下正文滚到顶部也清晰；
+            // IgnorePointer 让点击/翻页手势照常穿透到 WebView。
+            if (!_loading && _error == null)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: _toolbarVisible ? 0 : 1,
+                    duration: const Duration(milliseconds: 180),
+                    child: Container(
+                      padding: EdgeInsets.fromLTRB(
+                        tokens.spaceMd,
+                        tokens.spaceXs,
+                        tokens.spaceMd,
+                        tokens.spaceSm,
+                      ),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            scheme.surface,
+                            scheme.surface.withValues(alpha: 0),
+                          ],
+                        ),
+                      ),
+                      child: Text(
+                        '${_chapterLabel(book, location)} · 全书 $percent%',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tokens.captionStyle.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             // B 级提示：文字抽取不可靠的 PDF 关闭朗读（M10.3）。
             if (!book.ttsAllowed && _toolbarVisible)
               Positioned(
@@ -1050,11 +1091,24 @@ class _BridgeTtsPort implements TtsReaderPort {
   }
 
   @override
-  Future<void> highlight(int paragraphIndex, {bool scroll = true}) async {
+  Future<void> highlight(
+    int paragraphIndex, {
+    bool scroll = true,
+    int? startChar,
+    int? endChar,
+  }) async {
     if (scroll) {
-      await _bridge.highlightParagraph(paragraphIndex);
+      await _bridge.highlightParagraph(
+        paragraphIndex,
+        startChar: startChar,
+        endChar: endChar,
+      );
     } else {
-      await _bridge.markParagraph(paragraphIndex);
+      await _bridge.markParagraph(
+        paragraphIndex,
+        startChar: startChar,
+        endChar: endChar,
+      );
     }
   }
 
