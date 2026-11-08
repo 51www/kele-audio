@@ -178,6 +178,13 @@ flutter build linux --release          # Linux（需 GTK3 dev）
 flutter build ios --release --no-codesign   # iOS（需在 Mac 上）
 # Web 必须带 canvaskit 自托管参数，否则会去访问被墙的 gstatic
 flutter build web --release --dart-define=FLUTTER_WEB_CANVASKIT_URL=/canvaskit/
+# 默认：免签名 release 构建 + 手动打成「未签名 IPA」
+./build_ipa.sh
+# 产物：build/ios/ipa/Runner.ipa（未签名，需自行重签才能装设备）
+
+# 正式分发：Ad Hoc 签名（需先在 Xcode 给 Runner 配好 Team + Ad Hoc 描述文件）
+./build_ipa.sh --signed
+# 产物：build/ios/ipa/Runner.ipa（已签名，可装到已注册设备）
 ```
 **常见问题：**
 
