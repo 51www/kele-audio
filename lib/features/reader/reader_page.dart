@@ -1082,12 +1082,20 @@ class _BridgeTtsPort implements TtsReaderPort {
       if (await _bridge.isChapterReady(chapterIndex)) {
         // renderer 完成分栏后再读 DOM，避免拿到上一章的节点。
         await Future<void>.delayed(const Duration(milliseconds: 240));
-        return _bridge.extractParagraphs();
+        final list = await _bridge.extractParagraphs(
+          expectedChapter: chapterIndex,
+        );
+        if (list.isNotEmpty) return list;
+        // 章号校验未通过：换章过渡期 doc 还没替换成目标章。稍后重取，
+        // 绝不用上一章的正文顶替，否则就是「翻到新章却念旧章」。
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        continue;
       }
       await _bridge.goToChapter(chapterIndex);
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }
-    return _bridge.extractParagraphs();
+    // 超时也返回空：上层按「空章」处理，不朗读任何可能错章的文本。
+    return const [];
   }
 
   @override

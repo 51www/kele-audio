@@ -73,6 +73,9 @@ view.addEventListener('relocate', e => {
 view.addEventListener('load', e => {
   const doc = e.detail?.doc
   if (!doc) return
+  // 记录「这份文档属于哪一章」。foliate 换章时先改 index、后异步换 doc，
+  // TTS 据此判断新章的 DOM 是否真的渲染完成（只认 index 会拿到旧章正文）。
+  if (Number.isFinite(Number(e.detail?.index))) docChapter.set(doc, Number(e.detail.index))
   doc.addEventListener('click', ev => {
     const a = ev.target.closest?.('a[href]')
     if (a) return
@@ -92,6 +95,14 @@ let ttsNodes = []
 let ttsActiveNode = null
 // 句级高亮的临时 span（只包一两句，移除时原样还原正文节点）。
 let ttsActiveSpan = null
+// 段落缓存所属的文档对象：foliate 换章时先更新 #index、再异步替换 #view.doc，
+// 这段窗口里 index 已是新章但 doc 仍是旧章。只有 index 与 doc 同时匹配才算
+// 新章真正就位，避免把旧章正文当成新章朗读。
+let ttsDoc = null
+// 文档对象 → 章号：由 load 事件写入，用于判定当前渲染的 doc 属于哪一章。
+const docChapter = new WeakMap()
+// Dart 侧每 200ms 轮询一次，导航在途时重复发起会打断换章；在途则直接返回。
+let navBusy = -1
 
 function currentContents() {
   try { return (view.renderer?.getContents?.() || [])[0] || null } catch (e) { return null }
@@ -136,7 +147,9 @@ function extractChapter(force) {
   const c = currentContents()
   if (!c || !c.doc || !c.doc.body) return -1
   const chapter = Number(c.index ?? -1)
-  if (!force && chapter === ttsChapter && ttsNodes.length) return chapter
+  // 缓存命中要求章号与文档对象都在：换章过渡期 index 已变但 doc 还是旧章，
+  // 若只认章号就会把旧章节点重新缓存成新章（表现为「翻到新章却念旧章开头」）。
+  if (!force && chapter === ttsChapter && c.doc === ttsDoc && ttsNodes.length) return chapter
   const nodes = []
   const all = c.doc.body.querySelectorAll(PARA_SELECTOR)
   for (const el of all) {
@@ -148,6 +161,7 @@ function extractChapter(force) {
   }
   ttsNodes = nodes
   ttsChapter = chapter
+  ttsDoc = c.doc
   ttsActiveNode = null
   // 章节 DOM 已重建，旧句级 span 不再属于当前文档，不能留着下次还原。
   ttsActiveSpan = null
@@ -366,7 +380,17 @@ window.reader = {
     post('onToc', { items: flat.map((t, i) => ({ index: i, label: t.label, href: t.href })) })
     return true
   },
-  async goToChapter(index) { await view.goTo(Number(index)); return true },
+  async goToChapter(index) {
+    const target = Number(index)
+    if (navBusy === target) return true
+    navBusy = target
+    try {
+      await view.goTo(target)
+    } finally {
+      if (navBusy === target) navBusy = -1
+    }
+    return true
+  },
   async goToHref(href) { if (href) await view.goTo(href); return true },
   async next() { await view.renderer.next(); return true },
   async prev() { await view.renderer.prev(); return true },
@@ -378,9 +402,25 @@ window.reader = {
   },
   isChapterReady(index) {
     const c = currentContents()
-    return !!c && Number(c.index ?? -1) === Number(index)
+    if (!c || !c.doc || !c.doc.body) return false
+    const target = Number(index)
+    if (Number(c.index ?? -1) !== target) return false
+    // foliate 换章时先更新 #index，再异步把 #view 换成新章的文档，
+    // 这段窗口里 index 已是新章但 doc 还是旧章。必须确认渲染中的文档本身就
+    // 属于目标章，才能认为新章正文已就位，否则会抽取到旧章段落来朗读。
+    const known = docChapter.get(c.doc)
+    return known === undefined ? true : known === target
   },
-  extractParagraphs() {
+  extractParagraphs(expected) {
+    const c = currentContents()
+    if (!c || !c.doc || !c.doc.body) return []
+    // 兜底校验：即便就绪判断被绕过，也绝不把别的章的段落当成目标章返回。
+    // 直接看渲染文档的真实章号（不只看 index），过渡期 doc 还是旧章时会拦住。
+    if (expected != null) {
+      const known = docChapter.get(c.doc)
+      if (known !== undefined && known !== Number(expected)) return []
+      if (Number(c.index ?? -1) !== Number(expected)) return []
+    }
     if (extractChapter(false) < 0) return []
     return ttsNodes.map(textOf)
   },

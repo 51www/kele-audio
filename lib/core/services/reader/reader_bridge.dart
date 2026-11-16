@@ -315,8 +315,11 @@ class ReaderBridge {
   }
 
   /// 提取当前章节正文段落（纯文本数组，同步 JS 调用）。
-  Future<List<String>> extractParagraphs() async {
-    final raw = await _eval('window.reader.extractParagraphs()');
+  /// [expectedChapter] 给定时，JS 端会校验渲染文档确属该章，否则返回空数组，
+  /// 避免换章过渡期把上一章正文当成新章朗读。
+  Future<List<String>> extractParagraphs({int? expectedChapter}) async {
+    final arg = expectedChapter == null ? '' : '$expectedChapter';
+    final raw = await _eval('window.reader.extractParagraphs($arg)');
     final decoded = raw is String ? _tryDecode(raw) : raw;
     if (decoded is List) {
       return [
