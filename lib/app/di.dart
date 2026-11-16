@@ -31,6 +31,7 @@ import '../core/services/reader/reader_progress_store.dart';
 import '../core/services/reader/reader_typography.dart';
 import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
+import '../core/services/system/download_notification.dart';
 import '../core/services/tts/tts_engine.dart';
 import '../core/services/tts/tts_engine_edge.dart';
 import '../core/services/tts/tts_engine_system.dart';
@@ -235,6 +236,7 @@ class AppServices {
       store: createAudioStore(),
       fetcher: DioAudioFetcher(),
       log: _log,
+      downloadNotifier: DownloadNotification.showDownloadComplete,
     );
     await offline.initFlags(kv);
     offline.useAudioProxy = web;

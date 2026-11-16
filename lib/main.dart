@@ -36,7 +36,9 @@ Future<void> main() async {
       await AudioService.init(
         builder: () => bridge,
         config: const AudioServiceConfig(
-          androidNotificationChannelId: 'com.kele.audio.channel.audio',
+          // v2 渠道：旧渠道一旦以默认 importance（带声）创建便无法从 App 侧
+          // 修改，换新 id 让系统按下面原生预建的 IMPORTANCE_LOW 静默配置创建。
+          androidNotificationChannelId: 'com.kele.audio.channel.audio2',
           androidNotificationChannelName: '可乐听书',
           androidNotificationChannelDescription: '播放有声内容',
           androidNotificationIcon: 'mipmap/ic_launcher',

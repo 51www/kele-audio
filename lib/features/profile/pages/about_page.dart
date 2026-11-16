@@ -8,6 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../app/widgets/common.dart';
 import '../../../app/widgets/kele_logo.dart';
+import '../../../core/services/system/download_notification.dart';
 import '../profile_page.dart' show appVersion;
 import '../../update/update_config.dart';
 import '../../update/update_dialog.dart';
@@ -51,7 +52,9 @@ class _AboutPageState extends State<AboutPage> {
         _isProdBuild = info.packageName == 'com.kele.audio';
       });
       if (_isAndroid && _isProdBuild && _service == null) {
-        _service = UpdateService();
+        _service = UpdateService(
+          notifier: DownloadNotification.showDownloadComplete,
+        );
         _service!.init();
       }
     });

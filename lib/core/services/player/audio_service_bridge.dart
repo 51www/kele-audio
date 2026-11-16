@@ -80,6 +80,10 @@ class AudioServiceBridge extends BaseAudioHandler implements MediaSessionBridge 
   /// `PlaybackState` 携带 `updatePosition + updateTime + speed`，系统会自己
   /// 按时间外推锁屏/通知栏进度条，所以只要新位置落在外推值附近就无需重推。
   bool _positionOnTrack(MediaSnapshot s) {
+    // 无连续进度的场景（TTS：position 恒 0）不参与「走表」判断——否则随时间
+    // 外推的预期值会把恒 0 的实际位置越甩越远，几秒后就超过 3s 阈值，导致
+    // 每次 publish 都被判定为「进度变了」而重推 playbackState。
+    if (!s.trackPosition) return true;
     final anchor = _lastPosition;
     final pushedAt = _lastPushedAt;
     if (anchor == null || pushedAt == null) return false;

@@ -682,6 +682,9 @@ class TtsSession extends ChangeNotifier {
       hasNext: _chapterIndex < (_book?.chapterCount ?? 1) - 1,
       hasPrev: _chapterIndex > 0,
       speed: settings.rate,
+      // 听书无连续进度（position 恒 0）：不让它参与「走表」外推判断，
+      // 否则每切一段外推偏差就超阈值 → 反复重推 playbackState → 通知栏「叮」。
+      trackPosition: false,
     ));
   }
 

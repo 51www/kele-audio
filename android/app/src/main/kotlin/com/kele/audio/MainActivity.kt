@@ -1,6 +1,9 @@
 package com.kele.audio
 
 import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -31,6 +34,15 @@ import java.io.File
 ///    `kele/audio_focus_events`（事件），五个事件语义见
 ///    `lib/core/services/player/audio_focus.dart` 的文档。
 class MainActivity : AudioServiceActivity() {
+
+    companion object {
+        /// 媒体播放通知渠道（IMPORTANCE_LOW + 无声）：后台/锁屏控制条不「叮」。
+        /// 必须与 main.dart 的 androidNotificationChannelId 一致。
+        private const val MEDIA_CHANNEL_ID = "com.kele.audio.channel.audio2"
+
+        /// 下载完成通知渠道（IMPORTANCE_DEFAULT + 默认提示音）：低频、用户主动触发。
+        private const val DOWNLOAD_CHANNEL_ID = "com.kele.audio.channel.download"
+    }
 
     private var audioManager: AudioManager? = null
     private var focusCallback: EventChannel.EventSink? = null
@@ -72,6 +84,10 @@ class MainActivity : AudioServiceActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+        // 预建通知渠道：importance/sound 创建后不可改，必须先于 audio_service
+        // 用同 id 创建。媒体渠道静默，下载渠道带声。
+        ensureNotificationChannels()
 
         // 注册「即将变噪音」广播（拔耳机/蓝牙断开）→ 自动暂停
         try {
@@ -177,6 +193,79 @@ class MainActivity : AudioServiceActivity() {
                 "type" -> result.success(currentNetworkType())
                 else -> result.notImplemented()
             }
+        }
+
+        // 一次性下载完成通知（离线缓存 / 更新包）：带声渠道，低频提醒
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.kele.audio/notifier",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "showDownloadComplete" -> {
+                    val title = call.argument<String>("title") ?: "下载完成"
+                    val body = call.argument<String>("body") ?: ""
+                    val ok = showDownloadComplete(title, body)
+                    result.success(ok)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /// 预建两个通知渠道。渠道的 importance / sound 一经创建不可更改，必须在
+    /// audio_service 用媒体渠道 id 创建前先建好：这样它会复用本渠道的静默配置，
+    /// 播放/缓冲时反复重建通知也不再发声。
+    private fun ensureNotificationChannels() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+
+        // 媒体播放：低重要性、无声、不振动——后台/锁屏控制条常驻但不打扰。
+        val media = NotificationChannel(
+            MEDIA_CHANNEL_ID,
+            "播放有声内容",
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = "后台/锁屏播放控制（静默）"
+            setSound(null, null)
+            enableVibration(false)
+            setShowBadge(false)
+        }
+        manager.createNotificationChannel(media)
+
+        // 下载完成：默认重要性、系统提示音——用户主动发起、低频，理应提醒。
+        val download = NotificationChannel(
+            DOWNLOAD_CHANNEL_ID,
+            "下载完成",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply {
+            description = "离线缓存 / 更新包下载完成提醒"
+            enableVibration(true)
+        }
+        manager.createNotificationChannel(download)
+    }
+
+    /// 在带声渠道上发一条一次性下载完成通知。返回是否成功发出。
+    private fun showDownloadComplete(title: String, body: String): Boolean {
+        if (!hasNotificationPermission()) return false
+        return try {
+            val manager = getSystemService(NotificationManager::class.java) ?: return false
+            val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            val pending = PendingIntent.getActivity(this, 0, intent, flags)
+            val notification = Notification.Builder(this, DOWNLOAD_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setContentIntent(pending)
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
+                .build()
+            manager.notify(1001, notification)
+            true
+        } catch (e: Exception) {
+            false
         }
     }
 

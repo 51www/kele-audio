@@ -35,6 +35,7 @@ class OfflineCacheService extends ChangeNotifier {
     required this.store,
     required this.fetcher,
     this.log,
+    this.downloadNotifier,
   });
 
   final Daos daos;
@@ -50,6 +51,10 @@ class OfflineCacheService extends ChangeNotifier {
   final AudioFetcher fetcher;
 
   final void Function(String message)? log;
+
+  /// 下载完成通知回调（DI 注入；测试可不注入，无副作用）。
+  /// 每个队列排空周期聚合发一条，参数 = (标题, 正文)。
+  final void Function(String title, String body)? downloadNotifier;
 
   static const String keyOnlyCached = 'offline_only_cached';
 
@@ -283,6 +288,9 @@ class OfflineCacheService extends ChangeNotifier {
   Future<void> _drain() async {
     if (_busy) return;
     _busy = true;
+    // 单个队列排空周期内聚合：多章整本缓存只发一条通知，不逐章轰。
+    int doneCount = 0;
+    String lastTitle = '';
     try {
       while (true) {
         final queued = tasks()
@@ -294,14 +302,28 @@ class OfflineCacheService extends ChangeNotifier {
           orElse: () => queued.first,
         );
         if (_pausedAlbums.contains(task.albumId)) break;
-        await _runOne(task);
+        final succeeded = await _runOne(task);
+        if (succeeded) {
+          doneCount++;
+          final album = daos.albums.get(task.albumId);
+          lastTitle = daos.chapters.get(task.chapterId)?.title ?? album?.title ?? '';
+        }
       }
     } finally {
       _busy = false;
     }
+    if (doneCount > 0) {
+      final notifier = downloadNotifier;
+      if (notifier != null) {
+        final String title = doneCount == 1 ? '缓存完成' : '缓存完成 · $doneCount 集';
+        final String body = doneCount == 1 ? lastTitle : '共 $doneCount 集，最近：$lastTitle';
+        notifier(title, body);
+      }
+    }
   }
 
-  Future<void> _runOne(DownloadTask task) async {
+  /// 返回一个任务是否成功落盘完成（供上层聚合「缓存完成」通知）。
+  Future<bool> _runOne(DownloadTask task) async {
     final chapter = daos.chapters.get(task.chapterId);
     if (chapter == null) {
       await daos.downloads.upsert(_withStatus(
@@ -310,7 +332,7 @@ class OfflineCacheService extends ChangeNotifier {
         error: '章节记录不存在（album/chapter 表缺失）',
       ));
       notifyListeners();
-      return;
+      return false;
     }
     // 逐项门控：每个任务开始前按「当时」网络判断（队列中途切网也能拦住后续项）。
     // 已在 running 的任务不会走到这里，不会被中途掐断。
@@ -321,7 +343,7 @@ class OfflineCacheService extends ChangeNotifier {
       _wifiOnlyBlocked = true;
       _log('拦截下载（仅 Wi-Fi）：${chapter.title}');
       notifyListeners();
-      return;
+      return false;
     }
     _wifiOnlyBlocked = false;
 
@@ -346,7 +368,7 @@ class OfflineCacheService extends ChangeNotifier {
       );
       if (_cancelling.remove(task.chapterId)) {
         _log('下载已暂停：${chapter.title}');
-        return; // 保持 queued 状态
+        return false; // 保持 queued 状态
       }
 
       // 2. 拉字节（web 走同源反代；CDN 校验头仅原生需要）
@@ -361,7 +383,7 @@ class OfflineCacheService extends ChangeNotifier {
       );
       if (_cancelling.remove(task.chapterId)) {
         _log('下载已暂停：${chapter.title}');
-        return;
+        return false;
       }
 
       // 3. 落盘 + 状态（filePath 键 = 章节 id，真实地址不落库）
@@ -377,10 +399,12 @@ class OfflineCacheService extends ChangeNotifier {
       ));
       _log('已缓存：${chapter.title}'
           '（${(size / 1024 / 1024).toStringAsFixed(1)}MB）');
+      notifyListeners();
+      return true;
     } catch (e) {
       if (_cancelling.remove(task.chapterId)) {
         _log('下载已暂停：${chapter.title}');
-        return; // 暂停不算失败
+        return false; // 暂停不算失败
       }
       await daos.downloads.upsert(
         _withStatus(task, DownloadStatus.failed, error: '$e'),
@@ -388,6 +412,7 @@ class OfflineCacheService extends ChangeNotifier {
       _log('缓存失败：${chapter.title} — $e');
     }
     notifyListeners();
+    return false;
   }
 
   DownloadTask _withStatus(
