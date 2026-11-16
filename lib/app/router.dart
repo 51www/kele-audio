@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../features/discover/album_detail_page.dart';
 import '../features/discover/discover_page.dart';
 import '../features/discover/search_page.dart';
+import '../features/discover/up_profile_page.dart';
 import '../features/profile/pages/about_page.dart';
 import '../features/profile/pages/bili_account_page.dart';
 import '../features/profile/pages/downloads_page.dart';
@@ -109,6 +110,14 @@ class AppRouter {
         name: 'album',
         builder: (context, state) => AlbumDetailPage(
           albumId: state.pathParameters['id'] ?? '',
+        ),
+      ),
+      // 15. 主播主页（M11）：mid 来自专辑 upMid
+      GoRoute(
+        path: '/up/:mid',
+        name: 'up-profile',
+        builder: (context, state) => UpProfilePage(
+          mid: int.tryParse(state.pathParameters['mid'] ?? '') ?? 0,
         ),
       ),
       // 11. 搜索（M8）：`?q=` 支持编辑精选专题卡预置关键词

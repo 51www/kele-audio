@@ -11,6 +11,7 @@ import '../core/api/key_value_store.dart';
 import '../core/api/play_url_service.dart';
 import '../core/api/prefs_kv_store.dart';
 import '../core/api/subtitle_source.dart';
+import '../core/api/up_profile_source.dart';
 import '../core/data/daos.dart';
 import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
@@ -72,6 +73,7 @@ class AppServices {
     required this.playbackArbiter,
     required this.ttsSettings,
     required this.ttsSession,
+    required this.upProfile,
   });
 
   final KeyValueStore kv;
@@ -151,6 +153,9 @@ class AppServices {
   /// 听书会话（M9.3）：前台服务/锁屏通知/音频焦点/断点续听
   final TtsSession ttsSession;
 
+  /// 主播主页（M11）：UP 主资料 + 投稿作品列表
+  final UpProfileSource upProfile;
+
   /// 启动装配：**不发任何网络请求**（PRD 冷启动 ≤ 3s）。
   ///
   /// 顺序：本地 KV → 接口配置（内置 JSON，R1 远端覆盖失败静默）→
@@ -210,6 +215,11 @@ class AppServices {
       log: _log,
     );
     final discoverCache = DiscoverPageCache(kv);
+    final upProfile = UpProfileSource(
+      client: client,
+      config: config,
+      log: _log,
+    );
     final progress = ProgressStore(daos);
     final prefs = PlayerPrefs(kv);
     final settings = SettingsStore(kv);
@@ -355,6 +365,7 @@ class AppServices {
       playbackArbiter: arbiter,
       ttsSettings: ttsSettings,
       ttsSession: ttsSession,
+      upProfile: upProfile,
     );
   }
 

@@ -208,9 +208,40 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                 maxLines: 3,
                                 overflow: TextOverflow.ellipsis),
                             SizedBox(height: tokens.spaceSm),
-                            Text(
-                              album.upName.isEmpty ? 'UP 主未知' : album.upName,
-                              style: tokens.bodyStyle,
+                            // UP 主名可点击 → 主播主页（M11）：仅当持有 mid 时
+                            // 才可点，避免合集 meta 缺 mid 时跳到空页。
+                            InkWell(
+                              onTap: album.upMid > 0
+                                  ? () => context.push('/up/${album.upMid}')
+                                  : null,
+                              borderRadius:
+                                  BorderRadius.circular(tokens.radiusSm),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      album.upName.isEmpty
+                                          ? 'UP 主未知'
+                                          : album.upName,
+                                      style: tokens.bodyStyle.copyWith(
+                                        color: album.upMid > 0
+                                            ? scheme.primary
+                                            : null,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (album.upMid > 0) ...[
+                                    const SizedBox(width: 2),
+                                    Icon(
+                                      Icons.chevron_right_rounded,
+                                      size: 16,
+                                      color: scheme.primary,
+                                    ),
+                                  ],
+                                ],
+                              ),
                             ),
                             SizedBox(height: tokens.spaceSm),
                             Text(
