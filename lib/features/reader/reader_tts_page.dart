@@ -12,6 +12,7 @@ import '../../core/services/reader/reader_bridge.dart';
 import '../../core/services/tts/tts_engine.dart';
 import '../../core/services/tts/tts_engine_system.dart';
 import '../../core/services/tts/tts_session.dart';
+import '../../core/services/tts/tts_settings_store.dart';
 import 'reader_toc_sheet.dart';
 
 /// 本地书听书播放页（M9.6 精简形态）。
@@ -35,6 +36,9 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
   ModalRoute<dynamic>? _route;
   bool _leaving = false;
 
+  /// 拖动中的目标段；非 null 时 UI 以它为准，避免被持续推进的朗读位置抢改。
+  int? _seekDraft;
+
   @override
   void initState() {
     super.initState();
@@ -50,6 +54,7 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
 
   @override
   void dispose() {
+    if (_tts.seeking) unawaited(_tts.cancelSeek());
     _tts.removeListener(_onSessionChanged);
     super.dispose();
   }
@@ -162,6 +167,43 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
     return _tts.chapterLabels.length;
   }
 
+  String _formatDuration(Duration value) {
+    final total = value.inSeconds;
+    final hours = total ~/ 3600;
+    final minutes = (total % 3600) ~/ 60;
+    final seconds = total % 60;
+    if (hours > 0) {
+      return '$hours:${minutes.toString().padLeft(2, '0')}'
+          ':${seconds.toString().padLeft(2, '0')}';
+    }
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _beginSeek() async {
+    if (_seekDraft != null) return;
+    await _tts.beginSeek();
+    if (!mounted) return;
+    // onChanged 可能先于 beginSeek 的暂停完成而写入 draft，不能覆盖用户目标。
+    setState(() => _seekDraft ??= _tts.paragraphIndex);
+  }
+
+  Future<void> _previewSeek(double value) async {
+    final target = value.round();
+    if (!mounted || _seekDraft == target) return;
+    setState(() => _seekDraft = target);
+    await _tts.previewSeekToParagraph(target);
+  }
+
+  Future<void> _endSeek(double value) async {
+    final target = value.round();
+    if (_seekDraft != null) {
+      setState(() => _seekDraft = target);
+      await _tts.previewSeekToParagraph(target);
+    }
+    await _tts.commitSeek();
+    if (mounted) setState(() => _seekDraft = null);
+  }
+
   /// 紧凑底部弹窗：顶部圆角 + 拖拽条，高度按内容自适应。
   Future<T?> _showCompactSheet<T>({
     required String title,
@@ -244,12 +286,13 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
                       value: draft.clamp(0.5, 2.0).toDouble(),
                       min: 0.5,
                       max: 2.0,
-                      divisions: 30,
-                      label: _rateLabel(draft),
-                      onChanged: (value) =>
-                          setSheetState(() => draft = value),
-                      onChangeEnd: (value) =>
-                          Navigator.of(sheetContext).pop(value),
+                      divisions: 15,
+                      label: _rateLabel(TtsSettingsStore.quantizeParam(draft)),
+                      onChanged: (value) => setSheetState(
+                        () => draft = TtsSettingsStore.quantizeParam(value),
+                      ),
+                      onChangeEnd: (value) => Navigator.of(sheetContext)
+                          .pop(TtsSettingsStore.quantizeParam(value)),
                     ),
                   ),
                   Text(
@@ -547,7 +590,18 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
 
     final count = session.paragraphCount;
     final index = session.paragraphIndex;
-    final progress = count > 0 ? ((index + 1) / count).clamp(0.0, 1.0) : 0.0;
+    // 拖动中以本地目标段为准，拖动结束后才让会话位置重新驱动 UI。
+    final seekIndex = count > 0
+        ? (_seekDraft ?? index).clamp(0, count - 1).toInt()
+        : 0;
+    final sliderMax = count > 1 ? (count - 1).toDouble() : 1.0;
+    final position = _seekDraft == null
+        ? session.estimatedChapterPosition
+        : session.estimatedTimeAtParagraph(seekIndex);
+    final total = session.estimatedChapterTotal;
+    final chapterPart = _chapterCount > 0
+        ? ' · 第 ${session.chapterIndex + 1}/$_chapterCount 章'
+        : '';
     final bookTitle = session.bookTitle.isEmpty
         ? (book?.title ?? '本地书朗读')
         : session.bookTitle;
@@ -620,21 +674,41 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
                         const Spacer(flex: 3),
                         _buildToolbar(session),
                         SizedBox(height: tokens.spaceMd),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(
-                            tokens.radiusPill,
-                          ),
-                          child: LinearProgressIndicator(
-                            value: progress,
-                            minHeight: 4,
-                            backgroundColor: scheme.primary.withValues(
-                              alpha: 0.12,
-                            ),
+                        SizedBox(
+                          height: 28,
+                          child: Slider(
+                            value: seekIndex.toDouble().clamp(0.0, sliderMax),
+                            min: 0,
+                            max: sliderMax,
+                            divisions: count > 1 ? count - 1 : 1,
+                            label: count > 0
+                                ? '第 ${seekIndex + 1} / $count 段'
+                                : '正文待载入',
+                            onChanged: count > 0
+                                ? (value) => unawaited(_previewSeek(value))
+                                : null,
+                            onChangeStart: count > 0
+                                ? (_) => unawaited(_beginSeek())
+                                : null,
+                            onChangeEnd: count > 0
+                                ? (value) => unawaited(_endSeek(value))
+                                : null,
                           ),
                         ),
-                        SizedBox(height: tokens.spaceSm),
+                        SizedBox(height: tokens.spaceXs),
                         Text(
-                          count > 0 ? '第 ${index + 1} / $count 段' : '正文待载入',
+                          '${_formatDuration(position)} / '
+                          '${_formatDuration(total)} · 本章预计',
+                          textAlign: TextAlign.center,
+                          style: tokens.captionStyle.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          count > 0
+                              ? '第 ${seekIndex + 1} / $count 段$chapterPart'
+                              : '正文待载入',
                           textAlign: TextAlign.center,
                           style: tokens.captionStyle.copyWith(
                             color: scheme.onSurfaceVariant,

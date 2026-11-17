@@ -10,7 +10,7 @@ import 'tts_engine.dart';
 
 /// Edge TTS 引擎：WebSocket 合成 MP3 → 独立 media_kit Player 播放。
 ///
-/// 预合成队列深度 2：会话在播放第 i 段时调用 [prefetch] 合成第 i+1 段，
+/// 预合成队列支持会话向前预取数句：播放第 i 段时提前合成后续片段，
 /// 段间停顿只受本地文件切换影响。
 class TtsEdgeEngine implements TtsEngine {
   TtsEdgeEngine();
@@ -19,6 +19,11 @@ class TtsEdgeEngine implements TtsEngine {
   StreamSubscription<bool>? _completedSub;
   StreamSubscription<String>? _errorSub;
   Completer<void>? _pending;
+
+  /// 完成事件只有在当前段的 Media 已经 open 之后才有效。
+  /// 否则上一句迟到的 completed 会提前 complete 本句的 _pending，
+  /// 表现为「前一句还没念完，下一句就开始了」。
+  bool _completionArmed = false;
   String? _lastError;
   TtsParams _params = const TtsParams();
 
@@ -45,11 +50,14 @@ class TtsEdgeEngine implements TtsEngine {
     final player = Player();
     _player = player;
     _completedSub = player.stream.completed.listen((done) {
-      if (done) _pending?.complete();
+      if (!done || !_completionArmed) return;
+      _completionArmed = false;
+      _pending?.complete();
     });
     _errorSub = player.stream.error.listen((message) {
-      if (message.isEmpty) return;
+      if (message.isEmpty || !_completionArmed) return;
       _lastError = message;
+      _completionArmed = false;
       _pending?.complete();
     });
   }
@@ -117,8 +125,9 @@ class TtsEdgeEngine implements TtsEngine {
             // 参数或会话已变，在途结果直接丢弃。
             if (generation != _cacheGeneration) return;
             _prefetched[text] = bytes;
-            // 只保留最近两段预合成，避免长章节堆积内存。
-            while (_prefetched.length > 2) {
+            // 覆盖会话的前瞻预取窗口（当前句 + 后续数句），避免刚合成的下一段
+            // 被更早的缓存挤出，导致播到那里又现场合成、出现长停顿。
+            while (_prefetched.length > 6) {
               _prefetched.remove(_prefetched.keys.first);
             }
           })
@@ -135,6 +144,8 @@ class TtsEdgeEngine implements TtsEngine {
     final token = _token;
     _lastError = null;
     final completer = Completer<void>();
+    // 合成/写文件期间关闭闸门：上一句迟到的 completed 不能提前结束本句。
+    _completionArmed = false;
     _pending = completer;
     try {
       final cached = _prefetched.remove(text);
@@ -152,6 +163,13 @@ class TtsEdgeEngine implements TtsEngine {
       _currentFile = file;
       await _player!.open(Media(file.path), play: true);
       if (token != _token) return;
+      // 只有到这里才允许 completed 结束等待；极短音频可能在 open 期间就播完，
+      // 补一次状态检查，避免一直等到超时。
+      _completionArmed = true;
+      if (_player!.state.completed) {
+        _completionArmed = false;
+        completer.complete();
+      }
       await completer.future.timeout(
         const Duration(seconds: 300),
         onTimeout: () {},
@@ -166,7 +184,10 @@ class TtsEdgeEngine implements TtsEngine {
     } catch (e) {
       throw TtsException('edge_failed', _cleanError(e));
     } finally {
-      if (identical(_pending, completer)) _pending = null;
+      if (identical(_pending, completer)) {
+        _pending = null;
+        _completionArmed = false;
+      }
       await _cleanupCurrentFile();
     }
   }
@@ -183,6 +204,7 @@ class TtsEdgeEngine implements TtsEngine {
   @override
   Future<void> stop() async {
     _token++;
+    _completionArmed = false;
     _pending?.complete();
     _pending = null;
     _invalidatePrefetch();

@@ -21,6 +21,7 @@ class _FakePort implements TtsReaderPort {
   final List<int> highlights = [];
   final List<({int index, int? start, int? end})> marks = [];
   int chapter = 0;
+  int visible = 0;
 
   @override
   Future<int> currentChapter() async => chapter;
@@ -50,7 +51,10 @@ class _FakePort implements TtsReaderPort {
   Future<void> clearHighlight() async {}
 
   @override
-  Future<int> visibleParagraph() async => 0;
+  Future<int> visibleParagraph() async => visible;
+
+  @override
+  Future<int?> visibleParagraphStrict() async => visible;
 }
 
 /// 可控假引擎：`speak` 阻塞到 `stop()`，用于模拟「正在朗读」中切语速。
@@ -176,6 +180,21 @@ void main() {
     expect(restored.rate, 1.5);
     expect(restored.pitch, 0.8);
     expect(store.toJson().containsKey('defaultListen'), isFalse);
+  });
+
+  test('语速/音调按 0.1 步长量化，可在 1.0 与 0.9 间逐级切换', () async {
+    final store = TtsSettingsStore(MemoryKeyValueStore());
+    await store.load();
+
+    expect(TtsSettingsStore.quantizeParam(1.0), 1.0);
+    expect(TtsSettingsStore.quantizeParam(0.9), closeTo(0.9, 1e-9));
+    expect(TtsSettingsStore.quantizeParam(0.94), closeTo(0.9, 1e-9));
+    expect(TtsSettingsStore.quantizeParam(1.06), closeTo(1.1, 1e-9));
+
+    await store.setRate(TtsSettingsStore.quantizeParam(0.94));
+    await store.setPitch(TtsSettingsStore.quantizeParam(1.06));
+    expect(store.rate, closeTo(0.9, 1e-9));
+    expect(store.pitch, closeTo(1.1, 1e-9));
   });
 
   test('旧版 mimo/http 引擎回落 Edge 并清除残留 Key', () async {
@@ -476,8 +495,9 @@ void main() {
   group('系统引擎朗读中切语速', () {
     Future<TtsSession> build(
       TtsSettingsStore settings,
-      TtsEngine engine,
-    ) async {
+      TtsEngine engine, {
+      _FakePort? port,
+    }) async {
       final kv = MemoryKeyValueStore();
       await settings.load();
       await settings.setEngine(TtsEngineKind.system);
@@ -494,10 +514,11 @@ void main() {
       );
       session.bindReader(
         book: books.byId('b1')!,
-        port: _FakePort([
-          ['第一段', '第二段'],
-          ['第三章甲', '第三章乙'],
-        ]),
+        port: port ??
+            _FakePort([
+              ['第一段', '第二段'],
+              ['第三章甲', '第三章乙'],
+            ]),
         chapterTitleOf: (i) => '第${i + 1}章',
       );
       return session;
@@ -530,6 +551,55 @@ void main() {
       expect(session.playing, isFalse);
       await session.stop();
       expect(session.active, isFalse);
+    });
+
+    test('暂停后翻页再点播放：从当前可见段恢复，不用旧断点', () async {
+      final settings = TtsSettingsStore(MemoryKeyValueStore());
+      final engine = _GatedTtsEngine();
+      final port = _FakePort([
+        ['第一段', '第二段'],
+        ['第三章甲', '第三章乙'],
+      ]);
+      final session = await build(settings, engine, port: port);
+
+      await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(engine.spoken, ['第一段']);
+
+      await session.pause();
+      // 模拟用户暂停后翻到本页第二段，再点控制条播放键。
+      port.visible = 1;
+      await session.toggle();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(engine.spoken, ['第一段', '第二段']);
+      expect(session.paragraphIndex, 1);
+      await session.stop();
+    });
+
+    test('进度条拖动：预览不发声，松手只从目标段续读一次', () async {
+      final settings = TtsSettingsStore(MemoryKeyValueStore());
+      final engine = _GatedTtsEngine();
+      final session = await build(settings, engine);
+
+      await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(engine.spoken, ['第一段']);
+
+      await session.beginSeek();
+      expect(session.seeking, isTrue);
+      expect(session.playing, isFalse);
+
+      await session.previewSeekToParagraph(1);
+      expect(session.paragraphIndex, 1);
+      expect(engine.spoken, ['第一段']); // 拖动过程中不得重复朗读
+
+      await session.commitSeek();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(session.seeking, isFalse);
+      expect(engine.spoken, ['第一段', '第二段']);
+      expect(session.paragraphIndex, 1);
+      await session.stop();
     });
 
     test('参数设置失败时静默降级，不中断朗读', () async {

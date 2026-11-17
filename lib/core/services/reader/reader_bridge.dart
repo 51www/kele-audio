@@ -381,6 +381,14 @@ class ReaderBridge {
     return _asInt(raw);
   }
 
+  /// 当前可见区域所在段落；判定不出来返回 null，而非误回退到「章首第 0 段」。
+  Future<int?> visibleParagraphIndexOrNull() async {
+    final raw = await _eval('window.reader.visibleParagraphIndexStrict()');
+    if (raw == null) return null;
+    final value = _asInt(raw);
+    return value >= 0 ? value : null;
+  }
+
   static int _asInt(dynamic raw) {
     if (raw is num) return raw.toInt();
     return int.tryParse(raw?.toString() ?? '') ?? 0;

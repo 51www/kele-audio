@@ -33,6 +33,10 @@ abstract class TtsReaderPort {
 
   /// 当前可见区域内的段落序号（取不到返回 0）。
   Future<int> visibleParagraph();
+
+  /// 当前可见段落；判定不出来返回 null，避免调用方误当成「章首第 0 段」。
+  /// 默认沿用旧接口，阅读页会覆盖为 strict 实现。
+  Future<int?> visibleParagraphStrict() async => visibleParagraph();
 }
 
 /// 听书会话（docs/reader-design.md §5.2）：
@@ -100,6 +104,17 @@ class TtsSession extends ChangeNotifier {
   /// 与阅读页解绑后待续的章节（页面不存在时无法提取新章节段落）。
   int? _pendingChapter;
 
+  /// 进度条拖动中的会话状态：拖动开始先暂停，拖动只预览位置，
+  /// 松手才一次性落盘并重启朗读，避免旧循环与预览位置互相抢。
+  bool _seeking = false;
+  int? _seekOriginalPara;
+  bool _seekResumeAfter = false;
+
+  /// 估算朗读时长的基准：1.0x 约每秒 4.5 个汉字，段间留 0.15 秒停顿。
+  /// TTS 没有真实音频时间轴，进度/时长按本章正文字符数估算。
+  static const double _baseCharsPerSecond = 4.5;
+  static const double _paragraphPauseSeconds = 0.15;
+
   // ---------------------------------------------------------------- 只读状态
   bool get active => _active;
 
@@ -114,6 +129,7 @@ class TtsSession extends ChangeNotifier {
   int get paragraphCount => _paragraphs.length;
   TtsEngineKind get engineKind => _engineKind;
   Duration get sleepRemaining => _sleepRemaining;
+  bool get seeking => _seeking;
   bool get hasSleepTimer => _sleepTimer != null || _stopAfterChapter;
   bool get stopAfterChapter => _stopAfterChapter;
 
@@ -133,6 +149,26 @@ class TtsSession extends ChangeNotifier {
   }
 
   String get bookTitle => _book?.title ?? '';
+
+  /// 本章从开头读到指定段的预计用时（按当前语速）。
+  Duration estimatedTimeAtParagraph(int paragraphIndex) {
+    if (_paragraphs.isEmpty) return Duration.zero;
+    final end = paragraphIndex.clamp(0, _paragraphs.length);
+    var chars = 0;
+    for (var i = 0; i < end; i++) {
+      chars += _paragraphs[i].replaceAll(RegExp(r'\s'), '').length;
+    }
+    final rate = settings.rate > 0 ? settings.rate : 1.0;
+    final seconds = chars / (_baseCharsPerSecond * rate) +
+        end * _paragraphPauseSeconds;
+    return Duration(milliseconds: (seconds * 1000).round());
+  }
+
+  Duration get estimatedChapterPosition =>
+      estimatedTimeAtParagraph(_paraIndex);
+
+  Duration get estimatedChapterTotal =>
+      estimatedTimeAtParagraph(_paragraphs.length);
 
   /// 阅读页打开时绑定端口（退出页面只解绑，不中断朗读）。
   void bindReader({
@@ -205,6 +241,7 @@ class TtsSession extends ChangeNotifier {
       para = book.lastTtsParaIndex;
     }
     chapter ??= await port.currentChapter();
+    para ??= await port.visibleParagraphStrict();
     para ??= await port.visibleParagraph();
 
     await arbiter.claimTts();
@@ -272,7 +309,31 @@ class TtsSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> toggle() => playing ? pause() : resume();
+  /// 控制条 / mini 条 / 听书播放页的播放键：先对齐阅读页当前可见段落，再恢复。
+  /// 否则暂停后翻页，resume() 会沿用旧 [_paraIndex]，表现为「从章节开头重念」。
+  Future<void> resumeFromView() async {
+    if (!_active) return;
+    final port = _port;
+    if (port == null) {
+      await resume();
+      return;
+    }
+    int chapter;
+    try {
+      chapter = await port.currentChapter();
+    } catch (_) {
+      await resume();
+      return;
+    }
+    final para = await port.visibleParagraphStrict();
+    // 暂停态只更新断点，由 resume() 统一开一轮循环，避免重复起播。
+    if (_paused && para != null && para >= 0) {
+      await repositionTo(chapter, para);
+    }
+    await resume();
+  }
+
+  Future<void> toggle() => playing ? pause() : resumeFromView();
 
   /// 手动跳段（通知栏上一段/下一段、控制条）。
   Future<void> skipParagraph(int delta) async {
@@ -350,13 +411,76 @@ class TtsSession extends ChangeNotifier {
   Future<void> alignToView(int chapterIndex) async {
     final port = _port;
     if (!_active || port == null) return;
-    int para;
+    int? para;
     try {
-      para = await port.visibleParagraph();
+      para = await port.visibleParagraphStrict();
+      para ??= await port.visibleParagraph();
     } catch (_) {
       return;
     }
     await repositionTo(chapterIndex, para);
+  }
+
+  // ---------------------------------------------------------------- 进度拖动
+
+  /// 开始拖动进度条：先暂停正在进行的朗读，记录松手后是否要继续。
+  Future<void> beginSeek() async {
+    if (!_active || _seeking) return;
+    _seeking = true;
+    _seekOriginalPara = _paraIndex;
+    _seekResumeAfter = playing;
+    if (_seekResumeAfter) await pause();
+    notifyListeners();
+  }
+
+  /// 拖动中预览目标段：只改断点与高亮，不启动引擎、不重启朗读循环。
+  Future<void> previewSeekToParagraph(int paragraphIndex) async {
+    if (!_active || !_seeking || _paragraphs.isEmpty) return;
+    final target = paragraphIndex.clamp(0, _paragraphs.length - 1);
+    if (target == _paraIndex) return;
+    _paraIndex = target;
+    _pendingChapter = null;
+    notifyListeners();
+    await _syncHighlight(scroll: true);
+  }
+
+  /// 松手提交：落盘断点；原本在播则只从目标段重启一轮朗读。
+  Future<void> commitSeek() async {
+    if (!_active || !_seeking) return;
+    _seeking = false;
+    final resume = _seekResumeAfter;
+    _seekResumeAfter = false;
+    _seekOriginalPara = null;
+    final book = _book;
+    if (book != null) {
+      await _saveBookmark(
+        book: book,
+        chapter: _chapterIndex,
+        para: _paraIndex,
+        chapterCount: _paragraphs.length,
+      );
+    }
+    if (resume) {
+      await _restartLoop();
+    } else {
+      notifyListeners();
+    }
+  }
+
+  /// 拖动被中断（如离开播放页）：回到拖动前位置，并恢复原播放状态。
+  Future<void> cancelSeek() async {
+    if (!_active || !_seeking) return;
+    _seeking = false;
+    final original = _seekOriginalPara;
+    final resume = _seekResumeAfter;
+    _seekOriginalPara = null;
+    _seekResumeAfter = false;
+    if (original != null && original != _paraIndex) {
+      _paraIndex = original;
+      await _syncHighlight(scroll: false);
+      notifyListeners();
+    }
+    if (resume) await _restartLoop();
   }
 
   /// 设置页/控制条改了语速音调后即时重载当前段。
@@ -487,6 +611,35 @@ class TtsSession extends ChangeNotifier {
     return next;
   }
 
+  /// 播放当前句时提前合成后续数句（含跨段首句），把网络往返与播放重叠起来。
+  /// 只预取「下几句」，当前句仍走 speak，避免缓存命中顺序错乱。
+  void _prefetchAhead({
+    required List<String> paragraphs,
+    required int paragraphIndex,
+    required List<TtsTextSegment> segments,
+    required int segmentIndex,
+    required TtsTextSplitter splitter,
+    int depth = 2,
+  }) {
+    final engine = _engine;
+    if (engine == null) return;
+    var remaining = depth;
+    for (var s = segmentIndex + 1;
+        s < segments.length && remaining > 0;
+        s++, remaining--) {
+      engine.prefetch(segments[s].text);
+    }
+    for (var i = paragraphIndex + 1;
+        i < paragraphs.length && remaining > 0;
+        i++) {
+      for (final segment in splitter.split(paragraphs[i])) {
+        if (remaining <= 0) break;
+        engine.prefetch(segment.text);
+        remaining--;
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- 朗读主循环
 
   Future<void> _run(int runId, int chapter, int para) async {
@@ -560,33 +713,28 @@ class TtsSession extends ChangeNotifier {
               if (!_active || runId != _runId) return;
             }
             final segment = segments[s];
-            await _highlight(
+            // 立刻预取后续两句（首句也一样）：合成与 WebView 高亮、当前句播放
+            // 重叠进行，避免播完才现场合成造成「念几句停一下」。
+            _prefetchAhead(
+              paragraphs: list,
+              paragraphIndex: i,
+              segments: segments,
+              segmentIndex: s,
+              splitter: splitter,
+            );
+            final highlight = _highlight(
               i,
               startChar: segment.start,
               endChar: segment.end,
             );
-            String? next;
-            if (s + 1 < segments.length) {
-              next = segments[s + 1].text;
-            } else if (i + 1 < list.length) {
-              final following = splitter.split(list[i + 1]);
-              if (following.isNotEmpty) next = following.first.text;
-            }
-            final firstSegment = s == 0 && i == index;
-            // 首个朗读单元不与首请求同时发预合成，避免抢占首次 WebSocket；
-            // 稍后补一次预取，第一句尽快出声且第二句不用干等。
-            if (next != null && !firstSegment) _engine?.prefetch(next);
             final speaking = _engine?.speak(segment.text);
-            if (next != null && firstSegment) {
-              final nextText = next;
-              unawaited(
-                Future<void>.delayed(const Duration(milliseconds: 200)).then((_) {
-                  if (_active && runId == _runId) _engine?.prefetch(nextText);
-                }),
-              );
-            }
             try {
-              await speaking;
+              // 高亮往返与出声并行：高亮慢时不会先空出一段再开始朗读。
+              if (speaking != null) {
+                await Future.wait<void>([highlight, speaking]);
+              } else {
+                await highlight;
+              }
             } on TtsException catch (e) {
               if (!_active || runId != _runId) return;
               if (_abortedByPause) {

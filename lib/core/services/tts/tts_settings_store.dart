@@ -11,6 +11,13 @@ class TtsSettingsStore extends ChangeNotifier {
 
   static const storageKey = 'tts_settings';
 
+  /// 语速/音调的 UI 调节步长：1.0 → 0.9 → 0.8 这样逐级切换。
+  static const double paramStep = 0.1;
+
+  /// 把滑杆浮点值归到 0.1 网格，避免 0.9000000000000001 这类值落盘。
+  static double quantizeParam(double value) =>
+      (value / paramStep).round() * paramStep;
+
   /// 已下线的 MiMo 朗读 Key，读取设置时顺手清除本机残留凭据。
   static const removedMimoKeyStorageKey = 'mimo_api_key';
 

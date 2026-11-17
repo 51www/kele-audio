@@ -235,17 +235,19 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           value: settings.rate,
           min: 0.5,
           max: 3.0,
-          divisions: 10,
+          divisions: 25,
           label: '${settings.rate.toStringAsFixed(2)}x',
-          onChanged: settings.setRate,
+          onChanged: (value) =>
+              settings.setRate(TtsSettingsStore.quantizeParam(value)),
         ),
         Slider(
           value: settings.pitch,
           min: 0.5,
           max: 2.0,
-          divisions: 6,
+          divisions: 15,
           label: settings.pitch.toStringAsFixed(2),
-          onChanged: settings.setPitch,
+          onChanged: (value) =>
+              settings.setPitch(TtsSettingsStore.quantizeParam(value)),
         ),
         if (_busy) ...[
           const SizedBox(height: 8),

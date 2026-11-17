@@ -427,6 +427,9 @@ class _ReaderPageState extends State<ReaderPage>
       }
       _resumeSettled = true;
     }
+    // 暂停时翻页必须每次都对齐断点：它被放在进度 2 秒节流之前，
+    // 否则快速翻几页后最后一次 relocate 被吞，播放键仍从旧段落（章首）恢复。
+    unawaited(_syncPausedTtsToView(location));
     final now = DateTime.now();
     if (now.difference(_lastSaveAt) < const Duration(seconds: 2)) return;
     _lastSaveAt = now;
@@ -449,22 +452,24 @@ class _ReaderPageState extends State<ReaderPage>
         fraction: location.fraction,
       ),
     );
-    // 读写在同一次重定位上完成：页首段落直接来自本次 reloc 事件，
-    // 不再另开定时器二次查询。朗读高亮自身滚动的 reloc 不回写，避免反向拖拽。
-    //
-    // 只在暂停时回写：播放中段落推进由 TTS 自己驱动，跨页/自动滚动产生的
-    // reloc 携带的是「页首段」，回写会触发 repositionTo → _restartLoop，
-    // 把朗读拉回本页第 1 段（读完页末段后回绕）。暂停后再翻页才更新断点。
-    final paragraph = location.paragraphIndex;
-    if (_tts.active &&
-        _tts.paused &&
-        _tts.bookId == widget.bookId &&
-        !_tts.navigating &&
-        !location.ttsScroll &&
-        paragraph != null &&
-        paragraph >= 0 &&
-        location.chapterIndex == _tts.chapterIndex) {
-      unawaited(_tts.repositionTo(location.chapterIndex, paragraph));
+  }
+
+  /// 仅暂停态回写：播放中段落推进由 TTS 自己驱动，跨页/自动滚动产生的
+  /// reloc 携带的是「页首段」，回写会触发 repositionTo → _restartLoop，
+  /// 把朗读拉回本页第 1 段（读完页末段后回绕）。
+  Future<void> _syncPausedTtsToView(ReaderLocation location) async {
+    if (!_tts.active ||
+        !_tts.paused ||
+        _tts.bookId != widget.bookId ||
+        _tts.navigating ||
+        location.ttsScroll ||
+        location.chapterIndex != _tts.chapterIndex) {
+      return;
+    }
+    var paragraph = location.paragraphIndex;
+    paragraph ??= await _bridge.visibleParagraphIndexOrNull();
+    if (paragraph != null && paragraph >= 0) {
+      await _tts.repositionTo(location.chapterIndex, paragraph);
     }
   }
 
@@ -477,20 +482,57 @@ class _ReaderPageState extends State<ReaderPage>
     }
   }
 
+  /// 起播前重试取当前页首段：换章/排版刚完成时第一次查询可能拿不到，
+  /// 直接退回 null 会让 TtsSession 退化成「章首第 0 段」。
+  Future<int?> _currentVisibleParagraph(int chapter) async {
+    for (var attempt = 0; attempt < 6; attempt++) {
+      final para = await _bridge.visibleParagraphIndexOrNull();
+      if (para != null) return para;
+      await Future<void>.delayed(
+        Duration(milliseconds: attempt < 2 ? 80 : 160),
+      );
+    }
+    return null;
+  }
+
+  /// 起播段落解析：优先 WebView 当前页判定；判定不出来时用
+  /// 「全书 fraction → 章内比例 → 段落序号」估算，绝不退回章首第 0 段。
+  Future<int> _resolveStartParagraph(
+    int chapter,
+    ReaderBook book,
+    ReaderLocation? location,
+  ) async {
+    final direct = await _currentVisibleParagraph(chapter);
+    if (direct != null) return direct;
+    final chapters = book.chapterCount > 0 ? book.chapterCount : 1;
+    final global = (location?.fraction ?? book.overallProgress)
+        .clamp(0.0, 1.0)
+        .toDouble();
+    final local = (global * chapters - chapter).clamp(0.0, 1.0).toDouble();
+    final paras = await _bridge.extractParagraphs(expectedChapter: chapter);
+    if (paras.isEmpty) return 0;
+    final index = (local * paras.length).floor();
+    return index.clamp(0, paras.length - 1);
+  }
+
   Future<void> _toggleTts(ReaderBook book) async {
     if (!book.ttsAllowed) {
       _showTtsDisabled(book);
       return;
     }
     // 起播位置以「当前可见页」为准：跳页/跳章后点听书从当前页开始，而非旧书签。
-    final chapter = _location?.chapterIndex ?? book.lastChapterIndex;
+    final location = _location;
+    final chapter = location?.chapterIndex ?? book.lastChapterIndex;
+    // 不信任 relocate 里的 paragraphIndex（可能来自旧段落缓存/几何误判），
+    // 总是重新解析当前页；解析失败也有 fraction 兜底，不会退回章首。
+    final viewPara = await _resolveStartParagraph(chapter, book, location);
     if (_tts.active && _tts.bookId == book.id) {
       if (_tts.playing) {
         await _tts.pause();
         return;
       }
       // 暂停中：先把断点对齐到当前页，再从这里恢复。
-      await _tts.alignToView(chapter);
+      await _tts.repositionTo(chapter, viewPara);
       await _tts.resume();
       return;
     }
@@ -501,14 +543,9 @@ class _ReaderPageState extends State<ReaderPage>
       chapterTitleOf: (index) =>
           index < _toc.length ? _toc[index].label : '第${index + 1}章',
     );
-    // 起播段落取「页位置同一次测量」的段落索引（与阅读页显示一致），
-    // 不再让 start 内部另调一次 visibleParagraph 形成第二个来源。
-    final para = _location != null && _location!.chapterIndex == chapter
-        ? _location!.paragraphIndex
-        : null;
     await _tts.start(
       chapterIndex: chapter,
-      paraIndex: para,
+      paraIndex: viewPara,
       fromBookmark: false,
     );
   }
@@ -896,11 +933,6 @@ class _ReaderPageState extends State<ReaderPage>
                             ),
                           ),
                           IconButton(
-                            tooltip: '目录',
-                            onPressed: _openToc,
-                            icon: const Icon(Icons.format_list_bulleted_rounded),
-                          ),
-                          IconButton(
                             tooltip: '排版',
                             onPressed: _openSettings,
                             icon: const Icon(Icons.tune_rounded),
@@ -1040,17 +1072,12 @@ class _ReaderPageState extends State<ReaderPage>
                                 color: scheme.onSurfaceVariant,
                               ),
                             ),
-                          SizedBox(width: tokens.spaceMd),
-                          TextButton.icon(
-                            onPressed: () => _bridge.prev(),
-                            icon: const Icon(Icons.chevron_left_rounded),
-                            label: const Text('上一页'),
-                          ),
                           SizedBox(width: tokens.spaceXs),
-                          TextButton.icon(
-                            onPressed: () => _bridge.next(),
-                            icon: const Icon(Icons.chevron_right_rounded),
-                            label: const Text('下一页'),
+                          // 目录图标固定在页面右下侧；翻页交给正文手势/点击。
+                          IconButton(
+                            tooltip: '目录',
+                            onPressed: _openToc,
+                            icon: const Icon(Icons.format_list_bulleted_rounded),
                           ),
                         ],
                       ),
@@ -1125,4 +1152,8 @@ class _BridgeTtsPort implements TtsReaderPort {
 
   @override
   Future<int> visibleParagraph() => _bridge.visibleParagraphIndex();
+
+  @override
+  Future<int?> visibleParagraphStrict() =>
+      _bridge.visibleParagraphIndexOrNull();
 }

@@ -73,6 +73,8 @@ view.addEventListener('relocate', e => {
 view.addEventListener('load', e => {
   const doc = e.detail?.doc
   if (!doc) return
+  // 新章文档已就位：旧章的 Range 不能留着参与「当前页首段」判定。
+  lastRange = null
   // 记录「这份文档属于哪一章」。foliate 换章时先改 index、后异步换 doc，
   // TTS 据此判断新章的 DOM 是否真的渲染完成（只认 index 会拿到旧章正文）。
   if (Number.isFinite(Number(e.detail?.index))) docChapter.set(doc, Number(e.detail.index))
@@ -436,6 +438,11 @@ window.reader = {
     if (extractChapter(false) < 0) return 0
     return visibleParagraphIndexInternal() ?? 0
   },
+  // strict 版：判定不出来返回 -1，调用方不要误当成「章首第 0 段」。
+  visibleParagraphIndexStrict() {
+    if (extractChapter(false) < 0) return -1
+    return visibleParagraphIndexInternal() ?? -1
+  },
 }
 
 // 把 textOf() 归一化后的字符区间映射回 DOM。只在片段完整落在单个文本节点内时
@@ -518,6 +525,43 @@ function applyTtsHighlight(index, scroll, start, end) {
   return true
 }
 
+// 分页模式下 foliate 把整章文档横向铺在 iframe 里，iframe 相对滚动容器正好
+// 偏移一页；因此当前页在「iframe 文档坐标」中的窗口是
+// [scrollLeft - size, scrollLeft]（与 paginator.#getVisibleRange 同一口径）。
+// 直接按这个窗口找第一个相交段落，比 relocate 的 range 或 clientWidth 可靠：
+// 后者在分页模式下拿到的是整章多栏宽度，会把章首误判成当前页。
+function currentPageWindow() {
+  const r = view.renderer
+  if (!r || r.scrolled) return null
+  const contents = r.getContents?.() || []
+  const doc = contents[0] && contents[0].doc
+  if (!doc || !doc.defaultView) return null
+  const iframe = doc.defaultView.frameElement
+  const wrapper = iframe && iframe.parentElement
+  const container = wrapper && wrapper.parentElement
+  if (!container) return null
+  const size = Number(r.size)
+  const start = Math.abs(Number(container[r.scrollProp]))
+  if (!(size > 0) || !Number.isFinite(start)) return null
+  const dir = doc.documentElement.dir || doc.body.dir || ''
+  const writingMode = doc.defaultView.getComputedStyle(doc.body).writingMode || ''
+  if (dir === 'rtl' || /vertical/.test(writingMode)) return null
+  return { left: start - size, right: start }
+}
+
+function visibleParagraphIndexByPageWindow() {
+  const win = currentPageWindow()
+  if (!win) return null
+  for (let i = 0; i < ttsNodes.length; i++) {
+    const rect = ttsNodes[i].getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0 &&
+        rect.right > win.left && rect.left < win.right) {
+      return i
+    }
+  }
+  return null
+}
+
 // 当前可见段落（页首段）：只读已缓存的段落节点，不在这里触发提取，
 // 避免章节刚渲染时把不完整的节点列表缓存下来。
 function visibleParagraphIndexInternal() {
@@ -525,13 +569,51 @@ function visibleParagraphIndexInternal() {
   if (!c) return null
   const chapter = Number(c.index ?? -1)
   if (chapter !== ttsChapter || !ttsNodes.length) return null
+  // 1) foliate relocate 带过来的可见 Range（foliate 自己算的，最可信）。
   const range = lastRange
-  if (!range || typeof range.intersectsNode !== 'function') return null
-  for (let i = 0; i < ttsNodes.length; i++) {
+  if (range && typeof range.intersectsNode === 'function') {
+    for (let i = 0; i < ttsNodes.length; i++) {
+      try {
+        if (range.intersectsNode(ttsNodes[i])) return i
+      } catch (e) { /* ignore */ }
+    }
+  }
+  // 2) 分页模式：按 foliate 当前页窗口取首段。
+  const byPage = visibleParagraphIndexByPageWindow()
+  if (byPage != null) return byPage
+  // 3) 滚动模式：段落矩形与视口相交即可。
+  if (view.renderer && view.renderer.scrolled) {
     try {
-      if (range.intersectsNode(ttsNodes[i])) return i
+      const w = document.documentElement.clientWidth || window.innerWidth
+      const h = document.documentElement.clientHeight || window.innerHeight
+      for (let i = 0; i < ttsNodes.length; i++) {
+        const r = ttsNodes[i].getBoundingClientRect()
+        if (r.width > 0 && r.height > 0 &&
+            r.bottom > 0 && r.top < h && r.right > 0 && r.left < w) {
+          return i
+        }
+      }
     } catch (e) { /* ignore */ }
   }
+  // 4) 章内比例兜底：用 foliate 的 section 起始分数把全书 fraction 换算成
+  // 章内比例，再映射到段落，避免判定失败时退回章首。
+  try {
+    const globalFrac = Number(view.lastLocation && view.lastLocation.fraction)
+    const starts = (view.getSectionFractions?.() ?? []).map(Number)
+    if (Number.isFinite(globalFrac) && starts.length) {
+      let si = 0
+      for (let i = 0; i < starts.length; i++) {
+        if (starts[i] <= globalFrac) si = i
+      }
+      const begin = starts[si] ?? 0
+      const end = si + 1 < starts.length ? starts[si + 1] : 1
+      const local = end > begin ? (globalFrac - begin) / (end - begin) : 0
+      if (local > 0 && local < 1) {
+        return Math.min(ttsNodes.length - 1,
+          Math.max(0, Math.floor(local * ttsNodes.length)))
+      }
+    }
+  } catch (e) { /* ignore */ }
   return null
 }
 
