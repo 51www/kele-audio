@@ -110,7 +110,67 @@ const List<TtsVoice> edgeZhVoices = [
   TtsVoice(id: 'zh-CN-YunjianNeural', name: '云健 · 男声'),
   TtsVoice(id: 'zh-CN-YunyangNeural', name: '云扬 · 男声'),
   TtsVoice(id: 'zh-CN-liaoning-XiaobeiNeural', name: '晓北 · 东北女声'),
+  TtsVoice(id: 'zh-CN-shaanxi-XiaoniNeural', name: '晓妮 · 陕西女声'),
   TtsVoice(id: 'zh-TW-HsiaoChenNeural', name: '曉臻 · 台湾女声'),
+  TtsVoice(id: 'zh-TW-HsiaoYuNeural', name: '曉語 · 台湾女声'),
+  TtsVoice(id: 'zh-TW-YunJheNeural', name: '雲哲 · 台湾男声'),
+  TtsVoice(id: 'zh-HK-HiuMaanNeural', name: '曉曼 · 粤语女声'),
+];
+
+/// 听书场景预设：一次套用音色、语速与音调。
+class TtsVoicePreset {
+  const TtsVoicePreset({
+    required this.name,
+    required this.voiceId,
+    required this.rate,
+    required this.pitch,
+    required this.description,
+  });
+
+  final String name;
+  final String voiceId;
+  final double rate;
+  final double pitch;
+  final String description;
+
+  bool matches({
+    required String voice,
+    required double rate,
+    required double pitch,
+  }) =>
+      voiceId == voice && this.rate == rate && this.pitch == pitch;
+}
+
+/// Edge 听书预设：仅选择参数，不改变默认引擎或默认音色。
+const List<TtsVoicePreset> edgeVoicePresets = [
+  TtsVoicePreset(
+    name: '标准听书',
+    voiceId: 'zh-CN-XiaoxiaoNeural',
+    rate: 1.0,
+    pitch: 1.0,
+    description: '晓晓 · 清晰自然',
+  ),
+  TtsVoicePreset(
+    name: '儿童故事',
+    voiceId: 'zh-CN-XiaoyiNeural',
+    rate: 1.0,
+    pitch: 1.02,
+    description: '晓伊 · 柔和亲切',
+  ),
+  TtsVoicePreset(
+    name: '男声小说',
+    voiceId: 'zh-CN-YunxiNeural',
+    rate: 0.98,
+    pitch: 1.0,
+    description: '云希 · 自然沉稳',
+  ),
+  TtsVoicePreset(
+    name: '知识科普',
+    voiceId: 'zh-CN-YunyangNeural',
+    rate: 1.0,
+    pitch: 1.0,
+    description: '云扬 · 吐字清楚',
+  ),
 ];
 
 /// 测试用：返回固定音频的假引擎（不参与生产装配）。

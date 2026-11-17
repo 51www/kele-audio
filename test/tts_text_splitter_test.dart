@@ -65,4 +65,42 @@ void main() {
     expect(splitter.split(''), isEmpty);
     expect(splitter.split('   '), isEmpty);
   });
+
+  test('纯数字/纯标点段落（页码）不产生朗读片段', () {
+    for (final text in ['5', '12', '2024 / 2025', '- 3 -', '…']) {
+      expect(splitter.split(text), isEmpty, reason: text);
+    }
+  });
+
+  test('含文字的段落即使夹杂数字仍正常朗读', () {
+    final segments = splitter.split('第12章开始了。');
+    expect(segments, hasLength(1));
+    expect(segments.single.text, '第12章开始了。');
+  });
+
+  test('半角标点归一且字符长度不变', () {
+    const text = '你好,世界;今天呢?真的吗!';
+    final normalized = TtsTextSplitter.normalizePunctuation(text);
+    expect(normalized.length, text.length);
+    expect(normalized, '你好，世界；今天呢？真的吗！');
+
+    final segments = splitter.split(text);
+    expect(segments, hasLength(1));
+    expect(segments.single.text, normalized);
+    expect(segments.single.start, 0);
+    expect(segments.single.end, text.length);
+    expect(
+      normalized.substring(segments.single.start, segments.single.end),
+      segments.single.text,
+    );
+  });
+
+  test('相邻短句合并成单个片段，不丢字', () {
+    const text = '他来了。雨停了。天空很蓝。';
+    final segments = splitter.split(text);
+    expect(segments, hasLength(1));
+    expect(segments.single.text, text);
+    expect(segments.single.start, 0);
+    expect(segments.single.end, text.length);
+  });
 }

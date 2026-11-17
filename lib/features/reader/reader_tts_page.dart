@@ -301,6 +301,12 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
               if (ctx.mounted) setSheetState(() {});
             }
 
+            Future<void> selectPreset(TtsVoicePreset preset) async {
+              await settings.applyVoicePreset(preset);
+              await _tts.reloadParams();
+              if (ctx.mounted) setSheetState(() {});
+            }
+
             Widget engineItem(
               TtsEngineKind value,
               IconData icon,
@@ -405,6 +411,36 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
                       ),
                   ],
                 ),
+                if (kind == TtsEngineKind.edge) ...[
+                  SizedBox(height: tokens.spaceSm),
+                  Text('听书预设', style: tokens.captionStyle),
+                  SizedBox(height: tokens.spaceXs),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final preset in edgeVoicePresets)
+                        ChoiceChip(
+                          label: Text(preset.name, style: tokens.captionStyle),
+                          selected: preset.matches(
+                            voice: settings.edgeVoice,
+                            rate: settings.rate,
+                            pitch: settings.pitch,
+                          ),
+                          showCheckmark: false,
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          labelStyle: tokens.captionStyle,
+                          labelPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                          ),
+                          onSelected: (_) =>
+                              unawaited(selectPreset(preset)),
+                        ),
+                    ],
+                  ),
+                ],
               ],
             );
           },

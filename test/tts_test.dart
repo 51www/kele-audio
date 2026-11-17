@@ -217,6 +217,45 @@ void main() {
     expect(restored.activeVoice, 'zh-CN-system-voice');
   });
 
+  test('Edge 音色清单覆盖全部听书预设，默认音色未被改动', () {
+    final ids = edgeZhVoices.map((v) => v.id).toSet();
+    expect(ids, contains('zh-CN-XiaoxiaoNeural'));
+    for (final preset in edgeVoicePresets) {
+      expect(ids, contains(preset.voiceId), reason: preset.name);
+    }
+    expect(edgeVoicePresets.first.voiceId, 'zh-CN-XiaoxiaoNeural');
+    expect(edgeVoicePresets.first.rate, 1.0);
+    expect(edgeVoicePresets.first.pitch, 1.0);
+    expect(
+      edgeVoicePresets.first.matches(
+        voice: 'zh-CN-XiaoxiaoNeural',
+        rate: 1.0,
+        pitch: 1.0,
+      ),
+      isTrue,
+    );
+  });
+
+  test('applyVoicePreset 一次性写入音色、语速和音调', () async {
+    final kv = MemoryKeyValueStore();
+    final store = TtsSettingsStore(kv);
+    await store.load();
+
+    final preset = edgeVoicePresets.firstWhere(
+      (p) => p.name == '儿童故事',
+    );
+    await store.applyVoicePreset(preset);
+
+    expect(store.edgeVoice, 'zh-CN-XiaoyiNeural');
+    expect(store.rate, 1.0);
+    expect(store.pitch, 1.02);
+
+    final restored = TtsSettingsStore(kv);
+    await restored.load();
+    expect(restored.edgeVoice, 'zh-CN-XiaoyiNeural');
+    expect(restored.pitch, 1.02);
+  });
+
   test('PlaybackArbiter：B 站与 TTS 互斥且切换媒体回调', () async {
     final media = NoopMediaBridge();
     final arbiter = PlaybackArbiter(media: media);
@@ -300,6 +339,81 @@ void main() {
         .where((e) => e.mode == ReaderActivityMode.listening)
         .toList();
     expect(listening, isEmpty);
+  });
+
+  test('空章（只有单行数字页码）跳过并续读下一章，不卡住', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    await settings.setEngine(TtsEngineKind.system);
+    final books = ReaderBookStore(kv);
+    await books.add(_book());
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final engine = FakeTtsEngine();
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+    );
+    final port = _FakePort([
+      const [], // 本章正文只有一个单行数字，被抽取层过滤掉
+      ['第二章正文'],
+    ]);
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+    for (var i = 0; i < 40 && session.active; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    expect(session.error, isNull);
+    expect(engine.spoken, ['第二章正文']);
+    expect(session.chapterIndex, 1);
+    expect(session.active, isFalse);
+  });
+
+  test('章末纯数字段落被跳过，继续朗读并跨到下一章', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    await settings.setEngine(TtsEngineKind.system);
+    final books = ReaderBookStore(kv);
+    await books.add(_book());
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final engine = FakeTtsEngine();
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+    );
+    final port = _FakePort([
+      ['第一章正文', '12'],
+      ['第二章正文'],
+    ]);
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+    for (var i = 0; i < 40 && session.active; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    expect(session.error, isNull);
+    expect(engine.spoken, ['第一章正文', '第二章正文']);
+    expect(session.active, isFalse);
   });
 
   test('长段落按短句合成：首句不预取，高亮带段内区间', () async {

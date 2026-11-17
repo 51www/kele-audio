@@ -3,7 +3,7 @@
 class TtsTextSegment {
   const TtsTextSegment(this.text, this.start, this.end);
 
-  /// 实际送给引擎合成的文本（已去首尾空白）。
+  /// 实际送给引擎合成的文本（已去首尾空白，半角标点已归一）。
   final String text;
 
   /// 在段落文本中的起始字符下标（含）。
@@ -13,21 +13,29 @@ class TtsTextSegment {
   final int end;
 }
 
-/// 把一整段正文切成「一两句话」的朗读片段。
+/// 把一整段正文切成「一两句话」的朗读片段（短句合并时最多三句）。
 ///
 /// 目的：首次合成请求不再携带整段长文（Edge TTS 首包明显更快），
-/// 朗读高亮也只覆盖一两句。段落下标、断点与进度仍按原段落计算，
+/// 朗读高亮也只覆盖当前短句。段落下标、断点与进度仍按原段落计算，
 /// 因此 [TtsTextSegment.start]/[end] 只用于高亮，不改变朗读坐标。
 class TtsTextSplitter {
   const TtsTextSplitter({
     this.maxChars = defaultMaxChars,
+    this.minChars = defaultMinChars,
     this.maxSentences = 2,
   });
 
   /// 单个片段的最大字符数：约一两句话，首请求体量可控。
   static const int defaultMaxChars = 80;
 
+  /// 小于该长度的片段会尝试与相邻短句合并，减少碎句感。
+  static const int defaultMinChars = 12;
+
+  /// 合并后的片段最多保留三句，避免为凑长度变成大段朗读。
+  static const int maxMergedSentences = 3;
+
   final int maxChars;
+  final int minChars;
   final int maxSentences;
 
   /// 句末标点（含常见收尾引号/括号），英文句点只在后接空白或结尾时生效，
@@ -38,9 +46,17 @@ class TtsTextSplitter {
 
   static final RegExp _softBreak = RegExp(r'[，,、：:；; ]');
 
+  /// 是否含字母（中日韩等表意文字也算）。纯数字/纯标点没有可朗读语义，
+  /// Edge TTS 对这类 SSML 会返回空音频导致合成失败、整轮朗读卡住。
+  static final RegExp _letter = RegExp(r'\p{L}', unicode: true);
+
   List<TtsTextSegment> split(String paragraph) {
-    final text = paragraph.trim();
+    // 同长度替换，start/end 仍可直接用于原文高亮。
+    final text = normalizePunctuation(paragraph.trim());
     if (text.isEmpty) return const [];
+    // 正文末尾单独成行的页码/数字（如「12」「- 3 -」）直接跳过，
+    // 交给引擎会合成失败并让本章卡住，不产生任何朗读片段。
+    if (!_letter.hasMatch(text)) return const [];
 
     final units = _sentenceSpans(text);
     if (units.isEmpty) return const [];
@@ -81,7 +97,51 @@ class TtsTextSplitter {
       unitCount++;
     }
     emit();
-    return segments;
+    return _mergeShortSegments(segments, text);
+  }
+
+  /// 半角标点归一为中文全角：字符数不变，朗读停顿更自然。
+  static String normalizePunctuation(String text) => text
+      .replaceAll(',', '，')
+      .replaceAll(';', '；')
+      .replaceAll(':', '：')
+      .replaceAll('?', '？')
+      .replaceAll('!', '！');
+
+  /// 合并相邻短片段：仅当上一段偏短、合并后不超长且句数仍受控时执行。
+  List<TtsTextSegment> _mergeShortSegments(
+    List<TtsTextSegment> segments,
+    String text,
+  ) {
+    if (segments.length < 2) return segments;
+    final merged = <TtsTextSegment>[segments.first];
+    for (var i = 1; i < segments.length; i++) {
+      final segment = segments[i];
+      final previous = merged.last;
+      final raw = text.substring(previous.start, segment.end);
+      final previousLength = previous.end - previous.start;
+      final combinedLength = segment.end - previous.start;
+      final sentenceCount = _sentenceEnd.allMatches(raw).length;
+      final canMerge = previousLength < minChars &&
+          combinedLength <= maxChars &&
+          sentenceCount <= maxMergedSentences;
+      if (!canMerge) {
+        merged.add(segment);
+        continue;
+      }
+      final trimmed = raw.trim();
+      if (trimmed.isEmpty) {
+        merged.add(segment);
+        continue;
+      }
+      final offset = raw.indexOf(trimmed);
+      merged[merged.length - 1] = TtsTextSegment(
+        trimmed,
+        previous.start + offset,
+        previous.start + offset + trimmed.length,
+      );
+    }
+    return merged;
   }
 
   List<_Span> _sentenceSpans(String text) {

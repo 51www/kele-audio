@@ -446,6 +446,47 @@ class TtsSession extends ChangeNotifier {
     _playStartedAt ??= DateTime.now();
   }
 
+  /// 跨章续读：末章结束整轮，否则切到下一章并落盘断点。
+  ///
+  /// 返回下一章索引；返回 null 表示 [_run] 应结束（末章 / 阅读页已关闭）。
+  /// 空章（抽取不到正文）也复用本方法，确保不会卡在当前章。
+  Future<int?> _advanceChapter(int chapter, int chapterCount) async {
+    final book = _book;
+    if (book == null) return null;
+    if (chapter + 1 >= book.chapterCount) {
+      _active = false;
+      _playing = false;
+      await _accumulate();
+      _playStartedAt = null;
+      await _clearHighlight();
+      arbiter.releaseTts();
+      _publishMedia(active: false);
+      notifyListeners();
+      return null;
+    }
+    final next = chapter + 1;
+    _chapterIndex = next;
+    _paraIndex = 0;
+    _engine?.resetCache();
+    if (_port == null) {
+      // 阅读页已关闭：无法抽取新章正文，等回到阅读页再续读。
+      _pendingChapter = next;
+      _paused = true;
+      _playing = false;
+      await _accumulate();
+      _playStartedAt = null;
+      notifyListeners();
+      return null;
+    }
+    await _saveBookmark(
+      book: book,
+      chapter: next,
+      para: 0,
+      chapterCount: chapterCount,
+    );
+    return next;
+  }
+
   // ---------------------------------------------------------------- 朗读主循环
 
   Future<void> _run(int runId, int chapter, int para) async {
@@ -462,7 +503,13 @@ class TtsSession extends ChangeNotifier {
           _navigating = false;
           if (!_active || runId != _runId) return;
           if (list.isEmpty) {
-            throw const TtsException('empty_chapter', '本章没有可朗读的正文');
+            // 整章抽取不到正文（例如全章只有一个单行数字页码，被正文抽取
+            // 的长度过滤丢弃）：不报错卡住，直接跳过本章续读下一章。
+            final next = await _advanceChapter(chapter, 0);
+            if (next == null) return;
+            chapter = next;
+            para = 0;
+            continue;
           }
           _paragraphs = list;
           _paragraphsChapter = chapter;
@@ -578,35 +625,10 @@ class TtsSession extends ChangeNotifier {
           }
         }
         // 章末：跨章续读。
-        if (chapter + 1 >= book.chapterCount) {
-          _active = false;
-          _playing = false;
-          await _accumulate();
-          _playStartedAt = null;
-          await _clearHighlight();
-          arbiter.releaseTts();
-          _publishMedia(active: false);
-          notifyListeners();
-          return;
-        }
-        chapter++;
+        final next = await _advanceChapter(chapter, list.length);
+        if (next == null) return;
+        chapter = next;
         para = 0;
-        _engine?.resetCache();
-        if (_port == null) {
-          _pendingChapter = chapter;
-          _paused = true;
-          _playing = false;
-          await _accumulate();
-          _playStartedAt = null;
-          notifyListeners();
-          return;
-        }
-        await _saveBookmark(
-          book: book,
-          chapter: chapter,
-          para: 0,
-          chapterCount: list.length,
-        );
       }
     } catch (e) {
       _navigating = false;

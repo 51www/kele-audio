@@ -181,6 +181,31 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
                 icon: const Icon(Icons.play_circle_outline_rounded),
               ),
             ),
+          const SizedBox(height: 10),
+          Text('听书预设', style: tokens.captionStyle),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final preset in edgeVoicePresets)
+                Tooltip(
+                  message: preset.description,
+                  child: ChoiceChip(
+                    label: Text(preset.name, style: tokens.captionStyle),
+                    selected: preset.matches(
+                      voice: settings.edgeVoice,
+                      rate: settings.rate,
+                      pitch: settings.pitch,
+                    ),
+                    showCheckmark: false,
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onSelected: (_) => settings.applyVoicePreset(preset),
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 6),
           Wrap(
             spacing: 10,

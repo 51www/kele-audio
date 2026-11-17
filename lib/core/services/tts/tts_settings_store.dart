@@ -107,6 +107,15 @@ class TtsSettingsStore extends ChangeNotifier {
     await _persist();
   }
 
+  /// 一次套用听书预设，避免连续写入时产生中间状态。
+  Future<void> applyVoicePreset(TtsVoicePreset preset) async {
+    _edgeVoice = preset.voiceId;
+    _rate = preset.rate.clamp(0.5, 3.0);
+    _pitch = preset.pitch.clamp(0.5, 2.0);
+    notifyListeners();
+    await _persist();
+  }
+
   /// 当前参数快照。
   TtsParams get params =>
       TtsParams(voice: activeVoice, rate: _rate, pitch: _pitch);
