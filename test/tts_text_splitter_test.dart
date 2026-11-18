@@ -103,4 +103,17 @@ void main() {
     expect(segments.single.start, 0);
     expect(segments.single.end, text.length);
   });
+
+  test('perSentence：标点即句界，短句不合并，区间与原文一致', () {
+    const text = '桥头下着雨。风很大，他走进巷子。远处传来钟声。';
+    const perSentence = TtsTextSplitter.perSentence();
+    final segments = perSentence.split(text);
+    expect(
+      segments.map((s) => s.text).toList(),
+      ['桥头下着雨。', '风很大，他走进巷子。', '远处传来钟声。'],
+    );
+    for (final segment in segments) {
+      expect(text.substring(segment.start, segment.end), segment.text);
+    }
+  });
 }

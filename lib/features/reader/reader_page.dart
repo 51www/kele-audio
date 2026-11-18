@@ -325,6 +325,12 @@ class _ReaderPageState extends State<ReaderPage>
         _loading = false;
         _error = null;
       });
+      // 后台预热：提前初始化播放内核并预合成当前页首句，缩短点耳机到出声的
+      // 等待。稍作延时等排版稳定；预热失败静默，不影响阅读或后续起播。
+      unawaited(Future<void>.delayed(
+        const Duration(milliseconds: 600),
+        () => _tts.warmUp(),
+      ));
     } catch (e) {
       debugPrint('[reader] 打开书籍失败：$e');
       if (!mounted) return;
@@ -482,28 +488,36 @@ class _ReaderPageState extends State<ReaderPage>
     }
   }
 
-  /// 起播前重试取当前页首段：换章/排版刚完成时第一次查询可能拿不到，
-  /// 直接退回 null 会让 TtsSession 退化成「章首第 0 段」。
-  Future<int?> _currentVisibleParagraph(int chapter) async {
+  /// 起播句锚点：优先 WebView 当前页「第一句」判定；换章/排版刚完成时
+  /// 第一次查询可能拿不到，短退避重试。彻底判不出才用 fraction 估算段落，
+  /// 并退回该段句首，绝不默认成章首第 0 段。
+  Future<ReaderSentenceAnchor> _resolveStartAnchor(
+    int chapter,
+    ReaderBook book,
+    ReaderLocation? location,
+  ) async {
     for (var attempt = 0; attempt < 6; attempt++) {
-      final para = await _bridge.visibleParagraphIndexOrNull();
-      if (para != null) return para;
+      final anchor = await _bridge.firstVisibleSentence(
+        expectedChapter: chapter,
+      );
+      if (anchor != null) return anchor;
       await Future<void>.delayed(
         Duration(milliseconds: attempt < 2 ? 80 : 160),
       );
     }
-    return null;
+    return ReaderSentenceAnchor(
+      paragraph: await _resolveStartParagraph(chapter, book, location),
+      charIndex: 0,
+    );
   }
 
-  /// 起播段落解析：优先 WebView 当前页判定；判定不出来时用
+  /// fraction 兜底：WebView 判不出当前页时用
   /// 「全书 fraction → 章内比例 → 段落序号」估算，绝不退回章首第 0 段。
   Future<int> _resolveStartParagraph(
     int chapter,
     ReaderBook book,
     ReaderLocation? location,
   ) async {
-    final direct = await _currentVisibleParagraph(chapter);
-    if (direct != null) return direct;
     final chapters = book.chapterCount > 0 ? book.chapterCount : 1;
     final global = (location?.fraction ?? book.overallProgress)
         .clamp(0.0, 1.0)
@@ -520,19 +534,23 @@ class _ReaderPageState extends State<ReaderPage>
       _showTtsDisabled(book);
       return;
     }
-    // 起播位置以「当前可见页」为准：跳页/跳章后点听书从当前页开始，而非旧书签。
+    // 起播位置以「当前可见页」为准：跳页/跳章后点听书从当前页第一句开始，而非旧书签。
     final location = _location;
     final chapter = location?.chapterIndex ?? book.lastChapterIndex;
     // 不信任 relocate 里的 paragraphIndex（可能来自旧段落缓存/几何误判），
-    // 总是重新解析当前页；解析失败也有 fraction 兜底，不会退回章首。
-    final viewPara = await _resolveStartParagraph(chapter, book, location);
+    // 总是重新解析当前页首句；解析失败也有 fraction 兜底，不会退回章首。
+    final anchor = await _resolveStartAnchor(chapter, book, location);
     if (_tts.active && _tts.bookId == book.id) {
       if (_tts.playing) {
         await _tts.pause();
         return;
       }
-      // 暂停中：先把断点对齐到当前页，再从这里恢复。
-      await _tts.repositionTo(chapter, viewPara);
+      // 暂停中：先把断点对齐到当前页首句，再从这里恢复。
+      await _tts.repositionTo(
+        chapter,
+        anchor.paragraph,
+        charIndex: anchor.charIndex,
+      );
       await _tts.resume();
       return;
     }
@@ -545,7 +563,8 @@ class _ReaderPageState extends State<ReaderPage>
     );
     await _tts.start(
       chapterIndex: chapter,
-      paraIndex: viewPara,
+      paraIndex: anchor.paragraph,
+      charIndex: anchor.charIndex,
       fromBookmark: false,
     );
   }
@@ -1107,15 +1126,15 @@ class _BridgeTtsPort implements TtsReaderPort {
     final deadline = DateTime.now().add(const Duration(seconds: 10));
     while (DateTime.now().isBefore(deadline)) {
       if (await _bridge.isChapterReady(chapterIndex)) {
-        // renderer 完成分栏后再读 DOM，避免拿到上一章的节点。
-        await Future<void>.delayed(const Duration(milliseconds: 240));
+        // extractParagraphs 自带章号校验，抽到即返回，不再固定空等 240ms；
+        // 这 240ms 曾直接叠加在「点耳机 → 出声」的等待里。
         final list = await _bridge.extractParagraphs(
           expectedChapter: chapterIndex,
         );
         if (list.isNotEmpty) return list;
-        // 章号校验未通过：换章过渡期 doc 还没替换成目标章。稍后重取，
+        // 抽取为空多为 renderer 正在分栏 / 换章过渡期 doc 还是旧章，短等后重试。
         // 绝不用上一章的正文顶替，否则就是「翻到新章却念旧章」。
-        await Future<void>.delayed(const Duration(milliseconds: 120));
+        await Future<void>.delayed(const Duration(milliseconds: 160));
         continue;
       }
       await _bridge.goToChapter(chapterIndex);
@@ -1156,4 +1175,10 @@ class _BridgeTtsPort implements TtsReaderPort {
   @override
   Future<int?> visibleParagraphStrict() =>
       _bridge.visibleParagraphIndexOrNull();
+
+  @override
+  Future<ReaderSentenceAnchor?> firstVisibleSentence({
+    int? expectedChapter,
+  }) =>
+      _bridge.firstVisibleSentence(expectedChapter: expectedChapter);
 }

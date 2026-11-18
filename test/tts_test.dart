@@ -9,6 +9,7 @@ import 'package:kele_audio/core/services/player/media_bridge.dart';
 import 'package:kele_audio/core/services/player/playback_arbiter.dart';
 import 'package:kele_audio/core/services/reader/book_store.dart';
 import 'package:kele_audio/core/services/reader/reader_activity_store.dart';
+import 'package:kele_audio/core/services/reader/reader_bridge.dart';
 import 'package:kele_audio/core/services/tts/tts_engine.dart';
 import 'package:kele_audio/core/services/tts/tts_engine_system.dart';
 import 'package:kele_audio/core/services/tts/tts_session.dart';
@@ -22,6 +23,7 @@ class _FakePort implements TtsReaderPort {
   final List<({int index, int? start, int? end})> marks = [];
   int chapter = 0;
   int visible = 0;
+  ReaderSentenceAnchor? anchor;
 
   @override
   Future<int> currentChapter() async => chapter;
@@ -55,6 +57,12 @@ class _FakePort implements TtsReaderPort {
 
   @override
   Future<int?> visibleParagraphStrict() async => visible;
+
+  @override
+  Future<ReaderSentenceAnchor?> firstVisibleSentence({
+    int? expectedChapter,
+  }) async =>
+      anchor;
 }
 
 /// 可控假引擎：`speak` 阻塞到 `stop()`，用于模拟「正在朗读」中切语速。
@@ -141,6 +149,48 @@ class _SegmentRecordingEngine implements TtsEngine {
 
   @override
   Future<void> stop() async {}
+
+  @override
+  void resetCache() {}
+
+  @override
+  Future<void> testConnection() async {}
+
+  @override
+  Future<void> dispose() async {}
+}
+
+/// 在指定句子上阻塞，用于验证「切音色时从当前句续读」。
+class _BlockOnTextEngine implements TtsEngine {
+  _BlockOnTextEngine(this.blockText);
+
+  final String blockText;
+  final List<String> spoken = [];
+  Completer<void>? _gate;
+
+  @override
+  String get id => 'blocking';
+
+  @override
+  Future<void> start(TtsParams params) async {}
+
+  @override
+  void prefetch(String text) {}
+
+  @override
+  Future<void> speak(String text) async {
+    spoken.add(text);
+    if (text == blockText) {
+      _gate = Completer<void>();
+      await _gate!.future;
+    }
+  }
+
+  @override
+  Future<void> stop() async {
+    _gate?.complete();
+    _gate = null;
+  }
 
   @override
   void resetCache() {}
@@ -465,7 +515,9 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
 
-    expect(engine.spoken.first, '桥头下着雨。风很大，他走进巷子。');
+    // 朗读会话按「一句一片段」切分：标点即句界，续读可精确到当前句。
+    expect(engine.spoken.first, '桥头下着雨。');
+    expect(engine.spoken, contains('风很大，他走进巷子。'));
     expect(engine.spoken, contains('远处传来钟声。'));
     expect(engine.spoken.length, greaterThan(4));
     // 首请求独占合成通道，不被第二句预取抢占。
@@ -476,6 +528,91 @@ void main() {
     expect(port.marks.first.end, engine.spoken.first.length);
     expect(port.marks[1].index, 0);
     expect(port.marks[1].start, greaterThan(0));
+  });
+
+  test('指定句锚点起播：从当前页第一句开始，跳过同段前面的句子', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    final books = ReaderBookStore(kv);
+    await books.add(_book());
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final port = _FakePort([
+      ['甲。乙。丙。丁。'],
+      ['下一章。'],
+    ]);
+    // 「丙。」在段内的起始下标。
+    port.anchor = const ReaderSentenceAnchor(paragraph: 0, charIndex: 4);
+    final engine = _SegmentRecordingEngine();
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+    );
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+    await session.start(
+      chapterIndex: 0,
+      paraIndex: 0,
+      charIndex: 4,
+      fromBookmark: false,
+    );
+    for (var i = 0; i < 40 && session.active; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    expect(engine.spoken, ['丙。', '丁。', '下一章。']);
+    expect(port.marks.first.start, 4);
+  });
+
+  test('切音色后从当前句续读，不退回段落开头', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    final books = ReaderBookStore(kv);
+    await books.add(_book());
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final port = _FakePort([
+      ['甲。乙。丙。丁。'],
+      ['下一章。'],
+    ]);
+    final engine = _BlockOnTextEngine('丙。');
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+    );
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+    for (var i = 0; i < 40 && !engine.spoken.contains('丙。'); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(engine.spoken, contains('丙。'));
+
+    final before = List<String>.from(engine.spoken);
+    await settings.setEdgeVoice('zh-CN-YunxiNeural');
+    await session.reloadParams();
+    for (var i = 0; i < 40 && engine.spoken.length <= before.length; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    expect(engine.spoken.length, greaterThan(before.length));
+    // 重开一轮朗读的第一句仍是「丙。」而非段落首句「甲。」。
+    expect(engine.spoken[before.length], '丙。');
+    await session.stop();
   });
 
   group('系统引擎语速映射', () {

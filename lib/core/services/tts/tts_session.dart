@@ -8,6 +8,7 @@ import '../player/media_bridge.dart';
 import '../player/playback_arbiter.dart';
 import '../reader/book_store.dart';
 import '../reader/reader_activity_store.dart';
+import '../reader/reader_bridge.dart';
 import 'tts_engine.dart';
 import 'tts_settings_store.dart';
 import 'tts_text_splitter.dart';
@@ -37,6 +38,12 @@ abstract class TtsReaderPort {
   /// 当前可见段落；判定不出来返回 null，避免调用方误当成「章首第 0 段」。
   /// 默认沿用旧接口，阅读页会覆盖为 strict 实现。
   Future<int?> visibleParagraphStrict() async => visibleParagraph();
+
+  /// 当前页第一句的锚点（段落 + 段内字符起点）；默认不支持，阅读页覆盖。
+  Future<ReaderSentenceAnchor?> firstVisibleSentence({
+    int? expectedChapter,
+  }) async =>
+      null;
 }
 
 /// 听书会话（docs/reader-design.md §5.2）：
@@ -80,6 +87,13 @@ class TtsSession extends ChangeNotifier {
   int _paragraphsChapter = -1;
   int _chapterIndex = 0;
   int _paraIndex = 0;
+
+  /// 当前朗读句在 [_paraIndex] 段内的起始字符下标。
+  /// 切音色/引擎、暂停恢复等「原地续读」都从这一句重开，而不是退回段落开头。
+  int _startChar = 0;
+
+  /// 引擎是否已在后台预热（每次换书重置一次）。
+  bool _warmDone = false;
 
   /// 阅读页最近一次下发的章节目录文案（离线时播放页仍能显示目录）。
   List<String> _chapterLabels = const [];
@@ -126,6 +140,10 @@ class TtsSession extends ChangeNotifier {
   String? get bookId => _bookId;
   int get chapterIndex => _chapterIndex;
   int get paragraphIndex => _paraIndex;
+
+  /// 当前朗读句在段内的起始字符下标（调试/测试用）。
+  int get startChar => _startChar;
+
   int get paragraphCount => _paragraphs.length;
   TtsEngineKind get engineKind => _engineKind;
   Duration get sleepRemaining => _sleepRemaining;
@@ -182,6 +200,7 @@ class TtsSession extends ChangeNotifier {
       _chapterLabels = const [];
       _paragraphs = const [];
       _paragraphsChapter = -1;
+      _warmDone = false;
     }
     if (chapterTitles != null && chapterTitles.isNotEmpty) {
       _chapterLabels = List<String>.unmodifiable(chapterTitles);
@@ -218,9 +237,11 @@ class TtsSession extends ChangeNotifier {
   // ---------------------------------------------------------------- 播放控制
 
   /// 开始听书：优先从断点续听；未指定则从当前可见段落。
+  /// [charIndex] 为起播段内第一句的字符起点（0 表示整段从头）。
   Future<void> start({
     int? chapterIndex,
     int? paraIndex,
+    int charIndex = 0,
     bool fromBookmark = true,
   }) async {
     final book = _book;
@@ -239,10 +260,12 @@ class TtsSession extends ChangeNotifier {
     if (chapter == null && fromBookmark && book.lastTtsParaIndex != null) {
       chapter = book.lastChapterIndex;
       para = book.lastTtsParaIndex;
+      charIndex = 0;
     }
     chapter ??= await port.currentChapter();
     para ??= await port.visibleParagraphStrict();
     para ??= await port.visibleParagraph();
+    if (charIndex < 0) charIndex = 0;
 
     await arbiter.claimTts();
     _active = true;
@@ -250,6 +273,7 @@ class TtsSession extends ChangeNotifier {
     _playing = false;
     _chapterIndex = chapter;
     _paraIndex = para;
+    _startChar = charIndex;
     _stopAfterChapter = false;
     _playStartedAt = DateTime.now();
     notifyListeners();
@@ -266,7 +290,7 @@ class TtsSession extends ChangeNotifier {
       return;
     }
     _runId++;
-    unawaited(_run(_runId, _chapterIndex, _paraIndex));
+    unawaited(_run(_runId, _chapterIndex, _paraIndex, _startChar));
   }
 
   Future<void> resume({int? chapterOverride}) async {
@@ -292,7 +316,7 @@ class TtsSession extends ChangeNotifier {
     _playStartedAt = DateTime.now();
     notifyListeners();
     _runId++;
-    unawaited(_run(_runId, _chapterIndex, _paraIndex));
+    unawaited(_run(_runId, _chapterIndex, _paraIndex, _startChar));
   }
 
   Future<void> pause() async {
@@ -325,10 +349,20 @@ class TtsSession extends ChangeNotifier {
       await resume();
       return;
     }
-    final para = await port.visibleParagraphStrict();
+    // 播放键同样对齐到当前页首句：暂停后翻页/换段，不应退回段落开头重念。
+    final anchor = await port.firstVisibleSentence(expectedChapter: chapter);
     // 暂停态只更新断点，由 resume() 统一开一轮循环，避免重复起播。
-    if (_paused && para != null && para >= 0) {
-      await repositionTo(chapter, para);
+    if (_paused) {
+      if (anchor != null) {
+        await repositionTo(
+          chapter,
+          anchor.paragraph,
+          charIndex: anchor.charIndex,
+        );
+      } else {
+        final para = await port.visibleParagraphStrict();
+        if (para != null && para >= 0) await repositionTo(chapter, para);
+      }
     }
     await resume();
   }
@@ -350,6 +384,7 @@ class TtsSession extends ChangeNotifier {
     } else {
       _paraIndex = target;
     }
+    _startChar = 0;
     await _restartLoop();
   }
 
@@ -365,6 +400,7 @@ class TtsSession extends ChangeNotifier {
     if (index == _chapterIndex) return;
     _chapterIndex = index;
     _paraIndex = 0;
+    _startChar = 0;
     _pendingChapter = null;
     _paragraphs = const [];
     _paragraphsChapter = -1;
@@ -389,12 +425,19 @@ class TtsSession extends ChangeNotifier {
   /// 用户手动翻页/跳章：TTS 位置同步（先停再取新章段落）。
   ///
   /// 暂停中只更新断点位置、不开讲，等用户恢复时从新位置开始。
-  Future<void> repositionTo(int chapterIndex, int paragraphIndex) async {
-    if (!_active || (chapterIndex == _chapterIndex && paragraphIndex == _paraIndex)) {
-      return;
-    }
+  Future<void> repositionTo(
+    int chapterIndex,
+    int paragraphIndex, {
+    int? charIndex,
+  }) async {
+    if (!_active) return;
+    final sameSpot =
+        chapterIndex == _chapterIndex && paragraphIndex == _paraIndex;
+    if (sameSpot && (charIndex == null || charIndex == _startChar)) return;
     _chapterIndex = chapterIndex;
     _paraIndex = paragraphIndex;
+    // 同一段落只改句锚点；换段无锚点时从头读。
+    _startChar = sameSpot && charIndex == null ? _startChar : (charIndex ?? 0);
     _pendingChapter = null;
     notifyListeners();
     if (_paused) {
@@ -439,6 +482,7 @@ class TtsSession extends ChangeNotifier {
     final target = paragraphIndex.clamp(0, _paragraphs.length - 1);
     if (target == _paraIndex) return;
     _paraIndex = target;
+    _startChar = 0;
     _pendingChapter = null;
     notifyListeners();
     await _syncHighlight(scroll: true);
@@ -477,6 +521,7 @@ class TtsSession extends ChangeNotifier {
     _seekResumeAfter = false;
     if (original != null && original != _paraIndex) {
       _paraIndex = original;
+      _startChar = 0;
       await _syncHighlight(scroll: false);
       notifyListeners();
     }
@@ -501,6 +546,8 @@ class TtsSession extends ChangeNotifier {
 
   Future<void> switchEngine(TtsEngineKind kind) async {
     if (_engineKind == kind && _engine != null) return;
+    // 等后台预热初始化结束再换引擎，避免两处同时创建 Player。
+    await _engineInit;
     await settings.setEngine(kind);
     if (!_active) {
       _engineKind = kind;
@@ -562,7 +609,7 @@ class TtsSession extends ChangeNotifier {
     await _accumulate();
     _playStartedAt = DateTime.now();
     notifyListeners();
-    unawaited(_run(runId, _chapterIndex, _paraIndex));
+    unawaited(_run(runId, _chapterIndex, _paraIndex, _startChar));
   }
 
   void _possibleResumeTime() {
@@ -591,6 +638,7 @@ class TtsSession extends ChangeNotifier {
     final next = chapter + 1;
     _chapterIndex = next;
     _paraIndex = 0;
+    _startChar = 0;
     _engine?.resetCache();
     if (_port == null) {
       // 阅读页已关闭：无法抽取新章正文，等回到阅读页再续读。
@@ -642,7 +690,7 @@ class TtsSession extends ChangeNotifier {
 
   // ---------------------------------------------------------------- 朗读主循环
 
-  Future<void> _run(int runId, int chapter, int para) async {
+  Future<void> _run(int runId, int chapter, int para, int startChar) async {
     final book = _book;
     if (book == null) return;
     try {
@@ -692,7 +740,10 @@ class TtsSession extends ChangeNotifier {
         _publishMedia();
         notifyListeners();
 
-        const splitter = TtsTextSplitter();
+        // 起播段按句锚点跳过之前已经读过的句子；后续段落从完整段首开始。
+        var resumeChar = startChar < 0 ? 0 : startChar;
+        // 一句一片段：标点即句界，续读时才能精确回到当前这一句。
+        const splitter = TtsTextSplitter.perSentence();
         for (var i = index; i < list.length; i++) {
           if (!_active || runId != _runId) return;
           _paraIndex = i;
@@ -701,11 +752,16 @@ class TtsSession extends ChangeNotifier {
           _playing = true;
           _publishMedia();
           notifyListeners();
-          // 整段不再一次性送给引擎：切成一两句话的短片段，首请求体量更小，
-          // 高亮也能精确到句；段落下标仍是断点/进度/UI 的唯一坐标。
+          // 逐句送给引擎：首请求体量最小，高亮精确到句；段落下标仍是
+          // 断点/进度/UI 的唯一坐标，句首偏移只用于续读定位。
           final segments = splitter.split(list[i]);
           if (segments.isEmpty) continue;
-          for (var s = 0; s < segments.length; s++) {
+          var firstSegment = 0;
+          if (i == index && resumeChar > 0) {
+            final found = segments.indexWhere((seg) => seg.end > resumeChar);
+            if (found > 0) firstSegment = found;
+          }
+          for (var s = firstSegment; s < segments.length; s++) {
             if (!_active || runId != _runId) return;
             while (_paused) {
               _pauseGate ??= Completer<void>();
@@ -713,6 +769,8 @@ class TtsSession extends ChangeNotifier {
               if (!_active || runId != _runId) return;
             }
             final segment = segments[s];
+            // 记住当前句首：切音色/引擎、暂停恢复时从这里续读而不是段落开头。
+            _startChar = segment.start;
             // 立刻预取后续两句（首句也一样）：合成与 WebView 高亮、当前句播放
             // 重叠进行，避免播完才现场合成造成「念几句停一下」。
             _prefetchAhead(
@@ -758,6 +816,8 @@ class TtsSession extends ChangeNotifier {
               continue;
             }
           }
+          // 本段读完，下一段从头开始；句锚点只作用于起播段。
+          resumeChar = 0;
           await _saveBookmark(
             book: book,
             chapter: chapter,
@@ -792,7 +852,53 @@ class TtsSession extends ChangeNotifier {
 
   // ---------------------------------------------------------------- 引擎/设置
 
-  Future<void> _ensureEngine() async {
+  /// 阅读页就绪后后台预热：提前初始化播放内核、预合成当前页首句。
+  /// 这样点耳机时 speak 常能直接命中缓存，省掉首次网络往返与本地初始化。
+  /// 只做一次且仅在未开始听书时执行；任何失败都静默忽略，不影响正常起播。
+  Future<void> warmUp() async {
+    if (_warmDone || _active || _port == null) return;
+    final book = _book;
+    if (book == null || !book.ttsAllowed) return;
+    _warmDone = true;
+    if (_engineInit != null) return;
+    try {
+      await _ensureEngine();
+    } catch (_) {
+      return;
+    }
+    final port = _port;
+    if (port == null || _active) return;
+    try {
+      final chapter = await port.currentChapter();
+      var anchor = await port.firstVisibleSentence(expectedChapter: chapter);
+      anchor ??= ReaderSentenceAnchor(
+        paragraph: await port.visibleParagraphStrict() ?? 0,
+        charIndex: 0,
+      );
+      final paragraphs = await port.paragraphsOf(chapter);
+      if (anchor.paragraph < 0 || anchor.paragraph >= paragraphs.length) return;
+      final segments = const TtsTextSplitter.perSentence()
+          .split(paragraphs[anchor.paragraph]);
+      if (segments.isEmpty) return;
+      final charIndex = anchor.charIndex;
+      final index = segments.indexWhere((s) => s.end > charIndex);
+      _engine?.prefetch(segments[index < 0 ? 0 : index].text);
+    } catch (_) {
+      // 预热失败不影响点耳机后的正常朗读。
+    }
+  }
+
+  Future<void>? _engineInit;
+
+  Future<void> _ensureEngine() {
+    final pending = _engineInit;
+    if (pending != null) return pending;
+    final future = _initEngine().whenComplete(() => _engineInit = null);
+    _engineInit = future;
+    return future;
+  }
+
+  Future<void> _initEngine() async {
     if (_engine != null && _engineKind == settings.engine) {
       await _engine!.start(settings.params);
       return;

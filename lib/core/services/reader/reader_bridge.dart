@@ -47,6 +47,18 @@ class ReaderLocation {
   final bool ttsScroll;
 }
 
+/// 起播句锚点：当前页第一句所在的段落下标与该句在段内归一化文本中的起始下标。
+/// 字符口径与 [ReaderBridge.extractParagraphs] 返回的段落文本一致。
+class ReaderSentenceAnchor {
+  const ReaderSentenceAnchor({
+    required this.paragraph,
+    required this.charIndex,
+  });
+
+  final int paragraph;
+  final int charIndex;
+}
+
 /// 目录项（`onToc`）。
 class ReaderTocItem {
   const ReaderTocItem({
@@ -387,6 +399,22 @@ class ReaderBridge {
     if (raw == null) return null;
     final value = _asInt(raw);
     return value >= 0 ? value : null;
+  }
+
+  /// 当前页第一句的锚点（段落下标 + 段内字符起点）；判定不出来返回 null。
+  /// [expectedChapter] 给定时 JS 端会校验文档确属该章，避免换章过渡期串章。
+  Future<ReaderSentenceAnchor?> firstVisibleSentence({
+    int? expectedChapter,
+  }) async {
+    final arg = expectedChapter == null ? '' : '$expectedChapter';
+    final raw = await _eval('window.reader.firstVisibleSentence($arg)');
+    final decoded = raw is String ? _tryDecode(raw) : raw;
+    if (decoded is! Map) return null;
+    final paragraph = int.tryParse(decoded['paragraph']?.toString() ?? '');
+    final charIndex = int.tryParse(decoded['char']?.toString() ?? '');
+    if (paragraph == null || charIndex == null) return null;
+    if (paragraph < 0 || charIndex < 0) return null;
+    return ReaderSentenceAnchor(paragraph: paragraph, charIndex: charIndex);
   }
 
   static int _asInt(dynamic raw) {

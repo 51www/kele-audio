@@ -25,6 +25,15 @@ class TtsTextSplitter {
     this.maxSentences = 2,
   });
 
+  /// 一句一片段：标点即句界，短句也不与相邻句合并。
+  ///
+  /// 朗读会话用它切分，使「从当前句续读」能精确回到正在朗读的那一句，
+  /// 而不是退回最多两三句合并后的片段开头。
+  const TtsTextSplitter.perSentence()
+      : maxChars = defaultMaxChars,
+        minChars = 0,
+        maxSentences = 1;
+
   /// 单个片段的最大字符数：约一两句话，首请求体量可控。
   static const int defaultMaxChars = 80;
 

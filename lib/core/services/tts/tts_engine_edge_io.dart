@@ -33,11 +33,16 @@ class TtsEdgeEngine implements TtsEngine {
 
   /// 预合成结果（text → 音频字节）；合成失败不保留，正式朗读时会重试。
   final Map<String, Uint8List> _prefetched = {};
-  final Set<String> _prefetching = {};
+
+  /// 在途预合成：speak 命中时直接等待这张未来，避免同一句重复建连合成。
+  final Map<String, Future<Uint8List>> _prefetching = {};
 
   /// 预合成代际：切参数 / 切章 / 停止后自增，让在途请求的结果作废，
   /// 避免用旧音色、旧语速合成的音频被后续 speak 命中。
   int _cacheGeneration = 0;
+
+  /// start 是否已用当前引擎实例跑过一次（用于判断参数是否真的变化）。
+  bool _started = false;
 
   File? _currentFile;
 
@@ -74,8 +79,15 @@ class TtsEdgeEngine implements TtsEngine {
 
   @override
   Future<void> start(TtsParams params) async {
-    // 播放页切换音色 / 语速也会走到这里：旧参数的预合成音频必须先作废。
-    _invalidatePrefetch();
+    // 播放页切换音色 / 语速也会走到这里：只有参数真的变了才作废旧音频。
+    // 打开阅读页预热、点耳机起播时会用同一组参数重复调用，这里保留缓存，
+    // 让预热合成的首句能直接命中，省掉一次网络往返。
+    final unchanged = _started &&
+        _params.voice == params.voice &&
+        _params.rate == params.rate &&
+        _params.pitch == params.pitch;
+    if (!unchanged) _invalidatePrefetch();
+    _started = true;
     _params = params;
     _ensurePlayer();
     await _player!.setRate(1.0);
@@ -116,11 +128,12 @@ class TtsEdgeEngine implements TtsEngine {
   @override
   void prefetch(String text) {
     if (text.trim().isEmpty) return;
-    if (_prefetched.containsKey(text) || _prefetching.contains(text)) return;
+    if (_prefetched.containsKey(text) || _prefetching.containsKey(text)) return;
     final generation = _cacheGeneration;
-    _prefetching.add(text);
+    final future = _synthesize(text);
+    _prefetching[text] = future;
     unawaited(
-      _synthesize(text)
+      future
           .then((bytes) {
             // 参数或会话已变，在途结果直接丢弃。
             if (generation != _cacheGeneration) return;
@@ -149,8 +162,17 @@ class TtsEdgeEngine implements TtsEngine {
     _pending = completer;
     try {
       final cached = _prefetched.remove(text);
-      final bytes = cached ??
-          await _synthesize(text).timeout(const Duration(seconds: 90));
+      final inFlight = _prefetching.remove(text);
+      Uint8List? bytes = cached;
+      if (bytes == null && inFlight != null) {
+        // 预热/预取还在合成：等它结束而不是再建一条连接重复合成。
+        try {
+          bytes = await inFlight.timeout(const Duration(seconds: 90));
+        } catch (_) {
+          bytes = null;
+        }
+      }
+      bytes ??= await _synthesize(text).timeout(const Duration(seconds: 90));
       if (token != _token) return;
 
       final dir = await getTemporaryDirectory();

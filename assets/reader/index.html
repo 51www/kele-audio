@@ -443,6 +443,19 @@ window.reader = {
     if (extractChapter(false) < 0) return -1
     return visibleParagraphIndexInternal() ?? -1
   },
+  // 起播锚点：当前页第一句的 { paragraph, char }；char 为该句在 textOf() 归一化
+  // 文本中的起始下标，与 Dart TtsTextSplitter 的字符区间同一口径。
+  firstVisibleSentence(expected) {
+    const c = currentContents()
+    if (!c || !c.doc || !c.doc.body) return null
+    if (expected != null) {
+      const known = docChapter.get(c.doc)
+      if (known !== undefined && known !== Number(expected)) return null
+      if (Number(c.index ?? -1) !== Number(expected)) return null
+    }
+    if (extractChapter(false) < 0) return null
+    return firstVisibleSentenceInternal()
+  },
 }
 
 // 把 textOf() 归一化后的字符区间映射回 DOM。只在片段完整落在单个文本节点内时
@@ -615,6 +628,109 @@ function visibleParagraphIndexInternal() {
     }
   } catch (e) { /* ignore */ }
   return null
+}
+
+// 与 Dart TtsTextSplitter._sentenceEnd 同一口径：标点即句界，句尾引号/空白并入前句。
+// 半角标点在 Dart 侧等长归一为全角，故这里按原文切分得到的下标仍可直接复用。
+const TTS_SENTENCE_END = /(?:[。！？!?；;…]+|\.+(?=\s|$))[”’"）)\]】』」\s]*/g
+
+function ttsSentenceSpans(text) {
+  const spans = []
+  let cursor = 0
+  TTS_SENTENCE_END.lastIndex = 0
+  let match
+  while ((match = TTS_SENTENCE_END.exec(text)) !== null) {
+    if (match.end > cursor) spans.push({ start: cursor, end: match.end })
+    cursor = match.end
+  }
+  if (cursor < text.length) spans.push({ start: cursor, end: text.length })
+  return spans
+}
+
+// 把 textOf() 归一化后的字符区间映射回 DOM 位置（仅用于测量，不改 DOM）。
+// 与 sentenceRange 同口径：空白折叠、首尾 trim，因此可直接为跨文本节点的句子建 Range。
+function ttsSpanRange(node, start, end) {
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
+  const chars = []
+  let pending = false
+  let current
+  while ((current = walker.nextNode())) {
+    const data = current.data || ''
+    for (let i = 0; i < data.length; i++) {
+      const ch = data[i]
+      if (/\s/.test(ch)) {
+        if (chars.length) pending = true
+        continue
+      }
+      if (pending) {
+        chars.push({ node: current, offset: i, space: true })
+        pending = false
+      }
+      chars.push({ node: current, offset: i, space: false })
+    }
+  }
+  let first = 0
+  let last = chars.length - 1
+  while (first <= last && chars[first].space) first++
+  while (last >= first && chars[last].space) last--
+  const from = chars[first + Math.max(0, start)]
+  const to = chars[first + Math.min(last - first, Math.max(0, end - 1))]
+  if (!from || !to) return null
+  const range = document.createRange()
+  range.setStart(from.node, from.offset)
+  range.setEnd(to.node, to.offset + 1)
+  return range
+}
+
+// 句子矩形是否与当前页/视口相交：分页模式复用 currentPageWindow 的同一口径。
+function ttsRangeInView(range) {
+  const rects = range.getClientRects()
+  if (!rects || !rects.length) return false
+  const scrolled = !!(view.renderer && view.renderer.scrolled)
+  const win = scrolled ? null : currentPageWindow()
+  const w = document.documentElement.clientWidth || window.innerWidth
+  const h = document.documentElement.clientHeight || window.innerHeight
+  for (const r of rects) {
+    if (!(r.width > 0 && r.height > 0)) continue
+    if (win) {
+      if (r.right > win.left && r.left < win.right) return true
+    } else {
+      if (r.bottom > 0 && r.top < h && r.right > 0 && r.left < w) return true
+    }
+  }
+  return false
+}
+
+// 当前页第一句：先按与页首段判定一致的口径找到段落，再逐句测矩形，
+// 取第一句与本页相交的句子起始下标；全失败退回该段句首（char=0）。
+function firstVisibleSentenceInternal() {
+  const chapter = Number((currentContents() || {}).index ?? -1)
+  if (chapter !== ttsChapter || !ttsNodes.length) return null
+  const scrolled = !!(view.renderer && view.renderer.scrolled)
+  let paragraph = null
+  // 分页模式优先用页窗口：relocate 的 range 可能是整章多栏，会把章首误判成当前页。
+  if (!scrolled) paragraph = visibleParagraphIndexByPageWindow()
+  if (paragraph == null) {
+    const range = lastRange
+    if (range && typeof range.intersectsNode === 'function') {
+      for (let i = 0; i < ttsNodes.length; i++) {
+        try {
+          if (range.intersectsNode(ttsNodes[i])) { paragraph = i; break }
+        } catch (e) { /* ignore */ }
+      }
+    }
+  }
+  paragraph ??= visibleParagraphIndexInternal()
+  if (paragraph == null || paragraph < 0 || paragraph >= ttsNodes.length) return null
+  const text = textOf(ttsNodes[paragraph])
+  for (const span of ttsSentenceSpans(text)) {
+    if (span.end <= span.start) continue
+    const range = ttsSpanRange(ttsNodes[paragraph], span.start, span.end)
+    if (range && ttsRangeInView(range)) {
+      return { paragraph, char: span.start }
+    }
+  }
+  return { paragraph, char: 0 }
 }
 
 // 窗口尺寸变化（旋转 / 分屏）：分栏与页码都会变，等布局稳定后重算一次。
