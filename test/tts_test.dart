@@ -571,6 +571,55 @@ void main() {
     expect(port.marks.first.start, 4);
   });
 
+  test('自动跨章后句锚点不残留：新章从段首朗读并高亮', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    await settings.setEngine(TtsEngineKind.system);
+    final books = ReaderBookStore(kv);
+    await books.add(_book());
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final port = _FakePort([
+      ['甲。乙。丙。丁。'],
+      ['新章甲。新章乙。新章丙。新章丁。'],
+    ]);
+    final engine = _SegmentRecordingEngine();
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+    );
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+
+    // 从「丁。」起播，段内锚点为 6；旧实现跨章后仍拿 6 跳过新章开头两句。
+    await session.start(
+      chapterIndex: 0,
+      paraIndex: 0,
+      charIndex: 6,
+      fromBookmark: false,
+    );
+    for (var i = 0; i < 60 && session.active; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    expect(session.error, isNull);
+    expect(
+      engine.spoken,
+      ['丁。', '新章甲。', '新章乙。', '新章丙。', '新章丁。'],
+    );
+    expect(
+      port.marks.map((m) => m.start).toList(),
+      [6, 0, 4, 8, 12],
+    );
+  });
+
   test('切音色后从当前句续读，不退回段落开头', () async {
     final kv = MemoryKeyValueStore();
     final settings = TtsSettingsStore(kv);

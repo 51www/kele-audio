@@ -99,7 +99,11 @@ class TtsSession extends ChangeNotifier {
   List<String> _chapterLabels = const [];
 
   bool _active = false;
-  bool _navigating = false;
+
+  /// 切章取段落与高亮可能并发，必须用计数而不是单个 bool，
+  /// 否则先完成的一方会把另一方还在进行中的导航标志清掉。
+  int _navigating = 0;
+
   bool _playing = false;
   bool _paused = false;
   bool _abortedByPause = false;
@@ -133,7 +137,7 @@ class TtsSession extends ChangeNotifier {
   bool get active => _active;
 
   /// 正在为 TTS 切章/取段落（阅读页据此忽略自动定位事件，避免抢回位置）。
-  bool get navigating => _navigating;
+  bool get navigating => _navigating > 0;
   bool get playing => _playing && !_paused && _active;
   bool get paused => _paused && _active;
   String? get error => _error;
@@ -699,9 +703,12 @@ class TtsSession extends ChangeNotifier {
         final port = _port;
         List<String> list;
         if (port != null) {
-          _navigating = true;
-          list = await port.paragraphsOf(chapter);
-          _navigating = false;
+          _beginNavigate();
+          try {
+            list = await port.paragraphsOf(chapter);
+          } finally {
+            _endNavigate();
+          }
           if (!_active || runId != _runId) return;
           if (list.isEmpty) {
             // 整章抽取不到正文（例如全章只有一个单行数字页码，被正文抽取
@@ -710,6 +717,8 @@ class TtsSession extends ChangeNotifier {
             if (next == null) return;
             chapter = next;
             para = 0;
+            // 句锚点只对起播章有效，跨章后必须从新章段首开始。
+            startChar = 0;
             continue;
           }
           _paragraphs = list;
@@ -718,7 +727,6 @@ class TtsSession extends ChangeNotifier {
           // 阅读页关闭后无法抽取段落：仅能续读已缓存的当前章，
           // 跨章需回阅读页载入正文（由 bindReader 的 pendingChapter 续读）。
           if (_paragraphsChapter != chapter || _paragraphs.isEmpty) {
-            _navigating = false;
             _chapterIndex = chapter;
             _pendingChapter = chapter;
             _playing = false;
@@ -837,9 +845,11 @@ class TtsSession extends ChangeNotifier {
         if (next == null) return;
         chapter = next;
         para = 0;
+        // _advanceChapter 只重置了会话字段；循环参数里的旧章句锚点也必须清掉，
+        // 否则会用上一章的字符偏移跳过新章开头（音字对不上、听起来像断了一截）。
+        startChar = 0;
       }
     } catch (e) {
-      _navigating = false;
       if (!_active || runId != _runId) return;
       _error = e is TtsException ? e.message : '$e';
       _playing = false;
@@ -965,6 +975,12 @@ class TtsSession extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------- 高亮
+  void _beginNavigate() => _navigating++;
+
+  void _endNavigate() {
+    if (_navigating > 0) _navigating--;
+  }
+
   Future<void> _syncHighlight({bool scroll = true}) async {
     if (!_active) return;
     await _highlight(_paraIndex, scroll: scroll);
@@ -978,8 +994,8 @@ class TtsSession extends ChangeNotifier {
   }) async {
     final port = _port;
     if (port == null) return;
+    _beginNavigate();
     try {
-      _navigating = true;
       await port.highlight(
         index,
         scroll: scroll,
@@ -989,7 +1005,7 @@ class TtsSession extends ChangeNotifier {
     } catch (e) {
       debugPrint('[tts] 高亮失败：$e');
     } finally {
-      _navigating = false;
+      _endNavigate();
     }
   }
 

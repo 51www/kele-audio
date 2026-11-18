@@ -160,6 +160,7 @@ class TtsEdgeEngine implements TtsEngine {
     // 合成/写文件期间关闭闸门：上一句迟到的 completed 不能提前结束本句。
     _completionArmed = false;
     _pending = completer;
+    File? writtenFile;
     try {
       final cached = _prefetched.remove(text);
       final inFlight = _prefetching.remove(text);
@@ -182,6 +183,7 @@ class TtsEdgeEngine implements TtsEngine {
         '${DateTime.now().microsecondsSinceEpoch}.mp3',
       );
       await file.writeAsBytes(bytes, flush: true);
+      writtenFile = file;
       _currentFile = file;
       await _player!.open(Media(file.path), play: true);
       if (token != _token) return;
@@ -210,7 +212,13 @@ class TtsEdgeEngine implements TtsEngine {
         _pending = null;
         _completionArmed = false;
       }
-      await _cleanupCurrentFile();
+      if (writtenFile != null) {
+        // 只清本次 speak 写的文件：stop 后旧句可能最后才退出，
+        // 那时 _currentFile 已指向新句正在播放的 mp3，绝不能顺手删掉它，
+        // 否则切章/切句后声音会突然断掉。
+        if (identical(_currentFile, writtenFile)) _currentFile = null;
+        await _deleteFile(writtenFile);
+      }
     }
   }
 
@@ -218,6 +226,10 @@ class TtsEdgeEngine implements TtsEngine {
     final file = _currentFile;
     _currentFile = null;
     if (file == null) return;
+    await _deleteFile(file);
+  }
+
+  Future<void> _deleteFile(File file) async {
     try {
       if (await file.exists()) await file.delete();
     } catch (_) {}
