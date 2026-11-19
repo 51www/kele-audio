@@ -4,6 +4,7 @@ import '../../data/table.dart';
 import '../offline/offline_cache_service.dart';
 import '../player/progress_store.dart';
 import '../settings_store.dart';
+import '../tts/tts_settings_store.dart';
 
 /// 备份白名单（设计原则 1）：**只导出/导入这里声明的 key**，
 /// 绝不整库序列化 —— 缓存（album/chapter/发现页）、离线下载文件、
@@ -65,5 +66,6 @@ class BackupWhitelist {
   /// 登录态属用户自己的凭据，随备份迁移可省去换机后重扫。
   static const List<({String key, String label})> secureItems = [
     (key: BiliClient.prefCookie, label: 'B 站登录态'),
+    (key: TtsSettingsStore.doubaoCookieStorageKey, label: '豆包登录态'),
   ];
 }

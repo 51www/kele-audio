@@ -56,3 +56,18 @@
 
 - Flutter 3.38.x（Dart 3.10+）、JDK 17、Android SDK；构建：`flutter build apk --release`（项目为单包名 `com.kele.audio`，debug/profile 用 dev-key 调试 keystore 签名，release 用正式 key.properties）
 - 平台范围：**仅 Android**（API 26+），iOS/Windows 不做。
+
+## 5. 常用服务与工具路径
+
+环境里**没有把 Android SDK 加入 `PATH`**（也没设 `ANDROID_HOME` / `ANDROID_SDK_ROOT`），所以 `adb` 直接打命令找不到，每次都要手动定位。已确认的固定路径如下：
+
+- **Android SDK 根目录**：`E:\android-sdk`
+- **adb 可执行文件**：`E:\android-sdk\platform-tools\adb.exe`
+  - 调用示例（PowerShell）：`& 'E:\android-sdk\platform-tools\adb.exe' -s <device> <cmd>`
+- **Flutter 会自动识别该 SDK**（无需环境变量），`flutter devices` / `flutter run` / `flutter build` 无需额外配置。
+- 真机走查时优先用 `adb` 驱动（单步 `input tap` / `input swipe` + `screencap` + `pull` 截图对照），比盲猜屏幕坐标更可靠；`uiautomator dump` 在 Flutter 语义树下不稳定，以截图为准。
+
+### 已连接真机
+
+- 设备型号/序列号：`PKC110` / `HMQO4DPJC6MZXOZD`（Android 17，分辨率 1080×2376，密度 480）。
+ 

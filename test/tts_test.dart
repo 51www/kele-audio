@@ -286,6 +286,76 @@ void main() {
     expect(restored.activeVoice, 'zh-CN-system-voice');
   });
 
+  test('豆包音色/Cookie 可持久化，activeVoice 随引擎切换', () async {
+    final kv = MemoryKeyValueStore();
+    final store = TtsSettingsStore(kv);
+    await store.load();
+    expect(store.doubaoVoice, doubaoDefaultVoiceId);
+    expect(store.doubaoCookie, isEmpty);
+
+    await store.setDoubaoVoice('zh_male_chenwen_moon_bigtts');
+    await store.setDoubaoCookie('  sessionid=abc; uid_tt=123  ');
+    await store.setEngine(TtsEngineKind.doubao);
+    expect(store.activeVoice, 'zh_male_chenwen_moon_bigtts');
+    expect(store.doubaoCookie, 'sessionid=abc; uid_tt=123');
+
+    // Cookie 单独存放，绝不混进普通设置 JSON（备份时该 JSON 走 keys 明文区）。
+    expect(store.toJson().containsKey('doubaoCookie'), isFalse);
+    expect(
+      kv.getString(TtsSettingsStore.doubaoCookieStorageKey),
+      'sessionid=abc; uid_tt=123',
+    );
+
+    final restored = TtsSettingsStore(kv);
+    await restored.load();
+    expect(restored.engine, TtsEngineKind.doubao);
+    expect(restored.doubaoVoice, 'zh_male_chenwen_moon_bigtts');
+    expect(restored.doubaoCookie, 'sessionid=abc; uid_tt=123');
+    expect(restored.activeVoice, 'zh_male_chenwen_moon_bigtts');
+  });
+
+  test('旧版内嵌 doubaoCookie 迁移到独立 key 并从设置 JSON 擦除', () async {
+    final kv = MemoryKeyValueStore();
+    await kv.setString(
+      'tts_settings',
+      jsonEncode({
+        'engine': 'doubao',
+        'doubaoVoice': 'zh_male_chenwen_moon_bigtts',
+        'doubaoCookie': 'sessionid=legacy',
+      }),
+    );
+
+    final store = TtsSettingsStore(kv);
+    await store.load();
+
+    expect(store.doubaoCookie, 'sessionid=legacy');
+    expect(
+      kv.getString(TtsSettingsStore.doubaoCookieStorageKey),
+      'sessionid=legacy',
+    );
+    final plain = jsonDecode(kv.getString('tts_settings')!) as Map;
+    expect(plain.containsKey('doubaoCookie'), isFalse);
+    expect(plain['engine'], 'doubao');
+  });
+
+  test('清空豆包 Cookie 会删除独立凭据 key', () async {
+    final kv = MemoryKeyValueStore();
+    final store = TtsSettingsStore(kv);
+    await store.load();
+    await store.setDoubaoCookie('sessionid=abc');
+    expect(kv.getString(TtsSettingsStore.doubaoCookieStorageKey), isNotNull);
+
+    await store.setDoubaoCookie('   ');
+    expect(store.doubaoCookie, isEmpty);
+    expect(kv.getString(TtsSettingsStore.doubaoCookieStorageKey), isNull);
+  });
+
+  test('豆包音色清单默认音色与常量一致', () {
+    final ids = doubaoZhVoices.map((v) => v.id).toSet();
+    expect(ids, contains(doubaoDefaultVoiceId));
+    expect(doubaoZhVoices.first.id, doubaoDefaultVoiceId);
+  });
+
   test('Edge 音色清单覆盖全部听书预设，默认音色未被改动', () {
     final ids = edgeZhVoices.map((v) => v.id).toSet();
     expect(ids, contains('zh-CN-XiaoxiaoNeural'));

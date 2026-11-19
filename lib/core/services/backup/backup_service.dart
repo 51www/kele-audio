@@ -9,6 +9,7 @@ import '../../domain/records.dart';
 import 'backup_crypto.dart';
 import 'backup_keys.dart';
 import 'shelf_album_snapshot.dart';
+import '../tts/tts_settings_store.dart';
 
 /// 导入失败的分类（页面按此给友好提示 / 决定是否弹密码框重试）。
 enum BackupFailureKind {
@@ -124,6 +125,9 @@ class BackupService extends ChangeNotifier {
         final v = kv.getString(item.key);
         if (v != null) keys[item.key] = v;
       }
+      // 防御：早期版本曾把豆包 Cookie 内嵌在 tts_settings 里，这里再擦除一次，
+      // 保证明文凭据绝不随普通设置区（keys）导出。真正的凭据走 payload.secure。
+      _stripLegacyDoubaoCookie(keys);
       // 阅读进度是 `reader_progress_{bookId}` 动态键：按本地书库 ids 收集。
       try {
         final booksRaw = kv.getString('reader_books');
@@ -438,6 +442,22 @@ class BackupService extends ChangeNotifier {
   static DateTime? _tryParseDate(String? iso) {
     if (iso == null || iso.isEmpty) return null;
     return DateTime.tryParse(iso)?.toLocal();
+  }
+
+  /// 擦除旧版内嵌在 tts_settings JSON 里的豆包 Cookie（明文凭据不进 keys 区）。
+  static void _stripLegacyDoubaoCookie(Map<String, dynamic> keys) {
+    final raw = keys[TtsSettingsStore.storageKey];
+    if (raw is! String || raw.isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      final json = Map<String, dynamic>.from(decoded);
+      if (!json.containsKey(TtsSettingsStore.legacyDoubaoCookieField)) return;
+      json.remove(TtsSettingsStore.legacyDoubaoCookieField);
+      keys[TtsSettingsStore.storageKey] = jsonEncode(json);
+    } catch (_) {
+      // JSON 损坏时原样保留，由导入端 fail-safe 处理。
+    }
   }
 
   /// 表编码走 [Table.encodeAll]（`T` 在 `encode` 参数位，经

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../app/theme/app_tokens.dart';
 import '../../../core/services/tts/tts_engine.dart';
+import '../../../core/services/tts/tts_engine_doubao.dart';
 import '../../../core/services/tts/tts_engine_edge.dart';
 import '../../../core/services/tts/tts_engine_system.dart';
 import '../../../core/services/tts/tts_settings_store.dart';
@@ -20,11 +21,22 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
   bool _loadingVoices = false;
   bool _busy = false;
   String? _status;
+  late final TextEditingController _cookieController;
+  bool _cookieObscured = true;
 
   @override
   void initState() {
     super.initState();
+    _cookieController = TextEditingController(
+      text: context.read<TtsSettingsStore>().doubaoCookie,
+    );
     _loadSystemVoices();
+  }
+
+  @override
+  void dispose() {
+    _cookieController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSystemVoices() async {
@@ -99,6 +111,45 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
       }
     });
     await engine.dispose();
+  }
+
+  TtsDoubaoEngine _doubaoEngine(TtsSettingsStore settings) =>
+      TtsDoubaoEngine(cookieProvider: () => settings.doubaoCookie);
+
+  Future<void> _testDoubao(TtsSettingsStore settings) async {
+    final cookie = _cookieController.text.trim();
+    await settings.setDoubaoCookie(cookie);
+    if (cookie.isEmpty) {
+      setState(() => _status = '请先粘贴豆包 Cookie 再自检');
+      return;
+    }
+    final engine = _doubaoEngine(settings);
+    await _runBusy(() async {
+      try {
+        await engine.start(_params(settings, voice: settings.doubaoVoice));
+        await engine.testConnection();
+        if (mounted) setState(() => _status = '豆包连通性正常');
+      } catch (e) {
+        if (mounted) {
+          setState(() => _status = '豆包连通性失败：${_cleanError(e)}；'
+              '请确认 Cookie 有效且未过期，或改用 Edge 朗读');
+        }
+      }
+    });
+    await engine.dispose();
+  }
+
+  Future<void> _auditionDoubao(
+    TtsSettingsStore settings, {
+    String? voice,
+  }) async {
+    final cookie = _cookieController.text.trim();
+    await settings.setDoubaoCookie(cookie);
+    if (cookie.isEmpty) {
+      setState(() => _status = '请先粘贴豆包 Cookie 再试听');
+      return;
+    }
+    await _audition(_doubaoEngine(settings), settings, voice: voice);
   }
 
   @override
@@ -219,6 +270,95 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
               FilledButton.tonalIcon(
                 onPressed:
                     _busy ? null : () => _audition(TtsEdgeEngine(), settings),
+                icon: const Icon(Icons.volume_up_outlined, size: 18),
+                label: const Text('试听当前音色'),
+              ),
+            ],
+          ),
+        ],
+        if (settings.engine == TtsEngineKind.doubao) ...[
+          Text('豆包登录 Cookie', style: tokens.captionStyle),
+          const SizedBox(height: 6),
+          Text(
+            '登录豆包网页版后，按 F12 → Network → 刷新页面，'
+            '在任意请求的 Request Headers 中复制完整 Cookie 值粘贴到下方。'
+            'Cookie 仅保存在本机，有效期约 30 天，过期请重新获取。',
+            style: tokens.captionStyle.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _cookieController,
+            obscureText: _cookieObscured,
+            // Flutter 断言要求：遮盖时只能单行。显示时可多行，方便核对长 Cookie。
+            maxLines: _cookieObscured ? 1 : 3,
+            minLines: 1,
+            onChanged: (value) => settings.setDoubaoCookie(value),
+            decoration: InputDecoration(
+              labelText: 'Cookie（sessionid; sid_guard; uid_tt 等）',
+              hintText: 'sessionid=xxx; sid_guard=xxx; uid_tt=xxx',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                tooltip: _cookieObscured ? '显示 Cookie' : '隐藏 Cookie',
+                icon: Icon(
+                  _cookieObscured
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                ),
+                onPressed: () =>
+                    setState(() => _cookieObscured = !_cookieObscured),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '豆包为实验性在线引擎，接口可能与风控随时变化，仅供个人轻量使用；'
+            '不稳定时请切回 Edge 或系统朗读。',
+            style: tokens.captionStyle.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text('豆包音色', style: tokens.captionStyle),
+          const SizedBox(height: 6),
+          for (final voice in doubaoZhVoices)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: Icon(
+                settings.doubaoVoice == voice.id
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                color: settings.doubaoVoice == voice.id
+                    ? scheme.primary
+                    : scheme.outline,
+              ),
+              title: Text(voice.name, style: tokens.bodyStyle),
+              subtitle: Text(voice.id, style: tokens.captionStyle),
+              onTap: () => settings.setDoubaoVoice(voice.id),
+              trailing: IconButton(
+                tooltip: '试听该音色',
+                onPressed: _busy
+                    ? null
+                    : () => _auditionDoubao(settings, voice: voice.id),
+                icon: const Icon(Icons.play_circle_outline_rounded),
+              ),
+            ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: _busy ? null : () => _testDoubao(settings),
+                icon: const Icon(Icons.wifi_tethering_rounded, size: 18),
+                label: const Text('连通性自检'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: _busy
+                    ? null
+                    : () => _auditionDoubao(settings),
                 icon: const Icon(Icons.volume_up_outlined, size: 18),
                 label: const Text('试听当前音色'),
               ),

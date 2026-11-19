@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 /// 听书引擎类型（docs/reader-design.md §5.1）。
-enum TtsEngineKind { system, edge }
+enum TtsEngineKind { system, edge, doubao }
 
 extension TtsEngineKindX on TtsEngineKind {
   String get storageValue => name;
@@ -9,6 +9,7 @@ extension TtsEngineKindX on TtsEngineKind {
   String get label => switch (this) {
     TtsEngineKind.system => '系统',
     TtsEngineKind.edge => 'Edge',
+    TtsEngineKind.doubao => '豆包',
   };
 
   static TtsEngineKind fromStorage(String? value) {
@@ -115,6 +116,33 @@ const List<TtsVoice> edgeZhVoices = [
   TtsVoice(id: 'zh-TW-HsiaoYuNeural', name: '曉語 · 台湾女声'),
   TtsVoice(id: 'zh-TW-YunJheNeural', name: '雲哲 · 台湾男声'),
   TtsVoice(id: 'zh-HK-HiuMaanNeural', name: '曉曼 · 粤语女声'),
+];
+
+/// 豆包默认音色 ID（桃子）。
+const String doubaoDefaultVoiceId =
+    'zh_female_taozi_conversation_v4_wvae_bigtts';
+
+/// 豆包 TTS 内置中文音色（离线内置清单，需要登录 Cookie）。
+const List<TtsVoice> doubaoZhVoices = [
+  TtsVoice(
+    id: 'zh_female_taozi_conversation_v4_wvae_bigtts',
+    name: '桃子 · 女声',
+  ),
+  TtsVoice(
+    id: 'zh_female_shuangkuai_emo_v3_wvae_bigtts',
+    name: '爽快 · 女声',
+  ),
+  TtsVoice(
+    id: 'zh_female_tianmei_conversation_v4_wvae_bigtts',
+    name: '甜美 · 女声',
+  ),
+  TtsVoice(id: 'zh_female_qingche_moon_bigtts', name: '清澈 · 女声'),
+  TtsVoice(
+    id: 'zh_male_yangguang_conversation_v4_wvae_bigtts',
+    name: '阳光 · 男声',
+  ),
+  TtsVoice(id: 'zh_male_chenwen_moon_bigtts', name: '沉稳 · 男声'),
+  TtsVoice(id: 'zh_male_rap_mars_bigtts', name: '说唱 · 男声'),
 ];
 
 /// 听书场景预设：一次套用音色、语速与音调。

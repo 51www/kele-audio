@@ -336,6 +336,8 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
             Future<void> selectVoice(String id) async {
               if (kind == TtsEngineKind.system) {
                 await settings.setSystemVoice(id);
+              } else if (kind == TtsEngineKind.doubao) {
+                await settings.setDoubaoVoice(id);
               } else {
                 await settings.setEdgeVoice(id);
               }
@@ -384,12 +386,14 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
               );
             }
 
-            final voices = kind == TtsEngineKind.system
-                ? <TtsVoice>[
-                    const TtsVoice(id: '', name: '跟随系统默认'),
-                    ...systemVoices,
-                  ]
-                : edgeZhVoices;
+            final voices = switch (kind) {
+              TtsEngineKind.system => <TtsVoice>[
+                  const TtsVoice(id: '', name: '跟随系统默认'),
+                  ...systemVoices,
+                ],
+              TtsEngineKind.doubao => doubaoZhVoices,
+              _ => edgeZhVoices,
+            };
             final activeVoice = settings.activeVoice;
 
             return Column(
@@ -408,6 +412,11 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
                   Icons.cloud_outlined,
                   '在线合成，音色更自然',
                 ),
+                engineItem(
+                  TtsEngineKind.doubao,
+                  Icons.auto_awesome_outlined,
+                  '需登录 Cookie，实验性引擎',
+                ),
                 SizedBox(height: tokens.spaceSm),
                 Text(
                   '音色（切换后即时重读当前段）',
@@ -421,6 +430,17 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
                       '未读取到系统中文音色，可保持「跟随系统默认」。',
                       style: tokens.captionStyle.copyWith(
                         color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                if (kind == TtsEngineKind.doubao &&
+                    settings.doubaoCookie.trim().isEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: tokens.spaceXs),
+                    child: Text(
+                      '尚未设置豆包 Cookie，请到「设置 → 听书」粘贴登录 Cookie 后再使用。',
+                      style: tokens.captionStyle.copyWith(
+                        color: scheme.error,
                       ),
                     ),
                   ),

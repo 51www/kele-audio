@@ -12,6 +12,7 @@ import 'package:kele_audio/core/services/backup/backup_crypto.dart';
 import 'package:kele_audio/core/services/backup/backup_keys.dart';
 import 'package:kele_audio/core/services/backup/backup_service.dart';
 import 'package:kele_audio/core/services/settings_store.dart';
+import 'package:kele_audio/core/services/tts/tts_settings_store.dart';
 
 /// 组装「一台设备」：内存 KV + 本地库 + 备份服务。
 ({MemoryKeyValueStore kv, LocalDatabase db, BackupService service}) device() {
@@ -107,6 +108,10 @@ Future<void> seedSource(
   await kv.setString('player_rate', '1.5');
   await kv.setString('theme_preset', '3');
   await kv.setString(BiliClient.prefCookie, 'SESSDATA=abc; buvid3=xyz');
+  await kv.setString(
+    TtsSettingsStore.doubaoCookieStorageKey,
+    'sessionid=doubao; uid_tt=tt',
+  );
   await db.shelf
       .upsert(db.shelf.decode(Map<String, dynamic>.from(shelfRow)));
   await db.playHistory
@@ -128,6 +133,10 @@ void main() {
     expect(dst.kv.getString('player_rate'), '1.5');
     expect(dst.kv.getString('theme_preset'), '3');
     expect(dst.kv.getString(BiliClient.prefCookie), 'SESSDATA=abc; buvid3=xyz');
+    expect(
+      dst.kv.getString(TtsSettingsStore.doubaoCookieStorageKey),
+      'sessionid=doubao; uid_tt=tt',
+    );
     expect(dst.db.shelf.count, 1);
     expect(dst.db.shelf.all().first.albumId, 'al1');
     expect(dst.db.playHistory.count, 1);
@@ -403,9 +412,36 @@ void main() {
       BackupWhitelist.shelfAlbumMetaKey,
     };
     expect(keys.difference(allowed), isEmpty);
+    final secure = (payload['secure'] as Map).keys.toSet();
+    final allowedSecure = {
+      for (final item in BackupWhitelist.secureItems) item.key,
+    };
+    expect(secure.difference(allowedSecure), isEmpty);
+    expect(secure, contains(BiliClient.prefCookie));
+    expect(secure, contains(TtsSettingsStore.doubaoCookieStorageKey));
+  });
+
+  test('豆包登录 Cookie 归入 secure 区，不出现在普通设置 keys 区', () async {
+    final src = device();
+    await seedSource(src.kv, src.db);
+    // 即便旧设置 JSON 里残留同名字段，也不应被普通设置区带出去。
+    await src.kv.setString('tts_settings', jsonEncode({
+      'engine': 'doubao',
+      'doubaoCookie': 'sessionid=leaked-in-plain-settings',
+    }));
+
+    final bytes = await src.service.buildBackup();
+    final payload =
+        (jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>)['payload']
+            as Map<String, dynamic>;
+    final keys = jsonEncode(payload['keys']);
+    final secure = payload['secure'] as Map<String, dynamic>;
+
+    expect(keys.contains('sessionid=leaked-in-plain-settings'), isFalse);
+    expect(keys.contains(TtsSettingsStore.doubaoCookieStorageKey), isFalse);
     expect(
-      (payload['secure'] as Map).containsKey(BiliClient.prefCookie),
-      isTrue,
+      secure[TtsSettingsStore.doubaoCookieStorageKey],
+      'sessionid=doubao; uid_tt=tt',
     );
   });
 

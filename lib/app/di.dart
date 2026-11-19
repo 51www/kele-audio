@@ -34,6 +34,7 @@ import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
 import '../core/services/system/download_notification.dart';
 import '../core/services/tts/tts_engine.dart';
+import '../core/services/tts/tts_engine_doubao.dart';
 import '../core/services/tts/tts_engine_edge.dart';
 import '../core/services/tts/tts_engine_system.dart';
 import '../core/services/tts/tts_session.dart';
@@ -283,6 +284,9 @@ class AppServices {
       engineFactory: (kind) => switch (kind) {
         TtsEngineKind.system => TtsSystemEngine(),
         TtsEngineKind.edge => TtsEdgeEngine(),
+        TtsEngineKind.doubao => TtsDoubaoEngine(
+          cookieProvider: () => ttsSettings.doubaoCookie,
+        ),
       },
     );
 

@@ -18,6 +18,14 @@ class TtsSettingsStore extends ChangeNotifier {
   static double quantizeParam(double value) =>
       (value / paramStep).round() * paramStep;
 
+  /// 豆包登录 Cookie 单独存放，与 [storageKey] 的普通设置分离。
+  /// 凭据类数据由备份系统归入 payload.secure（见 BackupWhitelist.secureItems）。
+  static const doubaoCookieStorageKey = 'doubao_tts_cookie';
+
+  /// 早期版本曾把 Cookie 内嵌在 tts_settings 里的字段名。迁移与备份导出
+  /// 都据此擦除，避免明文 Cookie 混进普通设置区。
+  static const legacyDoubaoCookieField = 'doubaoCookie';
+
   /// 已下线的 MiMo 朗读 Key，读取设置时顺手清除本机残留凭据。
   static const removedMimoKeyStorageKey = 'mimo_api_key';
 
@@ -27,6 +35,8 @@ class TtsSettingsStore extends ChangeNotifier {
   TtsEngineKind _engine = TtsEngineKind.edge;
   String _systemVoice = '';
   String _edgeVoice = 'zh-CN-XiaoxiaoNeural';
+  String _doubaoVoice = doubaoDefaultVoiceId;
+  String _doubaoCookie = '';
   double _rate = 1.0;
   double _pitch = 1.0;
 
@@ -34,6 +44,8 @@ class TtsSettingsStore extends ChangeNotifier {
   TtsEngineKind get engine => _engine;
   String get systemVoice => _systemVoice;
   String get edgeVoice => _edgeVoice;
+  String get doubaoVoice => _doubaoVoice;
+  String get doubaoCookie => _doubaoCookie;
   double get rate => _rate;
   double get pitch => _pitch;
 
@@ -41,20 +53,39 @@ class TtsSettingsStore extends ChangeNotifier {
   String get activeVoice => switch (_engine) {
         TtsEngineKind.system => _systemVoice,
         TtsEngineKind.edge => _edgeVoice,
+        TtsEngineKind.doubao => _doubaoVoice,
       };
 
   Future<void> load() async {
     final raw = _kv.getString(storageKey);
+    Map<String, dynamic>? stored;
     if (raw != null && raw.isNotEmpty) {
       try {
         final decoded = jsonDecode(raw);
-        if (decoded is Map) {
-          _applyJson(Map<String, dynamic>.from(decoded));
-        }
+        if (decoded is Map) stored = Map<String, dynamic>.from(decoded);
       } catch (e) {
         debugPrint('[tts] 读取 tts_settings 失败：$e');
       }
     }
+
+    // Cookie 从独立凭据 key 读取。兼容早期内嵌在 tts_settings 里的旧数据：
+    // 迁移到独立 key 后把明文字段从普通设置里擦除（避免明文随设置外泄）。
+    var legacyFieldFound = false;
+    String legacyCookie = '';
+    if (stored != null && stored.containsKey(legacyDoubaoCookieField)) {
+      legacyFieldFound = true;
+      legacyCookie = stored.remove(legacyDoubaoCookieField)?.toString() ?? '';
+    }
+    _doubaoCookie = (_kv.getString(doubaoCookieStorageKey) ?? '').trim();
+    if (_doubaoCookie.isEmpty && legacyCookie.isNotEmpty) {
+      _doubaoCookie = legacyCookie;
+      await _kv.setString(doubaoCookieStorageKey, _doubaoCookie);
+    }
+    if (stored != null) {
+      _applyJson(stored);
+      if (legacyFieldFound) await _kv.setString(storageKey, jsonEncode(stored));
+    }
+
     if (_kv.getString(removedMimoKeyStorageKey) != null) {
       await _kv.remove(removedMimoKeyStorageKey);
     }
@@ -67,6 +98,7 @@ class TtsSettingsStore extends ChangeNotifier {
     _engine = TtsEngineKindX.fromStorage(json['engine']?.toString());
     _systemVoice = json['systemVoice']?.toString() ?? '';
     _edgeVoice = json['edgeVoice']?.toString() ?? 'zh-CN-XiaoxiaoNeural';
+    _doubaoVoice = json['doubaoVoice']?.toString() ?? doubaoDefaultVoiceId;
     _rate = ((json['rate'] as num?)?.toDouble() ?? 1.0).clamp(0.5, 3.0);
     _pitch = ((json['pitch'] as num?)?.toDouble() ?? 1.0).clamp(0.5, 2.0);
   }
@@ -75,6 +107,7 @@ class TtsSettingsStore extends ChangeNotifier {
         'engine': _engine.storageValue,
         'systemVoice': _systemVoice,
         'edgeVoice': _edgeVoice,
+        'doubaoVoice': _doubaoVoice,
         'rate': _rate,
         'pitch': _pitch,
       };
@@ -100,6 +133,23 @@ class TtsSettingsStore extends ChangeNotifier {
     _edgeVoice = voice;
     notifyListeners();
     await _persist();
+  }
+
+  Future<void> setDoubaoVoice(String voice) async {
+    _doubaoVoice = voice;
+    notifyListeners();
+    await _persist();
+  }
+
+  /// 保存豆包登录 Cookie 到独立凭据 key。空串表示清空凭据。
+  Future<void> setDoubaoCookie(String cookie) async {
+    _doubaoCookie = cookie.trim();
+    notifyListeners();
+    if (_doubaoCookie.isEmpty) {
+      await _kv.remove(doubaoCookieStorageKey);
+    } else {
+      await _kv.setString(doubaoCookieStorageKey, _doubaoCookie);
+    }
   }
 
   Future<void> setRate(double rate) async {
