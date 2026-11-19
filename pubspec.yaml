@@ -89,6 +89,15 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+# path_provider_android 2.3.1 通过 jni/jni_flutter 反射访问 Android Context。
+# jni 1.2.0 / jni_flutter 1.1.0 在 release(R8) 下查找 android.content.Context 失败
+# （ClassNotFoundException: Landroid/content/Context;），导致启动卡在图标页。
+# 锁定到已验证可正常启动的稳定组合，避免 pub get 因镜像源差异升级到问题版本。
+dependency_overrides:
+  jni: 1.1.2
+  jni_flutter: 1.0.4+1
+  jni_util: 1.0.0
+
 flutter:
 
   # The following line ensures that the Material Icons font is

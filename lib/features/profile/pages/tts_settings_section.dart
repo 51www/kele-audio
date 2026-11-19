@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../app/theme/app_tokens.dart';
+import '../../../core/services/tts/doubao_cookie_pool.dart';
 import '../../../core/services/tts/tts_engine.dart';
 import '../../../core/services/tts/tts_engine_doubao.dart';
 import '../../../core/services/tts/tts_engine_edge.dart';
 import '../../../core/services/tts/tts_engine_system.dart';
+import '../../../core/services/tts/tts_session.dart';
 import '../../../core/services/tts/tts_settings_store.dart';
 
 /// 设置页「本地书 · 听书」分组（M9.4）。
@@ -22,6 +24,7 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
   bool _busy = false;
   String? _status;
   late final TextEditingController _cookieController;
+  final FocusNode _cookieFocus = FocusNode();
   bool _cookieObscured = true;
 
   @override
@@ -30,12 +33,25 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
     _cookieController = TextEditingController(
       text: context.read<TtsSettingsStore>().doubaoCookie,
     );
+    context.read<TtsSettingsStore>().addListener(_onSettingsChanged);
     _loadSystemVoices();
+  }
+
+  /// 备份还原会在本页直接改写 settings.doubaoCookie；输入框不在编辑中时
+  /// 同步过来，避免界面显示旧 Cookie、实际却用新 Cookie 的错位。
+  void _onSettingsChanged() {
+    if (!mounted || _cookieFocus.hasFocus) return;
+    final latest = context.read<TtsSettingsStore>().doubaoCookie;
+    if (_cookieController.text != latest) {
+      _cookieController.text = latest;
+    }
   }
 
   @override
   void dispose() {
+    context.read<TtsSettingsStore>().removeListener(_onSettingsChanged);
     _cookieController.dispose();
+    _cookieFocus.dispose();
     super.dispose();
   }
 
@@ -82,6 +98,13 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
         rate: settings.rate,
         pitch: settings.pitch,
       );
+
+  /// 设置页改了音色/语速/音调后，若听书会话正在播放，立即把新参数推给它
+  /// 并从当前句续读——否则正在朗读的引擎仍用旧参数，表现为「切换不生效」。
+  /// 会话未激活时 reloadParams 内部直接返回，无副作用。
+  void _reloadActiveSession() {
+    context.read<TtsSession>().reloadParams();
+  }
 
   Future<void> _audition(
     TtsEngine engine,
@@ -172,7 +195,10 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
                 label: Text(kind.label),
                 selected: settings.engine == kind,
                 showCheckmark: false,
-                onSelected: (_) => settings.setEngine(kind),
+                onSelected: (_) async {
+                  await settings.setEngine(kind);
+                  _reloadActiveSession();
+                },
               ),
           ],
         ),
@@ -184,7 +210,10 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
             hint: '跟随系统默认音色',
             voices: _systemVoices,
             loading: _loadingVoices,
-            onChanged: settings.setSystemVoice,
+            onChanged: (v) async {
+              await settings.setSystemVoice(v);
+              _reloadActiveSession();
+            },
           ),
           const SizedBox(height: 8),
           Row(
@@ -222,7 +251,10 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
               ),
               title: Text(voice.name, style: tokens.bodyStyle),
               subtitle: Text(voice.id, style: tokens.captionStyle),
-              onTap: () => settings.setEdgeVoice(voice.id),
+              onTap: () async {
+                await settings.setEdgeVoice(voice.id);
+                _reloadActiveSession();
+              },
               trailing: IconButton(
                 tooltip: '试听该音色',
                 onPressed: _busy
@@ -282,6 +314,8 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           Text(
             '登录豆包网页版后，按 F12 → Network → 刷新页面，'
             '在任意请求的 Request Headers 中复制完整 Cookie 值粘贴到下方。'
+            '可每行粘贴一个不同账号的 Cookie，系统会轮流使用、'
+            '被拦截的自动冷却跳过，显著降低风控概率（多个小号效果最好）。'
             'Cookie 仅保存在本机，有效期约 30 天，过期请重新获取。',
             style: tokens.captionStyle.copyWith(
               color: scheme.onSurfaceVariant,
@@ -290,14 +324,19 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           const SizedBox(height: 8),
           TextField(
             controller: _cookieController,
+            focusNode: _cookieFocus,
             obscureText: _cookieObscured,
-            // Flutter 断言要求：遮盖时只能单行。显示时可多行，方便核对长 Cookie。
-            maxLines: _cookieObscured ? 1 : 3,
+            // Flutter 断言要求：遮盖时只能单行。显示时可多行，方便粘贴多个 Cookie。
+            maxLines: _cookieObscured ? 1 : 6,
             minLines: 1,
-            onChanged: (value) => settings.setDoubaoCookie(value),
+            onChanged: (value) {
+              settings.setDoubaoCookie(value);
+              setState(() {}); // 刷新下方已配置 Cookie 数量
+            },
             decoration: InputDecoration(
-              labelText: 'Cookie（sessionid; sid_guard; uid_tt 等）',
-              hintText: 'sessionid=xxx; sid_guard=xxx; uid_tt=xxx',
+              labelText: 'Cookie（每行一个，sessionid; sid_guard; uid_tt 等）',
+              hintText: '多个 Cookie 请点右侧眼睛展开后逐行粘贴，'
+                  '或用 | 分隔在同一行',
               border: const OutlineInputBorder(),
               suffixIcon: IconButton(
                 tooltip: _cookieObscured ? '显示 Cookie' : '隐藏 Cookie',
@@ -313,7 +352,9 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           ),
           const SizedBox(height: 6),
           Text(
-            '豆包为实验性在线引擎，接口可能与风控随时变化，仅供个人轻量使用；'
+            '已配置 ${DoubaoTtsCookiePool.parse(settings.doubaoCookie).length} 个 Cookie'
+            '${DoubaoTtsCookiePool.parse(settings.doubaoCookie).length > 1 ? '（自动轮换）' : ''}。'
+            '朗读采用多句合并以减少请求；豆包为实验性引擎，接口/风控可能变化，'
             '不稳定时请切回 Edge 或系统朗读。',
             style: tokens.captionStyle.copyWith(
               color: scheme.onSurfaceVariant,
@@ -336,7 +377,10 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
               ),
               title: Text(voice.name, style: tokens.bodyStyle),
               subtitle: Text(voice.id, style: tokens.captionStyle),
-              onTap: () => settings.setDoubaoVoice(voice.id),
+              onTap: () async {
+                await settings.setDoubaoVoice(voice.id);
+                _reloadActiveSession();
+              },
               trailing: IconButton(
                 tooltip: '试听该音色',
                 onPressed: _busy
@@ -379,6 +423,7 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           label: '${settings.rate.toStringAsFixed(2)}x',
           onChanged: (value) =>
               settings.setRate(TtsSettingsStore.quantizeParam(value)),
+          onChangeEnd: (_) => _reloadActiveSession(),
         ),
         Slider(
           value: settings.pitch,
@@ -388,6 +433,7 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           label: settings.pitch.toStringAsFixed(2),
           onChanged: (value) =>
               settings.setPitch(TtsSettingsStore.quantizeParam(value)),
+          onChangeEnd: (_) => _reloadActiveSession(),
         ),
         if (_busy) ...[
           const SizedBox(height: 8),

@@ -8,11 +8,11 @@ import 'package:path_provider/path_provider.dart';
 import 'doubao_tts_client.dart';
 import 'tts_engine.dart';
 
-/// 豆包 TTS 引擎（实验性）：WebSocket 合成 AAC → 独立 media_kit Player 播放。
+/// 豆包 TTS 引擎（实验性）：WebSocket 合成 WAV → 独立 media_kit Player 播放。
 ///
 /// 与 Edge 引擎同构：支持前瞻预合成以缩短段间停顿，但豆包网页端有风控，
 /// 客户端侧已做最小请求间隔限流；仍不宜高频/长时间连续调用。
-class TtsDoubaoEngine implements TtsEngine {
+class TtsDoubaoEngine implements TtsEngine, BatchingTtsEngine {
   TtsDoubaoEngine({required this.cookieProvider});
 
   /// 登录态 Cookie 提供者。每次合成都读取最新值，用户在设置页粘贴新 Cookie
@@ -39,6 +39,13 @@ class TtsDoubaoEngine implements TtsEngine {
 
   @override
   String get id => 'doubao';
+
+  // 豆包风控敏感：多句合并降低请求数，预取收窄到 1 避免瞬间连发。
+  @override
+  int get maxSentencesPerSegment => 5;
+
+  @override
+  int get prefetchDepth => 1;
 
   void _ensurePlayer() {
     if (_player != null) return;
@@ -106,7 +113,7 @@ class TtsDoubaoEngine implements TtsEngine {
         if (bytes.isEmpty) {
           throw const TtsException('empty_audio', '豆包未返回音频数据');
         }
-        return bytes;
+        return _padTailSilence(bytes);
       } on TtsException {
         rethrow; // auth / empty_audio 等无需重试
       } on DoubaoTtsException catch (e) {
@@ -119,6 +126,63 @@ class TtsDoubaoEngine implements TtsEngine {
       }
     }
     throw TtsException('doubao_failed', _cleanError(last ?? '豆包合成失败'));
+  }
+
+  /// 批量段之间的听感喘息。
+  ///
+  /// 音频内部的句间停顿由 TTS 模型自然生成，但两次合成请求的音频衔接处
+  /// 是硬接的（上一段播完立即 open 下一段），听感过于紧凑。在每段 WAV
+  /// 末尾追加 PCM 静音，把停顿做进音频流里，衔接自然且暂停/停止天然同步。
+  static const Duration _segmentTailPause = Duration(milliseconds: 420);
+
+  /// 在 WAV 的 data chunk 尾部追加 [_segmentTailPause] 的静音。
+  ///
+  /// 豆包输出的是流式 WAV：RIFF/data 的 size 字段均为 0xFFFFFFFF 占位，
+  /// 真实长度只到文件尾。因此以「到 EOF 的实际长度」为准，追加后把两个
+  /// size 字段一并修正为真实值（顺带把流式 WAV 修成标准 WAV）。
+  /// 结构不符合预期（非 RIFF / 找不到 data）时原样返回，不影响播放。
+  Uint8List _padTailSilence(Uint8List wav) {
+    if (wav.length < 44) return wav;
+    if (String.fromCharCodes(wav.sublist(0, 4)) != 'RIFF') return wav;
+    // 从 fmt chunk 读取采样参数，兜底豆包固定输出（24kHz / 16bit / mono）。
+    var rate = 24000, channels = 1, bits = 16;
+    var offset = 12; // 跳过 "RIFF" + size + "WAVE"
+    int? dataOffset;
+    while (offset + 8 <= wav.length) {
+      final id = String.fromCharCodes(wav.sublist(offset, offset + 4));
+      final size = ByteData.sublistView(wav, offset + 4, offset + 8)
+          .getUint32(0, Endian.little);
+      if (id == 'data') {
+        dataOffset = offset;
+        break;
+      }
+      if (id == 'fmt ' && offset + 24 <= wav.length) {
+        final fmt = ByteData.sublistView(wav, offset + 8, offset + 24);
+        channels = fmt.getUint16(2, Endian.little);
+        rate = fmt.getUint32(4, Endian.little);
+        bits = fmt.getUint16(14, Endian.little);
+      }
+      // size 字段无效（流式占位 0xFFFFFFFF）时无法跳到下一个 chunk。
+      if (size == 0xFFFFFFFF) break;
+      offset += 8 + size + (size.isOdd ? 1 : 0);
+    }
+    if (dataOffset == null) return wav;
+    final dataStart = dataOffset + 8;
+    final actualDataLen = wav.length - dataStart;
+    final bytesPerFrame = channels * (bits ~/ 8);
+    if (rate <= 0 || bytesPerFrame <= 0 || actualDataLen <= 0) return wav;
+    // 静音长度按采样帧对齐，避免 data 尺寸非帧整数倍。
+    final silenceLen = ((rate * bytesPerFrame * _segmentTailPause.inMilliseconds) ~/
+            1000 ~/
+            bytesPerFrame) *
+        bytesPerFrame;
+    final padded = Uint8List(wav.length + silenceLen)
+      ..setRange(0, wav.length, wav);
+    final bd = ByteData.sublistView(padded);
+    // data chunk size 与 RIFF 总 size（文件长 - 8）都修正为真实值。
+    bd.setUint32(dataOffset + 4, actualDataLen + silenceLen, Endian.little);
+    bd.setUint32(4, padded.length - 8, Endian.little);
+    return padded;
   }
 
   @override
@@ -172,13 +236,23 @@ class TtsDoubaoEngine implements TtsEngine {
       _seq++;
       final file = File(
         '${dir.path}${Platform.pathSeparator}tts_doubao_${_seq}_'
-        '${DateTime.now().microsecondsSinceEpoch}.aac',
+        '${DateTime.now().microsecondsSinceEpoch}.wav',
       );
       await file.writeAsBytes(bytes, flush: true);
       writtenFile = file;
       _currentFile = file;
       await _player!.open(Media(file.path), play: true);
       if (token != _token) return;
+      // open() 返回后 mpv 的状态异步刷新：连续朗读时上一段刚播完，
+      // state.completed 可能仍残留 true。此刻立即读取会把本段误判为
+      // 「已播完」，speak 提前返回导致下一段抢读。等新播放会话真正
+      // 开始（playing 且非 completed）后再启用完成检测。
+      final startedAt = DateTime.now();
+      while (DateTime.now().difference(startedAt) < const Duration(seconds: 3)) {
+        final st = _player!.state;
+        if (st.playing && !st.completed) break;
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      }
       _completionArmed = true;
       if (_player!.state.completed) {
         _completionArmed = false;

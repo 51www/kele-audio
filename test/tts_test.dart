@@ -10,7 +10,10 @@ import 'package:kele_audio/core/services/player/playback_arbiter.dart';
 import 'package:kele_audio/core/services/reader/book_store.dart';
 import 'package:kele_audio/core/services/reader/reader_activity_store.dart';
 import 'package:kele_audio/core/services/reader/reader_bridge.dart';
+import 'package:kele_audio/core/services/tts/doubao_cookie_pool.dart';
+import 'package:kele_audio/core/services/tts/doubao_tts_client.dart';
 import 'package:kele_audio/core/services/tts/tts_engine.dart';
+import 'package:kele_audio/core/services/tts/tts_text_splitter.dart';
 import 'package:kele_audio/core/services/tts/tts_engine_system.dart';
 import 'package:kele_audio/core/services/tts/tts_session.dart';
 import 'package:kele_audio/core/services/tts/tts_settings_store.dart';
@@ -286,6 +289,84 @@ void main() {
     expect(restored.activeVoice, 'zh-CN-system-voice');
   });
 
+  test('豆包 Cookie 轮询池：解析、轮换、风控冷却跳过', () {
+    final a = 'sessionid=a; sid_guard=a; uid_tt=a';
+    final b = 'sessionid=b; sid_guard=b; uid_tt=b';
+    final c = 'sessionid=c; sid_guard=c; uid_tt=c';
+
+    // 换行 / 竖线均可切分，空行忽略；单 Cookie 原样返回。
+    expect(DoubaoTtsCookiePool.parse('$a\n$b\n'), [a, b]);
+    expect(DoubaoTtsCookiePool.parse('$a|$b'), [a, b]);
+    expect(DoubaoTtsCookiePool.parse(a), [a]);
+
+    final pool = DoubaoTtsCookiePool.instance;
+    final cookies = [a, b, c];
+    pool.reset();
+    // 顺序轮换。
+    expect(pool.next(cookies), a);
+    expect(pool.next(cookies), b);
+    expect(pool.next(cookies), c);
+    expect(pool.next(cookies), a);
+
+    // b 被风控冷却后，轮询跳过 b。
+    pool.reset();
+    pool.markFailed(b);
+    final picked = <String>[];
+    for (var i = 0; i < 6; i++) {
+      picked.add(pool.next(cookies)!);
+    }
+    expect(picked, isNot(contains(b)));
+    pool.markSuccess(b);
+    pool.reset();
+  });
+
+  test('设置载入会重置豆包 Cookie 池与节流，避免备份还原后沿用旧限流态', () async {
+    final a = 'sessionid=a; sid_guard=a; uid_tt=a';
+    final b = 'sessionid=b; sid_guard=b; uid_tt=b';
+
+    // 制造「旧账号被风控」的残留态：池里 b 冷却、节流退避累加。
+    final pool = DoubaoTtsCookiePool.instance;
+    pool.reset();
+    pool.markFailed(b);
+    expect(pool.next([a, b]), a);
+    final throttle = DoubaoTtsThrottle.instance;
+    throttle.reset();
+    throttle.noteFailure();
+    throttle.noteFailure();
+
+    // load() 无论来源（启动或备份还原）都应清空这些残留。
+    final kv = MemoryKeyValueStore();
+    final store = TtsSettingsStore(kv);
+    await store.load();
+
+    expect(pool.next([a, b]), a, reason: '冷却应被清除，首个 Cookie 仍是 a');
+    // reset 后再连续取，b 不应再被跳过。
+    final picked = <String>[];
+    for (var i = 0; i < 4; i++) {
+      picked.add(pool.next([a, b])!);
+    }
+    expect(picked, contains(b));
+    pool.reset();
+    throttle.reset();
+  });
+
+  test('豆包批量切分：多句合并后请求数少于逐句切分', () {
+    final paragraph = '第一句话内容比较短。第二句话内容也不长。'
+        '第三句话继续讲述一些事情。第四句话是最后的内容。'
+        '第五句话补充说明一下。第六句话到此结束。';
+    final perSentence = const TtsTextSplitter.perSentence().split(paragraph);
+    final batched = const TtsTextSplitter.batched().split(paragraph);
+
+    expect(batched.length, lessThan(perSentence.length));
+    // 合并片段仍保留原文字符区间，供高亮/续读使用。
+    for (final seg in batched) {
+      expect(seg.text.isNotEmpty, isTrue);
+      expect(seg.start, greaterThanOrEqualTo(0));
+      expect(seg.end, greaterThan(seg.start));
+    }
+    expect(perSentence.length, greaterThan(3));
+  });
+
   test('豆包音色/Cookie 可持久化，activeVoice 随引擎切换', () async {
     final kv = MemoryKeyValueStore();
     final store = TtsSettingsStore(kv);
@@ -293,10 +374,10 @@ void main() {
     expect(store.doubaoVoice, doubaoDefaultVoiceId);
     expect(store.doubaoCookie, isEmpty);
 
-    await store.setDoubaoVoice('zh_male_chenwen_moon_bigtts');
+    await store.setDoubaoVoice('zh_male_ahu_conversation_wvae_bigtts');
     await store.setDoubaoCookie('  sessionid=abc; uid_tt=123  ');
     await store.setEngine(TtsEngineKind.doubao);
-    expect(store.activeVoice, 'zh_male_chenwen_moon_bigtts');
+    expect(store.activeVoice, 'zh_male_ahu_conversation_wvae_bigtts');
     expect(store.doubaoCookie, 'sessionid=abc; uid_tt=123');
 
     // Cookie 单独存放，绝不混进普通设置 JSON（备份时该 JSON 走 keys 明文区）。
@@ -309,9 +390,26 @@ void main() {
     final restored = TtsSettingsStore(kv);
     await restored.load();
     expect(restored.engine, TtsEngineKind.doubao);
-    expect(restored.doubaoVoice, 'zh_male_chenwen_moon_bigtts');
+    expect(restored.doubaoVoice, 'zh_male_ahu_conversation_wvae_bigtts');
     expect(restored.doubaoCookie, 'sessionid=abc; uid_tt=123');
-    expect(restored.activeVoice, 'zh_male_chenwen_moon_bigtts');
+    expect(restored.activeVoice, 'zh_male_ahu_conversation_wvae_bigtts');
+  });
+
+  test('豆包已下线的旧音色 ID 加载时回退当前默认音色', () async {
+    final kv = MemoryKeyValueStore();
+    await kv.setString(
+      'tts_settings',
+      jsonEncode({
+        'engine': 'doubao',
+        // 2025 年初的旧音色 ID，已被豆包下线：服务端对未知 speaker 静默
+        // 回退默认女声，客户端必须在加载时把它纠正到当前有效清单。
+        'doubaoVoice': 'zh_male_chenwen_moon_bigtts',
+      }),
+    );
+
+    final store = TtsSettingsStore(kv);
+    await store.load();
+    expect(store.doubaoVoice, doubaoDefaultVoiceId);
   });
 
   test('旧版内嵌 doubaoCookie 迁移到独立 key 并从设置 JSON 擦除', () async {

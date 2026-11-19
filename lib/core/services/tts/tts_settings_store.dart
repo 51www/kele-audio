@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../../api/key_value_store.dart';
+import 'doubao_cookie_pool.dart';
+import 'doubao_tts_client.dart';
 import 'tts_engine.dart';
 
 /// TTS 设置持久化（`tts_settings`，M9.3 建立，M9.4 设置页消费）。
@@ -86,6 +88,12 @@ class TtsSettingsStore extends ChangeNotifier {
       if (legacyFieldFound) await _kv.setString(storageKey, jsonEncode(stored));
     }
 
+    // 设置（含 Cookie）可能来自启动加载，也可能来自备份还原。无论哪种，
+    // 都要重置豆包轮询池与节流退避：否则导入新 Cookie 后仍沿用旧账号的
+    // 失败冷却/退避，下一次朗读被无故限流，误判成「导入后风控」。
+    DoubaoTtsCookiePool.instance.reset();
+    DoubaoTtsThrottle.instance.reset();
+
     if (_kv.getString(removedMimoKeyStorageKey) != null) {
       await _kv.remove(removedMimoKeyStorageKey);
     }
@@ -98,7 +106,14 @@ class TtsSettingsStore extends ChangeNotifier {
     _engine = TtsEngineKindX.fromStorage(json['engine']?.toString());
     _systemVoice = json['systemVoice']?.toString() ?? '';
     _edgeVoice = json['edgeVoice']?.toString() ?? 'zh-CN-XiaoxiaoNeural';
-    _doubaoVoice = json['doubaoVoice']?.toString() ?? doubaoDefaultVoiceId;
+    // 豆包会下线旧音色 ID（服务端对未知 speaker 静默回退默认女声），
+    // 存量设置里若是不在当前清单中的旧 ID，回退到当前默认音色。
+    final storedDoubaoVoice = json['doubaoVoice']?.toString();
+    _doubaoVoice = (storedDoubaoVoice != null &&
+            storedDoubaoVoice.isNotEmpty &&
+            doubaoZhVoices.any((v) => v.id == storedDoubaoVoice))
+        ? storedDoubaoVoice
+        : doubaoDefaultVoiceId;
     _rate = ((json['rate'] as num?)?.toDouble() ?? 1.0).clamp(0.5, 3.0);
     _pitch = ((json['pitch'] as num?)?.toDouble() ?? 1.0).clamp(0.5, 2.0);
   }
@@ -136,7 +151,9 @@ class TtsSettingsStore extends ChangeNotifier {
   }
 
   Future<void> setDoubaoVoice(String voice) async {
-    _doubaoVoice = voice;
+    // 只接受当前清单内的有效音色；豆包会下线旧 ID，存进去只会静默回退。
+    _doubaoVoice =
+        doubaoZhVoices.any((v) => v.id == voice) ? voice : doubaoDefaultVoiceId;
     notifyListeners();
     await _persist();
   }
@@ -150,6 +167,8 @@ class TtsSettingsStore extends ChangeNotifier {
     } else {
       await _kv.setString(doubaoCookieStorageKey, _doubaoCookie);
     }
+    // Cookie 列表变更：重置轮询游标与冷却，立即启用新配置。
+    DoubaoTtsCookiePool.instance.reset();
   }
 
   Future<void> setRate(double rate) async {

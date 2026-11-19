@@ -49,6 +49,10 @@ class MainActivity : AudioServiceActivity() {
     private var focusCallback: EventChannel.EventSink? = null
     private var focusRequest: AudioFocusRequest? = null
 
+    /// 通知权限弹窗期间挂起的 MethodChannel 回复：requestPermissions 是异步的，
+    /// 必须等用户在系统弹窗上做出选择后再回传结果，否则总是误报「未授权」。
+    private var pendingNotificationResult: MethodChannel.Result? = null
+
     /// 拔耳机 / 蓝牙断开：系统广播 AUDIO_BECOMING_NOISY，通知 Dart 侧暂停
     private val noisyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -141,13 +145,17 @@ class MainActivity : AudioServiceActivity() {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                         !hasNotificationPermission()
                     ) {
+                        // requestPermissions 是异步的：先把回复挂起，等用户在系统
+                        // 弹窗上选择后由 onRequestPermissionsResult 回传真实结果。
+                        pendingNotificationResult = result
                         ActivityCompat.requestPermissions(
                             this,
                             arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                             101,
                         )
+                    } else {
+                        result.success(hasNotificationPermission())
                     }
-                    result.success(hasNotificationPermission())
                 }
                 "openSettings" -> {
                     openNotificationSettings()
@@ -292,6 +300,22 @@ class MainActivity : AudioServiceActivity() {
             this,
             Manifest.permission.POST_NOTIFICATIONS,
         ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /// 通知权限弹窗结果：回传挂起的 MethodChannel 回复。
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != 101) return
+        val pending = pendingNotificationResult
+        pendingNotificationResult = null
+        pending?.success(
+            grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED,
+        )
     }
 
     /// 打开本应用的通知设置页；个别 ROM 无此页时退回应用详情页。

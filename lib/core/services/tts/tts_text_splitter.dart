@@ -34,6 +34,17 @@ class TtsTextSplitter {
         minChars = 0,
         maxSentences = 1;
 
+  /// 多句合并：一次请求覆盖约 3~5 句、最多 200 字，显著降低请求次数。
+  ///
+  /// 供有风控的豆包引擎使用——同类项目（阅读豆包朗读者）证实整段/多句批量
+  /// 合成比逐句请求更不易触发拦截。代价是句级高亮变粗，但段落坐标与续读
+  /// 仍按原字符偏移计算，不影响断点/进度。
+  const TtsTextSplitter.batched({
+    this.maxChars = 200,
+    this.minChars = 12,
+    this.maxSentences = 5,
+  });
+
   /// 单个片段的最大字符数：约一两句话，首请求体量可控。
   static const int defaultMaxChars = 80;
 

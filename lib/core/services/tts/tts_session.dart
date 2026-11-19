@@ -537,15 +537,21 @@ class TtsSession extends ChangeNotifier {
   /// 系统引擎参数设置失败（返回 0 / 平台拒绝）不代表引擎不可用，也不能中断
   /// 当前朗读或弹红字：这里静默降级沿用旧参数，真正不可用由初始化与合成报错。
   Future<void> reloadParams() async {
-    if (!_active || _engine == null) return;
+    final engine = _engine;
+    if (engine == null) return;
+    // 即使没有在朗读，也要把新参数推给已存在的引擎：warmUp() 可能已用旧
+    // 音色/语速预合成了首句缓存，若此处因 inactive 直接返回，缓存不会被清，
+    // 点播放时 speak() 命中旧音色的预取音频，表现为「切了音色但声音没变」。
+    // start() 在参数变化时会 _invalidatePrefetch() 清掉这些缓存。
     try {
-      await _engine!.start(settings.params);
+      await engine.start(settings.params);
     } catch (e) {
       if (_engineKind != TtsEngineKind.system) rethrow;
       debugPrint('[tts:session] 系统引擎更新参数失败，沿用旧参数：$e');
       return;
     }
-    await _restartLoop();
+    // 只有正在朗读时才从当前句重启；未朗读时清缓存已足够，下次起播用新参数。
+    if (_active) await _restartLoop();
   }
 
   Future<void> switchEngine(TtsEngineKind kind) async {
@@ -692,6 +698,18 @@ class TtsSession extends ChangeNotifier {
     }
   }
 
+  /// 按当前引擎选择切分粒度：风控引擎（实现 [BatchingTtsEngine]）用多句合并
+  /// 降低请求数；其余保持逐句（首包快、高亮精确到句）。
+  TtsTextSplitter _splitterForCurrentEngine() {
+    final engine = _engine;
+    if (engine is BatchingTtsEngine) {
+      return TtsTextSplitter.batched(
+        maxSentences: (engine as BatchingTtsEngine).maxSentencesPerSegment,
+      );
+    }
+    return const TtsTextSplitter.perSentence();
+  }
+
   // ---------------------------------------------------------------- 朗读主循环
 
   Future<void> _run(int runId, int chapter, int para, int startChar) async {
@@ -750,8 +768,9 @@ class TtsSession extends ChangeNotifier {
 
         // 起播段按句锚点跳过之前已经读过的句子；后续段落从完整段首开始。
         var resumeChar = startChar < 0 ? 0 : startChar;
-        // 一句一片段：标点即句界，续读时才能精确回到当前这一句。
-        const splitter = TtsTextSplitter.perSentence();
+        // 默认一句一片段（首包快、高亮精确到句）；风控引擎（豆包）改用多句
+        // 合并，显著降低请求次数，段落坐标/续读仍按原字符偏移计算。
+        final splitter = _splitterForCurrentEngine();
         for (var i = index; i < list.length; i++) {
           if (!_active || runId != _runId) return;
           _paraIndex = i;
@@ -787,6 +806,9 @@ class TtsSession extends ChangeNotifier {
               segments: segments,
               segmentIndex: s,
               splitter: splitter,
+              depth: (_engine is BatchingTtsEngine)
+                  ? (_engine as BatchingTtsEngine).prefetchDepth
+                  : 2,
             );
             final highlight = _highlight(
               i,
@@ -887,8 +909,8 @@ class TtsSession extends ChangeNotifier {
       );
       final paragraphs = await port.paragraphsOf(chapter);
       if (anchor.paragraph < 0 || anchor.paragraph >= paragraphs.length) return;
-      final segments = const TtsTextSplitter.perSentence()
-          .split(paragraphs[anchor.paragraph]);
+      final splitter = _splitterForCurrentEngine();
+      final segments = splitter.split(paragraphs[anchor.paragraph]);
       if (segments.isEmpty) return;
       final charIndex = anchor.charIndex;
       final index = segments.indexWhere((s) => s.end > charIndex);

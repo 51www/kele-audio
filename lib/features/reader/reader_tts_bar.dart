@@ -12,13 +12,28 @@ import 'reader_tts_compact_bar.dart';
 /// 细节统一收进听书播放页（`/listen/:id`，与全局 mini 条同一路由、同一会话）。
 /// 点条身进播放页；停止留在阅读页，避免退出朗读后找不到收口入口。
 /// 主体复用 [ReaderTtsCompactBar]，与 [TtsMiniPlayerSlot] 是同一套视觉与交互。
-class ReaderTtsBar extends StatelessWidget {
+class ReaderTtsBar extends StatefulWidget {
   const ReaderTtsBar({super.key, required this.session});
 
   final TtsSession session;
 
   @override
+  State<ReaderTtsBar> createState() => _ReaderTtsBarState();
+}
+
+class _ReaderTtsBarState extends State<ReaderTtsBar> {
+  @override
+  void initState() {
+    super.initState();
+    // 进入阅读页时刷新通知权限状态：启动申请结果（含用户随后手动开启）
+    // 都以真实授权状态为准，避免残留「未授予」的误报提示。
+    // ignore: discarded_futures
+    NotificationPermission.check();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final session = widget.session;
     final tokens = AppTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
     return AnimatedBuilder(

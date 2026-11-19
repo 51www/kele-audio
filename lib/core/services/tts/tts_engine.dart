@@ -103,6 +103,16 @@ abstract class TtsEngine {
   Future<void> dispose();
 }
 
+/// 标记接口：有风控的在线引擎（豆包）实现它，朗读会话据此采用「多句合并 +
+/// 收窄预取」以降低请求次数。系统/Edge 不实现，保持逐句、首包快、高亮精确。
+abstract class BatchingTtsEngine {
+  /// 单个请求合并的最大句数。
+  int get maxSentencesPerSegment;
+
+  /// 预取深度（风控引擎取 1，避免瞬间连发多个请求）。
+  int get prefetchDepth;
+}
+
 /// Edge TTS 常用中文音色（离线内置清单，设置页可直接选择）。
 const List<TtsVoice> edgeZhVoices = [
   TtsVoice(id: 'zh-CN-XiaoxiaoNeural', name: '晓晓 · 女声'),
@@ -118,31 +128,52 @@ const List<TtsVoice> edgeZhVoices = [
   TtsVoice(id: 'zh-HK-HiuMaanNeural', name: '曉曼 · 粤语女声'),
 ];
 
-/// 豆包默认音色 ID（桃子）。
+/// 豆包默认音色 ID（温柔桃子）。
+///
+/// 注意：豆包已下线 2025 年初的旧音色 ID（如 zh_female_taozi_conversation_v4_
+/// wvae_bigtts），对未知 speaker 服务端会静默回退默认女声（基频实测 ≈279Hz）。
+/// 当前有效音色经合成基频验证（男声 F0 103-146Hz，2026-11）。
 const String doubaoDefaultVoiceId =
-    'zh_female_taozi_conversation_v4_wvae_bigtts';
+    'zh_female_wenroutaozi_uranus_bigtts';
 
 /// 豆包 TTS 内置中文音色（离线内置清单，需要登录 Cookie）。
+/// 男声 ID 均经真实合成 + 基频分析验证有效（F0<165Hz）；失效 ID 已剔除。
 const List<TtsVoice> doubaoZhVoices = [
+  TtsVoice(id: 'zh_female_wenroutaozi_uranus_bigtts', name: '温柔桃子 · 女声'),
   TtsVoice(
-    id: 'zh_female_taozi_conversation_v4_wvae_bigtts',
-    name: '桃子 · 女声',
+    id: 'zh_female_xiaohe_conversation_wvae_bigtts',
+    name: '阳光甜妹 · 女声',
+  ),
+  TtsVoice(id: 'zh_female_sophie_conversation_wvae_bigtts', name: '魅力苏菲 · 女声'),
+  TtsVoice(id: 'zh_female_beijingdaniu_mars_bigtts', name: '北京大妞 · 女声'),
+  TtsVoice(id: 'zh_female_F466_mars_bigtts', name: '清甜瑶瑶 · 女声'),
+  TtsVoice(id: 'zh_female_maomao_conversation_wvae_bigtts', name: '文静毛毛 · 女声'),
+  TtsVoice(
+    id: 'zh_male_nuanxinshizhe_mars_bigtts',
+    name: '磁性俊宇 · 男声',
   ),
   TtsVoice(
-    id: 'zh_female_shuangkuai_emo_v3_wvae_bigtts',
-    name: '爽快 · 女声',
+    id: 'zh_male_M100_conversation_wvae_bigtts',
+    name: '悠悠君子 · 男声',
+  ),
+  TtsVoice(id: 'zh_male_ahu_conversation_wvae_bigtts', name: '温暖阿虎 · 男声'),
+  TtsVoice(
+    id: 'zh_male_qingyiyuxuan_mars_bigtts',
+    name: '阳光阿辰 · 男声',
   ),
   TtsVoice(
-    id: 'zh_female_tianmei_conversation_v4_wvae_bigtts',
-    name: '甜美 · 女声',
+    id: 'zh_male_aojiaobazong_wvae_bigtts',
+    name: '傲娇霸总 · 男声',
   ),
-  TtsVoice(id: 'zh_female_qingche_moon_bigtts', name: '清澈 · 女声'),
+  TtsVoice(id: 'zh_male_cheng_mars_bigtts', name: '温柔子言 · 男声'),
   TtsVoice(
-    id: 'zh_male_yangguang_conversation_v4_wvae_bigtts',
-    name: '阳光 · 男声',
+    id: 'zh_male_shenyeboke_wvae_bigtts',
+    name: '深夜播客 · 男声',
   ),
-  TtsVoice(id: 'zh_male_chenwen_moon_bigtts', name: '沉稳 · 男声'),
-  TtsVoice(id: 'zh_male_rap_mars_bigtts', name: '说唱 · 男声'),
+  TtsVoice(
+    id: 'zh_male_dongfanghaoran_moon_bigtts',
+    name: '东方浩然 · 男声',
+  ),
 ];
 
 /// 听书场景预设：一次套用音色、语速与音调。

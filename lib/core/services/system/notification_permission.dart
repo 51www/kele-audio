@@ -33,15 +33,20 @@ class NotificationPermission {
   }
 
   /// 申请权限（仅 Android 13+ 首次有系统弹窗）。
+  ///
+  /// 原生端会挂起本调用直到用户在系统弹窗上做出选择；若用户长时间不响应，
+  /// 按当前真实授权状态兜底，避免 await 永久挂起。
   static Future<bool> request() async {
     if (!_supported) return true;
     try {
-      final value = await _channel.invokeMethod<bool>('request') ?? true;
-      granted.value = value;
-      return value;
+      final value = await _channel
+          .invokeMethod<bool>('request')
+          .timeout(const Duration(seconds: 60));
+      granted.value = value ?? true;
+      return value ?? true;
     } catch (e) {
       debugPrint('[notification] 申请通知权限失败：$e');
-      return true;
+      return check();
     }
   }
 

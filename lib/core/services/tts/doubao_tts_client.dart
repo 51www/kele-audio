@@ -13,13 +13,18 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'doubao_cookie_pool.dart';
+
 /// 豆包 TTS 合成客户端（纯 Dart，免密钥，使用登录态 Cookie）。
 class DoubaoTtsClient {
   DoubaoTtsClient({
     required this.cookie,
     this.speaker = _defaultSpeaker,
     // 豆包 Web 端点只接受 aac / wav；传 mp3 会被拒（710020702 系统错误）。
-    this.format = 'aac',
+    // 用 wav 而非 aac：裸 AAC（ADTS 流）无容器时长，mpv 按比特率估算且偏短
+    // （实测同一句 wav 3.28s / aac 3.08s），播放到估算终点就触发 eof，
+    // 尾音约 200ms 被截断，表现为下一句「抢读」。wav 容器时长精确。
+    this.format = 'wav',
     this.rate = 0,
     this.pitch = 0,
     this.enableLogging = false,
@@ -33,7 +38,7 @@ class DoubaoTtsClient {
   static const _wsUrl =
       'wss://ws-samantha.doubao.com/samantha/audio/tts';
   static const _defaultSpeaker =
-      'zh_female_taozi_conversation_v4_wvae_bigtts';
+      'zh_female_wenroutaozi_uranus_bigtts';
   static const _userAgent =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
       'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -51,18 +56,21 @@ class DoubaoTtsClient {
   final Duration overallTimeout;
   final Duration minRequestInterval;
 
-  /// 合成一段文本，返回完整音频字节（默认 AAC）。
+  /// 合成一段文本，返回完整音频字节（默认 WAV）。
   ///
   /// 内置两层限流保护：相邻请求最小间隔 [minRequestInterval]，以及接收静默
   /// 判定结束。豆包网页端有风控，频繁请求可能被拦截，不宜高并发调用。
   Future<Uint8List> synthesize(String text) async {
-    final normalizedCookie = cookie.trim();
-    if (normalizedCookie.isEmpty) {
+    final cookies = DoubaoTtsCookiePool.parse(cookie);
+    if (cookies.isEmpty) {
       throw const DoubaoTtsException(
         'auth',
         '请先设置豆包 Cookie（sessionid / sid_guard / uid_tt）',
       );
     }
+    // 每次请求从轮询池取一个 Cookie；被风控的那个会被冷却跳过。
+    final normalizedCookie =
+        DoubaoTtsCookiePool.instance.next(cookies) ?? cookies.first;
 
     await DoubaoTtsThrottle.instance.wait(baseInterval: minRequestInterval);
 
@@ -154,6 +162,7 @@ class DoubaoTtsClient {
         throw const DoubaoTtsException('empty_audio', '豆包未返回音频数据');
       }
       DoubaoTtsThrottle.instance.noteSuccess();
+      DoubaoTtsCookiePool.instance.markSuccess(normalizedCookie);
       _log('合成完成：${bytes.length} bytes');
       return bytes;
     } on DoubaoTtsException {
@@ -225,8 +234,9 @@ class DoubaoTtsClient {
         } catch (_) {
           detail = body.length > 160 ? body.substring(0, 160) : body;
         }
-        // 非 101 基本都是风控/限流，通知全局节流器退避，避免连续重试撞墙。
+        // 非 101 基本都是风控/限流：全局退避 + 当前 Cookie 冷却（下次轮换跳过）。
         DoubaoTtsThrottle.instance.noteFailure();
+        DoubaoTtsCookiePool.instance.markFailed(cookieHeader);
         throw DoubaoTtsException(
           'rate_limited',
           '豆包请求被拦截（HTTP ${response.statusCode}'
@@ -327,18 +337,29 @@ class DoubaoTtsThrottle {
   int _consecutiveFailures = 0;
   final Duration _maxPenalty = const Duration(seconds: 30);
 
-  /// 等待到可以发起下一次握手。
+  // 串行锁：并发调用（预取 + 朗读 + 重试）必须排队，各自读出同一个时间戳后
+  // 一起 sleep、一起放行的写法会在 release（AOT 更快）下挤成一簇触发风控。
+  Future<void> _lock = Future.value();
+
+  /// 等待到可以发起下一次握手，并**原子地**占用本次时隙。
+  /// 用锁把「读时间戳 → 等待 → 写时间戳」串成临界区，保证任意两次握手
+  /// 实际间隔都不小于 [baseInterval] + 当前退避。
   Future<void> wait({required Duration baseInterval}) async {
-    final now = DateTime.now();
-    final last = _lastRequestAt;
-    var requiredGap = baseInterval + _penalty;
-    if (last != null) {
-      final elapsed = now.difference(last);
-      if (elapsed < requiredGap) {
-        await Future<void>.delayed(requiredGap - elapsed);
+    final previous = _lock;
+    final release = Completer<void>();
+    _lock = release.future;
+    await previous;
+    try {
+      final requiredGap = baseInterval + _penalty;
+      final last = _lastRequestAt;
+      if (last != null) {
+        final remaining = requiredGap - DateTime.now().difference(last);
+        if (remaining > Duration.zero) await Future<void>.delayed(remaining);
       }
+      _lastRequestAt = DateTime.now();
+    } finally {
+      release.complete();
     }
-    _lastRequestAt = DateTime.now();
   }
 
   /// 请求被风控拒绝时调用，累加退避；连续成功后由 [noteSuccess] 逐步恢复。
@@ -350,9 +371,17 @@ class DoubaoTtsThrottle {
   }
 
   void noteSuccess() {
-    if (_consecutiveFailures == 0 && _penalty == Duration.zero) return;
+    if (_consecutiveFailures == 0) return;
     _consecutiveFailures = 0;
+    // 不立即清零：保留一次间隔的退避，避免成功后立刻连发又被拦。
     _penalty = Duration.zero;
+  }
+
+  /// Cookie/配置变更后清空退避与时间戳，避免旧账号的限流状态拖累新配置。
+  void reset() {
+    _lastRequestAt = null;
+    _penalty = Duration.zero;
+    _consecutiveFailures = 0;
   }
 }
 
