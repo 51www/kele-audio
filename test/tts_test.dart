@@ -29,12 +29,18 @@ class _FakePort implements TtsReaderPort {
   int visible = 0;
   ReaderSentenceAnchor? anchor;
 
+  /// 这些章的段落抽取模拟 WebView 不可用（锁屏冻结 / 渲染进程被杀）。
+  Set<int> unavailableChapters = const {};
+
   @override
   Future<int> currentChapter() async => chapter;
 
   @override
   Future<List<String>> paragraphsOf(int chapterIndex) async {
     chapter = chapterIndex;
+    if (unavailableChapters.contains(chapterIndex)) {
+      throw const TtsReaderUnavailableException('WebView 不可用');
+    }
     return chapters[chapterIndex];
   }
 
@@ -696,6 +702,66 @@ void main() {
     expect(session.error, isNull);
     expect(engine.spoken, ['第二章正文']);
     expect(session.chapterIndex, 1);
+    expect(session.active, isFalse);
+  });
+
+  test('WebView 不可用时暂停在当前章，绝不按空章连跳写坏断点', () async {
+    // 复现线上「54 章读完 → 锁屏 → 回来已在 76 章」：
+    // 锁屏期间 WebView 冻结，旧实现把抽取超时当「空章」逐章连跳并落盘断点。
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    await settings.setEngine(TtsEngineKind.system);
+    final books = ReaderBookStore(kv);
+    await books.add(_book());
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final engine = FakeTtsEngine();
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+    );
+    final port = _FakePort([
+      ['第一段', '第二段'],
+      ['第二章甲', '第二章乙'],
+      ['第三章甲', '第三章乙'],
+    ]);
+    // 第 2 章（下标 1）抽取不可用，模拟换章后 WebView 被冻结。
+    port.unavailableChapters = {1};
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+    for (var i = 0; i < 60 && !session.paused; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    // 第 1 章正常读完，随后应暂停在第 2 章等待 WebView 恢复，
+    // 既不报错弹红字，也绝不跳到第 3 章或直接整轮结束。
+    expect(engine.spoken, ['第一段', '第二段']);
+    expect(session.error, isNull);
+    expect(session.active, isTrue);
+    expect(session.paused, isTrue);
+    expect(session.playing, isFalse);
+    expect(session.chapterIndex, 1);
+    expect(books.byId('b1')!.lastChapterIndex, 1);
+    expect(books.byId('b1')!.lastTtsParaIndex, 0);
+
+    // WebView 恢复后（阅读页回到前台），resume 从第 2 章段首续读。
+    port.unavailableChapters = const {};
+    await session.resume();
+    for (var i = 0; i < 60 && engine.spoken.length < 4; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(engine.spoken, ['第一段', '第二段', '第二章甲', '第二章乙']);
+    expect(session.chapterIndex, 1);
+    await session.stop();
     expect(session.active, isFalse);
   });
 

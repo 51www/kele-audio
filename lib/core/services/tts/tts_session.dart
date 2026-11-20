@@ -46,6 +46,19 @@ abstract class TtsReaderPort {
       null;
 }
 
+/// 阅读页 WebView 暂时不可用（锁屏期间渲染被冻结 / 渲染进程被杀 / 书未就绪）。
+///
+/// 必须与「本章确实是空章」区分开：WebView 不可用时应暂停等待恢复，
+/// 绝不能按空章连跳——否则断点会在没有朗读的情况下一路爬到几十章之外。
+class TtsReaderUnavailableException implements Exception {
+  const TtsReaderUnavailableException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'TtsReaderUnavailableException: $message';
+}
+
 /// 听书会话（docs/reader-design.md §5.2）：
 /// 段落队列 → 逐段朗读 → 高亮跟随 → 跨章续读 → 断点落盘 → 后台媒体会话。
 class TtsSession extends ChangeNotifier {
@@ -715,6 +728,9 @@ class TtsSession extends ChangeNotifier {
   Future<void> _run(int runId, int chapter, int para, int startChar) async {
     final book = _book;
     if (book == null) return;
+    // 空章连续跳过计数：真书里空章是零星几章，连续多章都抽不到正文
+    // 几乎必然是 WebView 卡死，继续跳会把断点爬到几十章之外。
+    var emptySkips = 0;
     try {
       while (_active && runId == _runId) {
         // 每章重新读取：朗读过程中阅读页可能挂载/关闭。
@@ -723,7 +739,23 @@ class TtsSession extends ChangeNotifier {
         if (port != null) {
           _beginNavigate();
           try {
-            list = await port.paragraphsOf(chapter);
+            try {
+              list = await port.paragraphsOf(chapter);
+            } on TtsReaderUnavailableException {
+              // 阅读页 WebView 暂时不可用（锁屏冻结 / 渲染进程被杀）：
+              // 留在当前章暂停等待恢复，等 bindReader/播放键回来续读。
+              // 绝不能当「空章」往下跳，否则无朗读也连跳几十章并写坏断点。
+              if (!_active || runId != _runId) return;
+              _chapterIndex = chapter;
+              _pendingChapter = chapter;
+              _playing = false;
+              _paused = true;
+              await _accumulate();
+              _playStartedAt = null;
+              _publishMedia();
+              notifyListeners();
+              return;
+            }
           } finally {
             _endNavigate();
           }
@@ -731,6 +763,17 @@ class TtsSession extends ChangeNotifier {
           if (list.isEmpty) {
             // 整章抽取不到正文（例如全章只有一个单行数字页码，被正文抽取
             // 的长度过滤丢弃）：不报错卡住，直接跳过本章续读下一章。
+            if (++emptySkips >= 3) {
+              _chapterIndex = chapter;
+              _pendingChapter = chapter;
+              _playing = false;
+              _paused = true;
+              await _accumulate();
+              _playStartedAt = null;
+              _publishMedia();
+              notifyListeners();
+              return;
+            }
             final next = await _advanceChapter(chapter, 0);
             if (next == null) return;
             chapter = next;
@@ -739,6 +782,7 @@ class TtsSession extends ChangeNotifier {
             startChar = 0;
             continue;
           }
+          emptySkips = 0;
           _paragraphs = list;
           _paragraphsChapter = chapter;
         } else {

@@ -1124,8 +1124,14 @@ class _BridgeTtsPort implements TtsReaderPort {
   @override
   Future<List<String>> paragraphsOf(int chapterIndex) async {
     final deadline = DateTime.now().add(const Duration(seconds: 10));
+    // 「该章从未就绪」与「就绪但抽不到正文」必须区分开：
+    // 前者多为 WebView 被冻结/渲染进程被杀（如锁屏期间），抛
+    // TtsReaderUnavailableException 让上层暂停等待恢复；后者才是真空章。
+    // 若统一返回空数组，上层会按空章逐章连跳并把断点爬到几十章之外。
+    var everReady = false;
     while (DateTime.now().isBefore(deadline)) {
       if (await _bridge.isChapterReady(chapterIndex)) {
+        everReady = true;
         // extractParagraphs 自带章号校验，抽到即返回，不再固定空等 240ms；
         // 这 240ms 曾直接叠加在「点耳机 → 出声」的等待里。
         final list = await _bridge.extractParagraphs(
@@ -1140,7 +1146,12 @@ class _BridgeTtsPort implements TtsReaderPort {
       await _bridge.goToChapter(chapterIndex);
       await Future<void>.delayed(const Duration(milliseconds: 200));
     }
-    // 超时也返回空：上层按「空章」处理，不朗读任何可能错章的文本。
+    if (!everReady) {
+      throw const TtsReaderUnavailableException(
+        '章节迟迟未渲染就绪，阅读页 WebView 可能已不可用',
+      );
+    }
+    // 章已就绪但始终抽不到正文：按空章处理，不朗读任何可能错章的文本。
     return const [];
   }
 
