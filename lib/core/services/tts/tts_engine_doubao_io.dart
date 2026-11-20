@@ -41,8 +41,9 @@ class TtsDoubaoEngine implements TtsEngine, BatchingTtsEngine {
   String get id => 'doubao';
 
   // 豆包风控敏感：多句合并降低请求数，预取收窄到 1 避免瞬间连发。
+  // 8 句约 300 字，低于官方接口单次 1024 字节（约 341 汉字）上限。
   @override
-  int get maxSentencesPerSegment => 5;
+  int get maxSentencesPerSegment => 8;
 
   @override
   int get prefetchDepth => 1;

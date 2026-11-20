@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -452,6 +453,88 @@ void main() {
     final ids = doubaoZhVoices.map((v) => v.id).toSet();
     expect(ids, contains(doubaoDefaultVoiceId));
     expect(doubaoZhVoices.first.id, doubaoDefaultVoiceId);
+  });
+
+  group('豆包 WAV 流容器头剥离', () {
+    // 构造流式 WAV：RIFF + fmt + data（size 占位 0xFFFFFFFF）+ PCM。
+    Uint8List streamingWav(List<int> pcm, {int headerRiffSize = 0xFFFFFFFF}) {
+      Uint8List u32(int v) => (ByteData(4)..setUint32(0, v, Endian.little))
+          .buffer
+          .asUint8List();
+      final fmt = Uint8List(16)
+        ..buffer.asByteData().setUint16(0, 1, Endian.little) // PCM
+        ..buffer.asByteData().setUint16(2, 1, Endian.little) // mono
+        ..buffer.asByteData().setUint32(4, 24000, Endian.little) // rate
+        ..buffer.asByteData().setUint32(8, 48000, Endian.little) // byte rate
+        ..buffer.asByteData().setUint16(12, 2, Endian.little) // block align
+        ..buffer.asByteData().setUint16(14, 16, Endian.little); // bits
+
+      final b = BytesBuilder()
+        ..add('RIFF'.codeUnits)
+        ..add(u32(headerRiffSize))
+        ..add('WAVE'.codeUnits)
+        ..add('fmt '.codeUnits)
+        ..add(u32(16))
+        ..add(fmt)
+        ..add('data'.codeUnits)
+        ..add(u32(0xFFFFFFFF))
+        ..add(pcm);
+      return b.toBytes();
+    }
+
+    Uint8List headerBlock() => streamingWav(const []);
+
+    test('流中无中途容器头时原样返回', () {
+      final pcm = List<int>.generate(1000, (i) => i & 0xFF);
+      final wav = streamingWav(pcm);
+      final out = DoubaoTtsClient.stripEmbeddedWavHeaders(wav);
+      expect(out.length, wav.length);
+      expect(String.fromCharCodes(out.sublist(0, 4)), 'RIFF');
+    });
+
+    test('句界重发的容器头被剥离，PCM 原样保留', () {
+      final pcmA = List<int>.generate(400, (i) => i & 0x7F);
+      final pcmB = List<int>.generate(600, (i) => (i * 7) & 0x7F);
+      final wav = streamingWav(pcmA);
+      final header = headerBlock();
+      final combined = BytesBuilder()
+        ..add(wav)
+        ..add(header) // 句界重发
+        ..add(pcmB);
+      final out = DoubaoTtsClient.stripEmbeddedWavHeaders(combined.toBytes());
+
+      final expectLen = wav.length + pcmB.length;
+      expect(out.length, expectLen);
+      // 头部（含首个流式头）与段 A 完整保留。
+      final head = BytesBuilder()..add(wav);
+      expect(
+        out.sublist(0, head.length),
+        head.toBytes(),
+      );
+      // 段 B 紧跟其后且逐字节一致。
+      expect(out.sublist(head.length), Uint8List.fromList(pcmB));
+    });
+
+    test('PCM 中偶然出现的 RIFF 序列（非法头）不误删', () {
+      final pcmA = List<int>.generate(300, (i) => i & 0x7F);
+      // 恰好是「RIFF」四个字符，但后面不是合法 WAVE/fmt 结构。
+      final fake = 'RIFFGarbage'.codeUnits;
+      final pcmB = List<int>.generate(200, (i) => (i + 3) & 0x7F);
+      final combined = BytesBuilder()
+        ..add(streamingWav(pcmA))
+        ..add(fake)
+        ..add(pcmB);
+      final raw = combined.toBytes();
+      final out = DoubaoTtsClient.stripEmbeddedWavHeaders(raw);
+      expect(out.length, raw.length);
+    });
+
+    test('偏移 0 的首个头永远保留', () {
+      final pcm = List<int>.generate(100, (i) => i & 0x7F);
+      final wav = streamingWav(pcm);
+      final out = DoubaoTtsClient.stripEmbeddedWavHeaders(wav);
+      expect(out.length, wav.length);
+    });
   });
 
   test('Edge 音色清单覆盖全部听书预设，默认音色未被改动', () {

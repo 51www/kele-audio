@@ -158,13 +158,16 @@ class DoubaoTtsClient {
         throw DoubaoTtsException('server_error', remoteError!);
       }
       final bytes = Uint8List.fromList(chunks);
-      if (bytes.isEmpty) {
+      // WAV 流里句界处可能重复下发容器头，头字节混入 PCM 会产生杂音。
+      final clean =
+          format == 'wav' ? stripEmbeddedWavHeaders(bytes) : bytes;
+      if (clean.isEmpty) {
         throw const DoubaoTtsException('empty_audio', '豆包未返回音频数据');
       }
       DoubaoTtsThrottle.instance.noteSuccess();
       DoubaoTtsCookiePool.instance.markSuccess(normalizedCookie);
-      _log('合成完成：${bytes.length} bytes');
-      return bytes;
+      _log('合成完成：${clean.length} bytes');
+      return clean;
     } on DoubaoTtsException {
       rethrow;
     } catch (e) {
@@ -311,6 +314,100 @@ class DoubaoTtsClient {
   static String _cleanError(Object error) {
     final raw = error.toString();
     return raw.replaceFirst(RegExp(r'^\w+Exception\([^)]*\):\s*'), '');
+  }
+
+  // ------------------------------------------------------------------
+  // WAV 容器头剥离
+  //
+  // 豆包按句下发音频（sentence_start/sentence_end 事件之间夹二进制帧），
+  // 正常情况下整条流只有开头一个流式 WAV 头（RIFF + fmt/LIST + data，
+  // size 字段为 0xFFFFFFFF 占位），后续帧都是裸 PCM。但句界处服务端
+  // 可能重发完整容器头——头字节会被当作 PCM 样本播放，在每个句界形成
+  // 一声短促的爆音（约 1~2ms，听感像「da」一声）。这里扫描整条流：
+  // 偏移 > 0 且通过严格校验（WAVE 魔数 + 合法采样率的 fmt 块）的 RIFF
+  // 头块，连同其 data 声明一并删除，只保留 PCM。校验不通过的 RIFF
+  // 序列视为普通音频数据，不改动。
+  // ------------------------------------------------------------------
+
+  /// 单个头块的最大长度上限（含 fmt/LIST 等前置块），防止误伤 PCM。
+  static const int _maxHeaderLen = 512;
+
+  /// 剥离音频流中途的 WAV 容器头；无中途头时原样返回。
+  static Uint8List stripEmbeddedWavHeaders(Uint8List raw) {
+    if (raw.length < 64) return raw;
+    final riff = 'RIFF'.codeUnits;
+    final cuts = <int>[]; // 成对出现：[start, end) 待删除区间
+    var search = 12; // 偏移 0 是合法的流式头，从其后开始找
+    while (true) {
+      final pos = _findBytes(raw, riff, search);
+      if (pos < 0) break;
+      final headerEnd = _validatedHeaderEnd(raw, pos);
+      if (headerEnd != null) {
+        cuts..add(pos)..add(headerEnd);
+        search = headerEnd;
+      } else {
+        search = pos + 4;
+      }
+    }
+    if (cuts.isEmpty) return raw;
+    final kept = BytesBuilder(copy: false);
+    var cursor = 0;
+    for (var i = 0; i < cuts.length; i += 2) {
+      kept.add(raw.sublist(cursor, cuts[i]));
+      cursor = cuts[i + 1];
+    }
+    kept.add(raw.sublist(cursor));
+    return kept.toBytes();
+  }
+
+  /// 校验 [pos] 处是否为完整合法的 WAV 头，返回其 data 载荷起始偏移
+  /// （即应删除的区间终点）；不合法返回 null。
+  static int? _validatedHeaderEnd(Uint8List raw, int pos) {
+    if (pos + 16 > raw.length) return null;
+    if (!_bytesMatch(raw, pos, 'RIFF'.codeUnits)) return null;
+    if (!_bytesMatch(raw, pos + 8, 'WAVE'.codeUnits)) return null;
+    var off = pos + 12;
+    var sawFmt = false;
+    while (off + 8 <= raw.length && off - pos <= _maxHeaderLen) {
+      final size = ByteData.sublistView(raw, off + 4, off + 8)
+          .getUint32(0, Endian.little);
+      if (_bytesMatch(raw, off, 'fmt '.codeUnits)) {
+        if (off + 16 > raw.length) return null;
+        final rate = ByteData.sublistView(raw, off + 12, off + 16)
+            .getUint32(0, Endian.little);
+        // 采样率必须在人声合成的合理范围内，否则视为 PCM 巧合。
+        if (rate < 6000 || rate > 96000) return null;
+        sawFmt = true;
+      } else if (_bytesMatch(raw, off, 'data'.codeUnits)) {
+        return sawFmt ? off + 8 : null;
+      }
+      if (size == 0xFFFFFFFF || size > _maxHeaderLen) return null;
+      off += 8 + size + (size & 1);
+    }
+    return null;
+  }
+
+  static bool _bytesMatch(Uint8List raw, int offset, List<int> pattern) {
+    if (offset + pattern.length > raw.length) return false;
+    for (var i = 0; i < pattern.length; i++) {
+      if (raw[offset + i] != pattern[i]) return false;
+    }
+    return true;
+  }
+
+  static int _findBytes(Uint8List hay, List<int> needle, int start) {
+    if (needle.isEmpty) return start;
+    for (var i = start; i + needle.length <= hay.length; i++) {
+      var ok = true;
+      for (var j = 0; j < needle.length; j++) {
+        if (hay[i + j] != needle[j]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return i;
+    }
+    return -1;
   }
 
   void _log(String message) {

@@ -10,7 +10,7 @@ class TtsDoubaoEngine implements TtsEngine, BatchingTtsEngine {
   String get id => 'doubao';
 
   @override
-  int get maxSentencesPerSegment => 5;
+  int get maxSentencesPerSegment => 8;
 
   @override
   int get prefetchDepth => 1;
