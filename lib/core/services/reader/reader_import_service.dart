@@ -12,6 +12,7 @@ import 'mobi_importer.dart';
 import 'pdf_importer.dart';
 import 'pdf_page_map.dart';
 import 'reader_activity_store.dart';
+import 'reader_annotation_store.dart';
 import 'reader_progress_store.dart';
 import 'txt_importer.dart';
 import 'txt_to_epub.dart';
@@ -54,11 +55,13 @@ class ReaderImportService {
     required this.books,
     required this.activity,
     this.progress,
+    this.annotations,
   });
 
   final ReaderBookStore books;
   final ReaderActivityStore activity;
   final ReaderProgressStore? progress;
+  final ReaderAnnotationStore? annotations;
 
   static const String bookFileName = 'book.epub';
 
@@ -387,6 +390,7 @@ class ReaderImportService {
     await deleteReaderBookDir(book.id);
     await activity.removeBook(book.id);
     await progress?.remove(book.id);
+    await annotations?.removeBook(book.id);
     await books.purge(book.id);
   }
 

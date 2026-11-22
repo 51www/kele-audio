@@ -263,3 +263,25 @@ flowchart LR
 - anx-reader（MIT）：`reader_bridge` 消息协议设计、foliate-js 集成方式、TXT 编码处理可参考其实现，拷贝处文件头注释标注 `// Adapted from anx-reader (MIT)`；
 - foliate-js（MIT）与 Readability.js（Apache-2.0）：vendored，保留原许可证文件于各自目录内；
 - README「致谢 · 参考项目」表与关于页许可列表须登记上述三项；`docs/release-notes.md` M9 版本按「新增功能」分类撰写（面向使用者的功能描述，不含实现细节）。
+
+## 10. 划线标注与离线查词
+
+### 10.1 划线标注
+
+- **定位**：JS 侧用 `view.getCFI(chapterIndex, range)` 生成 EPUB 范围 CFI。选区生成前先把 TTS 临时 `<span>` 清除并按文本偏移重建 Range，避免临时 DOM 污染 CFI。
+- **渲染**：接入 foliate-js 已有 `addAnnotation/deleteAnnotation` + `draw-annotation/create-overlay/show-annotation`，用 `Overlayer.underline` 绘制 SVG 下划线覆盖层，不改动 XHTML 正文。
+- **桥消息**：JS→Dart 新增 `onSelection {chapterIndex,cfi,text,x,y,width,height}`、`onSelectionCleared`、`onAnnotationTap {cfi}`；Dart→JS 新增 `setAnnotations/addAnnotation/removeAnnotation/showAnnotation/clearSelection`。
+- **持久化**（沿用 shared_preferences JSON）：
+  - `reader_annotation_books`：有标注的 bookId 索引；
+  - `reader_annotations_{bookId}`：`ReaderAnnotation` JSON 数组（id/bookId/bookTitle/chapterIndex/chapterTitle/cfi/text/color/note/fraction/createdAt/updatedAt）。
+  - 书名与章节名做快照，网页重抓或软删后仍可展示；CFI 失效时保留文字快照。
+- **入口**：阅读页顶栏「我的划线」查看本书；「我的 → 我的划线」全量按书分组，只展示划线文本，不提供跳回原文。
+- **导出**：`AnnotationExportService.buildText` 仅输出划线文本，一行一条，导出为 `.txt`，复用备份的文件交付方式（移动端系统分享 / 桌面另存为 / Web 下载）。
+- **集成**：标注纳入备份白名单与删书清理；PDF 等来源统一转 EPUB，因此同一条 CFI 链路覆盖全部格式。
+
+### 10.2 离线词库
+
+- 数据源：从 ECDICT（MIT）裁剪的精简英汉词库（约 3.9MB / 2.7 万词条 + 词形），默认下载 `dict.json` 并在端上转换为本地 `dict.json`（entries + aliases）；也兼容 ECDICT CSV 与 `tool/build_dictionary_pack.py` 生成的 zip。
+- 默认源顺序：多个 jsDelivr / ghproxy CDN 镜像自动回退；「离线词库」页可填自定义直链（JSON/CSV/zip），也可用 `DICTIONARY_URL` dart-define 追加。可选 `DICTIONARY_SHA256` 做下载校验。
+- 状态存 `dictionary_state`，自定义地址存 `dictionary_custom_url`（纳入备份）；卸载即删目录，不影响自定义地址。
+- 查询在 Isolate 解析后用内存 Map 完成；选中内容不联网、不上传。单词/短语给释义，整句退化为逐词释义并明确提示“不是整句翻译”。

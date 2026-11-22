@@ -31,6 +31,8 @@ class BackupWhitelist {
     (key: 'children_mode', label: '儿童模式'),
     // M9.4：本地书 / 阅读 / 听书数据纳入迁移（进度细粒度键按 bookId 动态收集）
     (key: 'reader_books', label: '本地书库'),
+    (key: 'reader_annotation_books', label: '划线书索引'),
+    (key: 'dictionary_custom_url', label: '词库下载地址'),
     (key: 'reader_history', label: '阅读历史'),
     (key: 'reader_log', label: '阅读时长统计'),
     (key: 'reader_typography', label: '阅读排版设置'),
@@ -39,6 +41,9 @@ class BackupWhitelist {
 
   /// 阅读进度按书动态存储（`reader_progress_{bookId}`），单独按前缀迁移。
   static const String readerProgressPrefix = 'reader_progress_';
+
+  /// 划线标注按书动态存储（`reader_annotations_{bookId}`）。
+  static const String readerAnnotationPrefix = 'reader_annotations_';
 
   /// 书架专辑的轻量元数据快照（JSON 数组，见 shelf_album_snapshot.dart）。
   ///

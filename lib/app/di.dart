@@ -17,6 +17,8 @@ import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
 import '../core/services/backup/backup_service.dart';
 import '../core/services/bili_account_service.dart';
+import '../core/services/dictionary/dictionary_service.dart';
+import '../core/services/dictionary/dictionary_state_store.dart';
 import '../core/services/mini_player_controller.dart';
 import '../core/services/offline/dio_audio_fetcher.dart';
 import '../core/services/offline/audio_store.dart';
@@ -27,6 +29,7 @@ import '../core/services/player/player_service.dart';
 import '../core/services/player/progress_store.dart';
 import '../core/services/reader/book_store.dart';
 import '../core/services/reader/reader_activity_store.dart';
+import '../core/services/reader/reader_annotation_store.dart';
 import '../core/services/reader/reader_import_service.dart';
 import '../core/services/reader/reader_progress_store.dart';
 import '../core/services/reader/reader_typography.dart';
@@ -68,9 +71,12 @@ class AppServices {
     required this.backup,
     required this.readerBooks,
     required this.readerActivity,
+    required this.readerAnnotations,
     required this.readerImport,
     required this.readerTypography,
     required this.readerProgress,
+    required this.dictionaryState,
+    required this.dictionary,
     required this.playbackArbiter,
     required this.ttsSettings,
     required this.ttsSession,
@@ -136,6 +142,9 @@ class AppServices {
   /// 阅读历史与时长埋点（M9.1 建立，M9.2/M9.3 写入）
   final ReaderActivityStore readerActivity;
 
+  /// 划线标注（按书 JSON，全局入口与导出共用）
+  final ReaderAnnotationStore readerAnnotations;
+
   /// 本地书导入编排（TXT / EPUB / PDF / MOBI / 网页）
   final ReaderImportService readerImport;
 
@@ -144,6 +153,10 @@ class AppServices {
 
   /// 阅读进度细粒度真源（M9.2，`reader_progress_{id}`）
   final ReaderProgressStore readerProgress;
+
+  /// 离线词库状态与下载/查询服务
+  final DictionaryStateStore dictionaryState;
+  final DictionaryService dictionary;
 
   /// 播放互斥收敛点（M9.3）：B 站收听 ↔ 本地书 TTS 共用系统媒体会话
   final PlaybackArbiter playbackArbiter;
@@ -232,13 +245,19 @@ class AppServices {
     await readerBooks.load();
     final readerActivity = ReaderActivityStore(kv);
     await readerActivity.load();
+    final readerAnnotations = ReaderAnnotationStore(kv);
+    await readerAnnotations.load();
     final readerTypography = ReaderTypographyStore(kv);
     await readerTypography.load();
     final readerProgress = ReaderProgressStore(kv);
+    final dictionaryState = DictionaryStateStore(kv);
+    dictionaryState.load();
+    final dictionary = DictionaryService(state: dictionaryState);
     final readerImport = ReaderImportService(
       books: readerBooks,
       activity: readerActivity,
       progress: readerProgress,
+      annotations: readerAnnotations,
     );
     final offline = OfflineCacheService(
       daos: daos,
@@ -333,6 +352,7 @@ class AppServices {
         // 备份还原后重读本地书元数据与阅读活动（M9.4 正式纳入备份）。
         await readerBooks.load();
         await readerActivity.load();
+        await readerAnnotations.load();
         await readerTypography.load();
         await ttsSettings.load();
       },
@@ -363,9 +383,12 @@ class AppServices {
       backup: backup,
       readerBooks: readerBooks,
       readerActivity: readerActivity,
+      readerAnnotations: readerAnnotations,
       readerImport: readerImport,
       readerTypography: readerTypography,
       readerProgress: readerProgress,
+      dictionaryState: dictionaryState,
+      dictionary: dictionary,
       playbackArbiter: arbiter,
       ttsSettings: ttsSettings,
       ttsSession: ttsSession,

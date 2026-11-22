@@ -149,6 +149,23 @@ class BackupService extends ChangeNotifier {
       } catch (e) {
         debugPrint('[backup] 收集阅读进度失败：$e');
       }
+      // 划线按 `reader_annotations_{bookId}` 动态键：从书索引取 ids 收集。
+      try {
+        final indexRaw = kv.getString('reader_annotation_books');
+        if (indexRaw != null && indexRaw.isNotEmpty) {
+          final decoded = jsonDecode(indexRaw);
+          if (decoded is List) {
+            for (final id in decoded.whereType<String>()) {
+              if (id.isEmpty) continue;
+              final key = '${BackupWhitelist.readerAnnotationPrefix}$id';
+              final v = kv.getString(key);
+              if (v != null) keys[key] = v;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[backup] 收集划线失败：$e');
+      }
       for (final table in BackupWhitelist.tablesOf(db)) {
         final storageKey = Table.storageKey(table.name);
         keys[storageKey] = _encodeTable(table);
@@ -356,6 +373,21 @@ class BackupService extends ChangeNotifier {
       entries.add(ImportEntry(
         key: entry.key,
         label: '阅读进度 · ${entry.key.substring(BackupWhitelist.readerProgressPrefix.length)}',
+        detail: '设置项',
+      ));
+    }
+
+    // 划线动态键（reader_annotations_{id}）：只接受前缀，其余忽略。
+    for (final entry in keys.entries) {
+      if (!entry.key.startsWith(BackupWhitelist.readerAnnotationPrefix)) {
+        continue;
+      }
+      final v = entry.value;
+      if (v == null) continue;
+      kvWrites[entry.key] = '$v';
+      entries.add(ImportEntry(
+        key: entry.key,
+        label: '划线 · ${entry.key.substring(BackupWhitelist.readerAnnotationPrefix.length)}',
         detail: '设置项',
       ));
     }

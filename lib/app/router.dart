@@ -7,11 +7,13 @@ import '../features/discover/search_page.dart';
 import '../features/discover/up_profile_page.dart';
 import '../features/profile/pages/about_page.dart';
 import '../features/profile/pages/bili_account_page.dart';
+import '../features/profile/pages/dictionary_page.dart';
 import '../features/profile/pages/downloads_page.dart';
 import '../features/profile/pages/settings_page.dart';
 import '../features/profile/pages/stats_page.dart';
 import '../features/profile/profile_page.dart';
 import '../features/player/player_page.dart';
+import '../features/reader/annotations_page.dart';
 import '../features/reader/reader_page.dart';
 import '../features/reader/reader_tts_page.dart';
 import '../features/shelf/shelf_page.dart';
@@ -64,6 +66,18 @@ class AppRouter {
                   path: 'downloads',
                   name: 'profile-downloads',
                   builder: (context, state) => const DownloadsPage(),
+                ),
+                // 我的划线：全量查看 + 导出
+                GoRoute(
+                  path: 'annotations',
+                  name: 'profile-annotations',
+                  builder: (context, state) => const AnnotationsPage(),
+                ),
+                // 离线词库：按需下载与卸载
+                GoRoute(
+                  path: 'dictionary',
+                  name: 'profile-dictionary',
+                  builder: (context, state) => const DictionaryPage(),
                 ),
                 // 8. 设置
                 GoRoute(

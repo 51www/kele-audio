@@ -1,25 +1,32 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/route_observer.dart';
 import '../../app/theme/app_tokens.dart';
+import '../../core/domain/reader_annotation.dart';
 import '../../core/domain/reader_book.dart';
 import '../../core/services/reader/book_file_store.dart';
 import '../../core/services/reader/book_store.dart';
 import '../../core/services/reader/reader_activity_store.dart';
+import '../../core/services/reader/reader_annotation_store.dart';
 import '../../core/services/reader/reader_bridge.dart';
 import '../../core/services/reader/reader_import_service.dart';
 import '../../core/services/reader/reader_progress_store.dart';
 import '../../core/services/reader/reader_typography.dart';
 import '../../core/services/reader/pdf_page_map.dart';
 import '../../core/services/reader/reading_duration_clock.dart';
+import '../../core/services/dictionary/dictionary_service.dart';
 import '../../core/services/tts/tts_session.dart';
+import 'dictionary_lookup_sheet.dart';
+import 'reader_annotation_sheet.dart' show showReaderAnnotationEditorSheet;
+import 'reader_selection_bar.dart';
 import 'reader_settings_sheet.dart';
 import 'reader_toc_sheet.dart';
 import 'reader_tts_bar.dart';
@@ -45,6 +52,7 @@ class _ReaderPageState extends State<ReaderPage>
   late final ReaderBookStore _books;
   late final ReaderActivityStore _activity;
   late final ReaderProgressStore _progress;
+  late final ReaderAnnotationStore _annotations;
   late final ReaderTypographyStore _typography;
   late final TtsSession _tts;
   late final _BridgeTtsPort _ttsPort;
@@ -61,6 +69,7 @@ class _ReaderPageState extends State<ReaderPage>
   bool _toolbarVisible = true;
   bool _refreshing = false;
   String? _error;
+  ReaderSelection? _selection;
   String _styleKey = '';
   DateTime _lastSaveAt = DateTime.fromMillisecondsSinceEpoch(0);
   ReaderProgress? _resumeTarget;
@@ -86,6 +95,7 @@ class _ReaderPageState extends State<ReaderPage>
     _books = context.read<ReaderBookStore>();
     _activity = context.read<ReaderActivityStore>();
     _progress = context.read<ReaderProgressStore>();
+    _annotations = context.read<ReaderAnnotationStore>();
     _typography = context.read<ReaderTypographyStore>();
     _tts = context.read<TtsSession>();
     _bridge = ReaderBridge(
@@ -111,6 +121,15 @@ class _ReaderPageState extends State<ReaderPage>
         if (!mounted) return;
         setState(() => _toolbarVisible = !_toolbarVisible);
       },
+      onSelection: (selection) {
+        if (!mounted) return;
+        setState(() => _selection = selection);
+      },
+      onSelectionCleared: () {
+        if (!mounted || _selection == null) return;
+        setState(() => _selection = null);
+      },
+      onAnnotationTap: _onAnnotationTap,
       onError: (message) {
         if (!mounted) return;
         setState(() {
@@ -302,6 +321,7 @@ class _ReaderPageState extends State<ReaderPage>
       _syncReadingClock();
       // renderer 就绪后再注入一次样式（模式切换依赖 renderer 属性）。
       await _bridge.setStyle(style);
+      await _applyAnnotations();
       // 再次绑定：若听书会话仍在后台，补挂高亮/续读下一章。
       _tts.bindReader(
         book: book,
@@ -732,6 +752,103 @@ class _ReaderPageState extends State<ReaderPage>
     showReaderSettingsSheet(context, store: _typography);
   }
 
+  void _dismissSelection() {
+    _bridge.clearSelection();
+    if (mounted) setState(() => _selection = null);
+  }
+
+  Future<void> _saveHighlight(ReaderAnnotationColor color) async {
+    final selection = _selection;
+    final book = _books.byId(widget.bookId);
+    if (selection == null || book == null) return;
+    final now = DateTime.now();
+    final annotation = ReaderAnnotation(
+      id: 'anno_${now.microsecondsSinceEpoch}',
+      bookId: book.id,
+      bookTitle: book.title,
+      chapterIndex: selection.chapterIndex,
+      chapterTitle: _chapterTitle(selection.chapterIndex),
+      cfi: selection.cfi,
+      text: selection.text,
+      color: color,
+      fraction: _location?.fraction,
+      createdAt: now,
+      updatedAt: now,
+    );
+    await _annotations.upsert(annotation);
+    await _bridge.addAnnotation(annotation);
+    _dismissSelection();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('已加入划线')));
+  }
+
+  String _chapterTitle(int index) => index >= 0 && index < _toc.length
+      ? _toc[index].label
+      : '第${index + 1}章';
+
+  Future<void> _copySelection() async {
+    final text = _selection?.text;
+    if (text == null) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    _dismissSelection();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('已复制选中内容')));
+  }
+
+  void _lookupSelection() {
+    final text = _selection?.text;
+    if (text == null) return;
+    final dictionary = context.read<DictionaryService>();
+    if (!dictionary.isInstalled) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: const Text('请先下载离线词库'),
+            action: SnackBarAction(
+              label: '去下载',
+              onPressed: () => context.push('/profile/dictionary'),
+            ),
+          ),
+        );
+      return;
+    }
+    _dismissSelection();
+    showDictionaryLookupSheet(context, text: text, service: dictionary);
+  }
+
+  void _onAnnotationTap(String cfi) {
+    final annotation = _annotations
+        .byBook(widget.bookId)
+        .where((e) => e.cfi == cfi)
+        .toList();
+    if (annotation.isEmpty || !mounted) return;
+    showReaderAnnotationEditorSheet(
+      context,
+      annotation: annotation.first,
+      onSave: (color) async {
+        final updated = annotation.first.copyWith(
+          color: color,
+          updatedAt: DateTime.now(),
+        );
+        await _annotations.upsert(updated);
+        await _bridge.removeAnnotation(cfi);
+        await _bridge.addAnnotation(updated);
+      },
+      onDelete: () async {
+        await _annotations.remove(widget.bookId, annotation.first.id);
+        await _bridge.removeAnnotation(cfi);
+      },
+    );
+  }
+
+  Future<void> _applyAnnotations() =>
+      _bridge.setAnnotations(_annotations.byBook(widget.bookId));
+
   @override
   Widget build(BuildContext context) {
     final tokens = AppTokens.of(context);
@@ -772,6 +889,11 @@ class _ReaderPageState extends State<ReaderPage>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _bridge.setStyle(style);
+        // 版式重建会重置覆盖层，稍后重放划线（foliate 的 create-overlay 也会补当前章）。
+        unawaited(Future<void>.delayed(
+          const Duration(milliseconds: 260),
+          _applyAnnotations,
+        ));
         // 排版变化会重建分栏/页脚：先重设页码，新的页码等 JS 重算后回推。
         _syncPageLabel();
       });
@@ -823,6 +945,21 @@ class _ReaderPageState extends State<ReaderPage>
                 },
               ),
             ),
+            if (_selection != null && !_loading && _error == null)
+              Positioned(
+                left: (_selection!.x + _selection!.width / 2 - 118)
+                    .clamp(8.0, MediaQuery.of(context).size.width - 244)
+                    .toDouble(),
+                top: (_selection!.y - 54)
+                    .clamp(8.0, MediaQuery.of(context).size.height - 72)
+                    .toDouble(),
+                child: ReaderSelectionBar(
+                  onHighlight: () => _saveHighlight(ReaderAnnotationColor.yellow),
+                  onLookup: _lookupSelection,
+                  onCopy: _copySelection,
+                  onDismiss: _dismissSelection,
+                ),
+              ),
             if (_loading)
               Positioned.fill(
                 child: ColoredBox(

@@ -6,7 +6,7 @@
 <title>kele-audio reader</title>
 <style>
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
-  body { background: #f7f1e7; }
+  body { background: #f7f1e7; --overlayer-highlight-opacity: .32; }
   foliate-view { width: 100%; height: 100%; display: block; }
   #status { display: none; }
 </style>
@@ -16,6 +16,7 @@
 <div id="status">reader: booting…</div>
 <script type="module">
 import './foliate-js/view.js'
+import { Overlayer } from './foliate-js/overlayer.js'
 
 const view = document.getElementById('view')
 const status = document.getElementById('status')
@@ -83,6 +84,10 @@ view.addEventListener('load', e => {
     if (a) return
     post('onTapCenter', {})
   }, false)
+  // 划词：长按/拖拽产生的选区在选区结束时回传 Dart（供划线与查词共用）。
+  doc.addEventListener('selectionchange', () => scheduleSelectionCapture(doc))
+  doc.addEventListener('mouseup', () => scheduleSelectionCapture(doc))
+  doc.addEventListener('touchend', () => scheduleSelectionCapture(doc))
 })
 
 // ---- 状态 ---------------------------------------------------------------
@@ -109,6 +114,130 @@ let navBusy = -1
 function currentContents() {
   try { return (view.renderer?.getContents?.() || [])[0] || null } catch (e) { return null }
 }
+
+// ---- 划线 / 选区 --------------------------------------------------------
+const ANNOTATION_COLORS = {
+  yellow: '#E8B33C', green: '#5AAE7A', blue: '#4A86D8', pink: '#D66B9B',
+}
+const annotations = new Map()  // cfi -> annotation
+// foliate-js 的标注接口只认 `value`（CFI），Dart 侧模型字段是 `cfi`。
+function toFoliateAnnotation(a) {
+  return a && !a.value && a.cfi ? { ...a, value: a.cfi } : a
+}
+let selectionTimer = null
+let suppressSelection = false
+
+function rangeFromOffsets(doc, root, start, end) {
+  if (!(end > start)) return null
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let pos = 0, startNode = null, startOff = 0, endNode = null, endOff = 0
+  let node
+  while ((node = walker.nextNode())) {
+    const len = node.data ? node.data.length : 0
+    if (!startNode && start <= pos + len) { startNode = node; startOff = start - pos }
+    if (!endNode && end <= pos + len) { endNode = node; endOff = end - pos }
+    if (startNode && endNode) break
+    pos += len
+  }
+  if (!startNode || !endNode) return null
+  try {
+    const range = doc.createRange()
+    range.setStart(startNode, Math.min(startOff, startNode.data.length))
+    range.setEnd(endNode, Math.min(endOff, endNode.data.length))
+    return range
+  } catch (e) { return null }
+}
+
+// TTS 临时 span 会改变 DOM 结构但不改变文本顺序：先记文本偏移、再清高亮、
+// 最后按偏移重建 Range，保证生成的 CFI 落在稳定 DOM 上。
+function canonicalSelectionRange(doc, range) {
+  try {
+    const root = doc.body || doc.documentElement
+    const pre = doc.createRange()
+    pre.selectNodeContents(root)
+    pre.setEnd(range.startContainer, range.startOffset)
+    const start = pre.toString().length
+    const preEnd = doc.createRange()
+    preEnd.selectNodeContents(root)
+    preEnd.setEnd(range.endContainer, range.endOffset)
+    const end = preEnd.toString().length
+    if (!(end > start)) return range
+    clearTtsHighlight()
+    return rangeFromOffsets(doc, root, start, end) || range
+  } catch (e) { return range }
+}
+
+function scheduleSelectionCapture(doc) {
+  if (suppressSelection) return
+  clearTimeout(selectionTimer)
+  selectionTimer = setTimeout(() => captureSelection(doc), 180)
+}
+
+function captureSelection(doc) {
+  if (suppressSelection) return
+  const sel = doc.getSelection ? doc.getSelection() : (doc.defaultView && doc.defaultView.getSelection())
+  if (!sel || sel.isCollapsed || !sel.rangeCount) {
+    post('onSelectionCleared', {})
+    return
+  }
+  const text = (sel.toString() || '').replace(/\s+/g, ' ').trim()
+  if (!text || text.length > 1200) return
+  const range = canonicalSelectionRange(doc, sel.getRangeAt(0).cloneRange())
+  const chapter = Number(docChapter.get(doc) ?? ((currentContents() || {}).index ?? 0))
+  let cfi = ''
+  try { cfi = view.getCFI(chapter, range) || '' } catch (e) { /* ignore */ }
+  if (!cfi) return
+  let rect = null
+  try {
+    const rects = range.getClientRects()
+    rect = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
+  } catch (e) { /* ignore */ }
+  if (!rect) return
+  let fx = 0, fy = 0
+  try {
+    const frame = doc.defaultView && doc.defaultView.frameElement
+    if (frame) { const fr = frame.getBoundingClientRect(); fx = fr.left; fy = fr.top }
+  } catch (e) { /* ignore */ }
+  post('onSelection', {
+    chapterIndex: chapter,
+    cfi,
+    text,
+    x: Math.round(rect.left + fx),
+    y: Math.round(rect.top + fy),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  })
+}
+
+function clearSelectionJs() {
+  suppressSelection = true
+  clearTimeout(selectionTimer)
+  try {
+    const doc = (currentContents() || {}).doc
+    if (doc && doc.getSelection) doc.getSelection().removeAllRanges()
+  } catch (e) { /* ignore */ }
+  setTimeout(() => { suppressSelection = false }, 60)
+}
+
+// foliate 的标注覆盖层：宿主只保存 CFI/文本，绘制交给 draw-annotation。
+view.addEventListener('draw-annotation', e => {
+  const detail = e.detail || {}
+  const annotation = detail.annotation || {}
+  const hex = ANNOTATION_COLORS[annotation.color] || ANNOTATION_COLORS.yellow
+  if (detail.draw) detail.draw(Overlayer.underline, { color: hex, width: 2 })
+})
+view.addEventListener('create-overlay', e => {
+  const index = Number((e.detail || {}).index ?? -1)
+  for (const annotation of annotations.values()) {
+    if (Number(annotation.chapterIndex) === index) {
+      Promise.resolve(view.addAnnotation(toFoliateAnnotation(annotation))).catch(() => {})
+    }
+  }
+})
+view.addEventListener('show-annotation', e => {
+  const cfi = (e.detail || {}).value
+  if (cfi) post('onAnnotationTap', { cfi })
+})
 
 // ---- 全书页码（当前页 / 总页）-------------------------------------------
 // foliate 只给「章内」实测页数（page/pages，按屏分页）：以当前章的「字数/屏」
@@ -396,6 +525,43 @@ window.reader = {
   async goToHref(href) { if (href) await view.goTo(href); return true },
   async next() { await view.renderer.next(); return true },
   async prev() { await view.renderer.prev(); return true },
+
+  // ---- 划线标注 ----
+  async setAnnotations(list) {
+    const next = new Map()
+    for (const a of (list || [])) {
+      if (a && a.cfi) next.set(a.cfi, a)
+    }
+    for (const cfi of annotations.keys()) {
+      if (!next.has(cfi)) {
+        try { await view.deleteAnnotation({ value: cfi }) } catch (e) { /* ignore */ }
+      }
+    }
+    annotations.clear()
+    for (const [cfi, a] of next) annotations.set(cfi, a)
+    for (const a of annotations.values()) {
+      try { await view.addAnnotation(toFoliateAnnotation(a)) } catch (e) { console.warn('[reader] annotation failed', e) }
+    }
+    return true
+  },
+  async addAnnotation(annotation) {
+    if (!annotation || !annotation.cfi) return false
+    annotations.set(annotation.cfi, annotation)
+    try { await view.addAnnotation(toFoliateAnnotation(annotation)) } catch (e) { console.warn('[reader] addAnnotation failed', e); return false }
+    return true
+  },
+  async removeAnnotation(cfi) {
+    if (!cfi) return false
+    annotations.delete(cfi)
+    try { await view.deleteAnnotation({ value: cfi }) } catch (e) { /* ignore */ }
+    return true
+  },
+  async showAnnotation(cfi) {
+    if (!cfi) return false
+    try { await view.showAnnotation({ value: cfi }) } catch (e) { return false }
+    return true
+  },
+  clearSelection() { clearSelectionJs(); return true },
 
   // ---- M9.3 TTS ----
   currentChapterIndex() {

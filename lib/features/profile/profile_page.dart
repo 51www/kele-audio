@@ -110,6 +110,20 @@ class ProfilePage extends StatelessWidget {
                   ),
                   _divider(tokens),
                   _EntryTile(
+                    icon: Icons.edit_note_rounded,
+                    label: '我的划线',
+                    stage: '',
+                    onTap: () => context.push('/profile/annotations'),
+                  ),
+                  _divider(tokens),
+                  _EntryTile(
+                    icon: Icons.menu_book_rounded,
+                    label: '离线词库',
+                    stage: '',
+                    onTap: () => context.push('/profile/dictionary'),
+                  ),
+                  _divider(tokens),
+                  _EntryTile(
                     icon: Icons.bar_chart_rounded,
                     label: '听书统计',
                     stage: '',

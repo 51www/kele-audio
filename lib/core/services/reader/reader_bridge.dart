@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import '../../domain/reader_annotation.dart';
 import 'reader_typography.dart';
 
 /// 一本书在 WebView 内解析出的元数据（`onBookMeta`）。
@@ -45,6 +46,30 @@ class ReaderLocation {
 
   /// 该次重定位是否由朗读高亮滚动触发（是则应忽略，避免反写朗读位置）。
   final bool ttsScroll;
+}
+
+/// 用户在正文中的选区（供划线与查词共用）。
+/// 坐标为 WebView 视口坐标，用于放置 Flutter 浮层。
+class ReaderSelection {
+  const ReaderSelection({
+    required this.chapterIndex,
+    required this.cfi,
+    required this.text,
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+
+  final int chapterIndex;
+  final String cfi;
+  final String text;
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+
+  double get bottom => y + height;
 }
 
 /// 起播句锚点：当前页第一句所在的段落下标与该句在段内归一化文本中的起始下标。
@@ -148,6 +173,9 @@ class ReaderBridge {
     this.onRelocated,
     this.onToc,
     this.onTapCenter,
+    this.onSelection,
+    this.onSelectionCleared,
+    this.onAnnotationTap,
     this.onError,
     this.log,
   });
@@ -163,6 +191,9 @@ class ReaderBridge {
   final ValueChanged<ReaderLocation>? onRelocated;
   final ValueChanged<List<ReaderTocItem>>? onToc;
   final VoidCallback? onTapCenter;
+  final ValueChanged<ReaderSelection>? onSelection;
+  final VoidCallback? onSelectionCleared;
+  final ValueChanged<String>? onAnnotationTap;
   final ValueChanged<String>? onError;
   final void Function(String message)? log;
 
@@ -237,6 +268,27 @@ class ReaderBridge {
         onToc?.call(items);
       case 'onTapCenter':
         onTapCenter?.call();
+      case 'onSelection':
+        final cfi = p['cfi']?.toString() ?? '';
+        final text = p['text']?.toString().trim() ?? '';
+        if (cfi.isNotEmpty && text.isNotEmpty) {
+          onSelection?.call(
+            ReaderSelection(
+              chapterIndex: (p['chapterIndex'] as num?)?.toInt() ?? 0,
+              cfi: cfi,
+              text: text,
+              x: (p['x'] as num?)?.toDouble() ?? 0,
+              y: (p['y'] as num?)?.toDouble() ?? 0,
+              width: (p['width'] as num?)?.toDouble() ?? 0,
+              height: (p['height'] as num?)?.toDouble() ?? 0,
+            ),
+          );
+        }
+      case 'onSelectionCleared':
+        onSelectionCleared?.call();
+      case 'onAnnotationTap':
+        final cfi = p['cfi']?.toString() ?? '';
+        if (cfi.isNotEmpty) onAnnotationTap?.call(cfi);
       case 'onError':
         onError?.call(p['message']?.toString() ?? '未知错误');
         if (_loadCompleter?.isCompleted == false) {
@@ -416,6 +468,27 @@ class ReaderBridge {
     if (paragraph < 0 || charIndex < 0) return null;
     return ReaderSentenceAnchor(paragraph: paragraph, charIndex: charIndex);
   }
+
+  // ---- 划线标注 ---------------------------------------------------------
+
+  /// 整本书标注重放（打开书籍 / 主题色变化后调用）。
+  Future<void> setAnnotations(List<ReaderAnnotation> items) {
+    final payload = items.map((e) => e.toJson()).toList();
+    return _send('window.reader.setAnnotations(${jsonEncode(payload)})');
+  }
+
+  Future<void> addAnnotation(ReaderAnnotation annotation) =>
+      _send('window.reader.addAnnotation(${jsonEncode(annotation.toJson())})');
+
+  Future<void> removeAnnotation(String cfi) =>
+      _send('window.reader.removeAnnotation(${jsonEncode(cfi)})');
+
+  /// 跳转到标注位置并短暂高亮。
+  Future<void> showAnnotation(String cfi) =>
+      _send('window.reader.showAnnotation(${jsonEncode(cfi)})');
+
+  Future<void> clearSelection() =>
+      _send('window.reader.clearSelection()');
 
   static int _asInt(dynamic raw) {
     if (raw is num) return raw.toInt();

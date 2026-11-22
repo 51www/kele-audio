@@ -13,11 +13,14 @@ import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
 import '../core/services/bili_account_service.dart';
 import '../core/services/backup/backup_service.dart';
+import '../core/services/dictionary/dictionary_service.dart';
+import '../core/services/dictionary/dictionary_state_store.dart';
 import '../core/services/mini_player_controller.dart';
 import '../core/services/offline/offline_cache_service.dart';
 import '../core/services/player/player_service.dart';
 import '../core/services/reader/book_store.dart';
 import '../core/services/reader/reader_activity_store.dart';
+import '../core/services/reader/reader_annotation_store.dart';
 import '../core/services/reader/reader_import_service.dart';
 import '../core/services/reader/reader_progress_store.dart';
 import '../core/services/reader/reader_typography.dart';
@@ -59,11 +62,20 @@ class KeleApp extends StatelessWidget {
         ChangeNotifierProvider<ReaderActivityStore>.value(
           value: services.readerActivity,
         ),
+        ChangeNotifierProvider<ReaderAnnotationStore>.value(
+          value: services.readerAnnotations,
+        ),
         Provider<ReaderImportService>.value(value: services.readerImport),
         ChangeNotifierProvider<ReaderTypographyStore>.value(
           value: services.readerTypography,
         ),
         Provider<ReaderProgressStore>.value(value: services.readerProgress),
+        ChangeNotifierProvider<DictionaryStateStore>.value(
+          value: services.dictionaryState,
+        ),
+        ChangeNotifierProvider<DictionaryService>.value(
+          value: services.dictionary,
+        ),
         ChangeNotifierProvider<TtsSettingsStore>.value(
           value: services.ttsSettings,
         ),
