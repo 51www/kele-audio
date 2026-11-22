@@ -51,3 +51,6 @@ app.*.map.json
 .opencode/
 .playwright-cli/
 .logs 
+ios
+android/app/dev-key.properties
+docs/shortscreen
