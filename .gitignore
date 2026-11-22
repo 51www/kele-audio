@@ -50,12 +50,8 @@ app.*.map.json
 # OpenCode / playwright-cli 本地会话产物
 .opencode/
 .playwright-cli/
-.logs 
-<<<<<<< HEAD
+.logs  
 ios
 android/app/dev-key.properties
-docs/shortscreen
-=======
-pubspec.yaml
 docs/shortscreen 
->>>>>>> noval
+pubspec.yaml 
