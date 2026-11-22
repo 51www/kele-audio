@@ -86,9 +86,9 @@ void main() {
     await scrollTo(tester, find.text('工程自检 · M1 骨架'));
     expect(find.text('工程自检 · M1 骨架'), findsOneWidget);
 
-    await tester.tap(find.text('暗夜金橙'));
+    await tester.tap(find.text('静夜墨灰'));
     await tester.pumpAndSettle();
-    expect(services.theme.preset, AppThemePreset.darkGold);
+    expect(services.theme.preset, AppThemePreset.inkNight);
 
     await tester.tap(find.text('暖纸书卷'));
     await tester.pumpAndSettle();

@@ -94,10 +94,12 @@ class _DiscoverPageState extends State<DiscoverPage> {
           _buildSearchEntry(context, tokens, scheme),
           if (!kids && settings.featuredVisible && activeConfig.featured.isNotEmpty)
             _buildFeatured(context, tokens, scheme, activeConfig.featured),
+          // 版面节奏（设计稿）：区块间大留白（spaceLg）分隔，
+          // 分区标题与其下的分类条紧凑（spaceSm）。
           Padding(
             padding: EdgeInsets.fromLTRB(
               tokens.spaceMd,
-              tokens.spaceMd,
+              tokens.spaceLg,
               tokens.spaceMd,
               tokens.spaceSm,
             ),
@@ -258,7 +260,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.symmetric(horizontal: tokens.spaceMd),
         itemCount: categories.length,
-        separatorBuilder: (_, _) => SizedBox(width: tokens.spaceSm),
+        separatorBuilder: (_, _) => SizedBox(width: tokens.spaceMd),
         itemBuilder: (context, i) {
           final cat = categories[i];
           final selected = cat.id == _categoryId;

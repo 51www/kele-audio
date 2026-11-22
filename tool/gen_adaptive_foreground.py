@@ -18,7 +18,7 @@ import os
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "docs/images/icon.png")
+SRC = os.path.join(ROOT, "assets/icons/icon.png")
 RES = os.path.join(ROOT, "android/app/src/main/res")
 
 # 各密度下自适应图标画布尺寸（108dp 基准）

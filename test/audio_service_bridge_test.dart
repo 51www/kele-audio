@@ -53,4 +53,48 @@ void main() {
     expect(b.mediaItem.value, isNull);
     expect(b.playbackState.value.processingState, AudioProcessingState.idle);
   });
+
+  // 回归：TTS 无连续进度（position 恒 0），若参与「走表」外推判断，
+  // 时间一长偏差超 3s 就会被当成进度变化反复重推 playbackState →
+  // 通知栏被高频重建，部分机型每重建一次「叮」一声。trackPosition=false
+  // 时切段不应改动 playbackState（播放态/控件/倍速不变）。
+  test('TTS 不追踪进度时，重复 publish 不重建 playbackState', () {
+    final b = bridge();
+    final tts = MediaSnapshot(
+      active: true,
+      playing: true,
+      chapterTitle: '第一章',
+      trackPosition: false,
+    );
+    b.publish(tts);
+    final first = b.playbackState.value;
+
+    b.publish(tts);
+    expect(b.playbackState.value, same(first),
+        reason: '无变化不应重推，避免通知栏反复重建');
+
+    // 换段（同一章、播放态不变）依然不重建
+    b.publish(tts.copyWith(position: const Duration(seconds: 0)));
+    expect(b.playbackState.value, same(first));
+  });
+
+  test('有声书正常走表不重建，但真实跳转会更新进度', () {
+    final b = bridge();
+    b.publish(const MediaSnapshot(
+      active: true,
+      playing: true,
+      position: Duration(seconds: 10),
+      speed: 1.0,
+    ));
+    final anchored = b.playbackState.value;
+
+    // 走表范围内的小偏差（<3s）不重推
+    b.publish(const MediaSnapshot(
+      active: true,
+      playing: true,
+      position: Duration(seconds: 11),
+      speed: 1.0,
+    ));
+    expect(b.playbackState.value, same(anchored));
+  });
 }

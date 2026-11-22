@@ -11,6 +11,7 @@ import '../core/api/key_value_store.dart';
 import '../core/api/play_url_service.dart';
 import '../core/api/prefs_kv_store.dart';
 import '../core/api/subtitle_source.dart';
+import '../core/api/up_profile_source.dart';
 import '../core/data/daos.dart';
 import '../core/data/discover_cache.dart';
 import '../core/data/local_database.dart';
@@ -21,10 +22,23 @@ import '../core/services/offline/dio_audio_fetcher.dart';
 import '../core/services/offline/audio_store.dart';
 import '../core/services/offline/offline_cache_service.dart';
 import '../core/services/player/media_bridge.dart';
+import '../core/services/player/playback_arbiter.dart';
 import '../core/services/player/player_service.dart';
 import '../core/services/player/progress_store.dart';
+import '../core/services/reader/book_store.dart';
+import '../core/services/reader/reader_activity_store.dart';
+import '../core/services/reader/reader_import_service.dart';
+import '../core/services/reader/reader_progress_store.dart';
+import '../core/services/reader/reader_typography.dart';
 import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
+import '../core/services/system/download_notification.dart';
+import '../core/services/tts/tts_engine.dart';
+import '../core/services/tts/tts_engine_doubao.dart';
+import '../core/services/tts/tts_engine_edge.dart';
+import '../core/services/tts/tts_engine_system.dart';
+import '../core/services/tts/tts_session.dart';
+import '../core/services/tts/tts_settings_store.dart';
 import 'theme/theme_controller.dart';
 
 /// 应用级服务集合（DI）：一次性启动装配，页面用 `context.read` 取用。
@@ -52,6 +66,15 @@ class AppServices {
     required this.offline,
     required this.account,
     required this.backup,
+    required this.readerBooks,
+    required this.readerActivity,
+    required this.readerImport,
+    required this.readerTypography,
+    required this.readerProgress,
+    required this.playbackArbiter,
+    required this.ttsSettings,
+    required this.ttsSession,
+    required this.upProfile,
   });
 
   final KeyValueStore kv;
@@ -95,7 +118,7 @@ class AppServices {
   /// 书架（M4）：收藏状态的单一事实源 + shelf×album×play_history 联合查询
   final ShelfController shelf;
 
-  /// 设置页持久化（M5）：仅 Wi-Fi 下载占位开关等
+  /// 设置持久化（M5）：仅 Wi-Fi 下载、发现页显隐等
   final SettingsStore settings;
 
   /// 离线缓存（M8）：整本缓存队列 + 缓存播放联动
@@ -106,6 +129,33 @@ class AppServices {
 
   /// 数据备份 / 还原（本地文件，替代原 WebDAV 云同步）
   final BackupService backup;
+
+  /// 本地书元数据（M9.1）：独立数据域，不写 shelf / play_history / play_log
+  final ReaderBookStore readerBooks;
+
+  /// 阅读历史与时长埋点（M9.1 建立，M9.2/M9.3 写入）
+  final ReaderActivityStore readerActivity;
+
+  /// 本地书导入编排（TXT / EPUB / PDF / MOBI / 网页）
+  final ReaderImportService readerImport;
+
+  /// 阅读排版设置（M9.2，`reader_typography`）
+  final ReaderTypographyStore readerTypography;
+
+  /// 阅读进度细粒度真源（M9.2，`reader_progress_{id}`）
+  final ReaderProgressStore readerProgress;
+
+  /// 播放互斥收敛点（M9.3）：B 站收听 ↔ 本地书 TTS 共用系统媒体会话
+  final PlaybackArbiter playbackArbiter;
+
+  /// 听书设置（M9.3，`tts_settings`）
+  final TtsSettingsStore ttsSettings;
+
+  /// 听书会话（M9.3）：前台服务/锁屏通知/音频焦点/断点续听
+  final TtsSession ttsSession;
+
+  /// 主播主页（M11）：UP 主资料 + 投稿作品列表
+  final UpProfileSource upProfile;
 
   /// 启动装配：**不发任何网络请求**（PRD 冷启动 ≤ 3s）。
   ///
@@ -124,25 +174,22 @@ class AppServices {
     final config = await ApiConfigLoader.load(
       store: kv,
       isWeb: web,
-      bundledJson: () async => rootBundle.loadString(
-        'assets/api/api_config.json',
-      ),
+      bundledJson: () async =>
+          rootBundle.loadString('assets/api/api_config.json'),
     );
 
     // 内容源配置（M3）：内置 JSON → 远端覆盖，损坏静默回退内置分类
     final content = await ContentConfigLoader.load(
       store: kv,
-      bundledJson: () async => rootBundle.loadString(
-        'assets/api/content_config.json',
-      ),
+      bundledJson: () async =>
+          rootBundle.loadString('assets/api/content_config.json'),
     );
 
     // 儿童白名单配置（M6 / PRD §7.3）：同构加载链路，独立远端缓存 key
     final childrenContent = await ContentConfigLoader.load(
       store: kv,
-      bundledJson: () async => rootBundle.loadString(
-        'assets/api/children_config.json',
-      ),
+      bundledJson: () async =>
+          rootBundle.loadString('assets/api/children_config.json'),
       builtIn: ContentConfig.childrenBuiltIn,
       cacheKey: ContentConfigLoader.childrenRemoteCacheKey,
     );
@@ -169,11 +216,30 @@ class AppServices {
       log: _log,
     );
     final discoverCache = DiscoverPageCache(kv);
+    final upProfile = UpProfileSource(
+      client: client,
+      config: config,
+      log: _log,
+    );
     final progress = ProgressStore(daos);
     final prefs = PlayerPrefs(kv);
     final settings = SettingsStore(kv);
     final account = BiliAccountService(client: client, kv: kv, log: _log);
     final miniPlayer = MiniPlayerController();
+
+    // 本地书（M9.1）：独立 reader_* 数据域，启动只读本地、不发网络请求。
+    final readerBooks = ReaderBookStore(kv);
+    await readerBooks.load();
+    final readerActivity = ReaderActivityStore(kv);
+    await readerActivity.load();
+    final readerTypography = ReaderTypographyStore(kv);
+    await readerTypography.load();
+    final readerProgress = ReaderProgressStore(kv);
+    final readerImport = ReaderImportService(
+      books: readerBooks,
+      activity: readerActivity,
+      progress: readerProgress,
+    );
     final offline = OfflineCacheService(
       daos: daos,
       playUrl: playUrl,
@@ -181,9 +247,18 @@ class AppServices {
       store: createAudioStore(),
       fetcher: DioAudioFetcher(),
       log: _log,
+      downloadNotifier: DownloadNotification.showDownloadComplete,
     );
     await offline.initFlags(kv);
     offline.useAudioProxy = web;
+    // 下载下发前的网络门控：仅 Wi-Fi 下载开关（网络类型走系统原生通道）
+    offline.wifiOnlyProvider = () => settings.wifiOnlyDownload;
+
+    // 听书（M9.3）：设置读取 → 播放互斥 → TTS 会话（系统 / Edge 按需创建）。
+    final ttsSettings = TtsSettingsStore(kv);
+    await ttsSettings.load();
+    final arbiter = PlaybackArbiter(media: mediaBridge ?? NoopMediaBridge());
+
     final player = PlayerService(
       playUrl: playUrl,
       albumSource: albums,
@@ -196,9 +271,24 @@ class AppServices {
       log: _log,
       shelf: shelf,
       offline: offline,
+      arbiter: arbiter,
     );
     // 零网络、零引擎：只挂生命周期/焦点/系统桥 + 读持久化参数
     await player.init();
+
+    final ttsSession = TtsSession(
+      settings: ttsSettings,
+      books: readerBooks,
+      activity: readerActivity,
+      arbiter: arbiter,
+      engineFactory: (kind) => switch (kind) {
+        TtsEngineKind.system => TtsSystemEngine(),
+        TtsEngineKind.edge => TtsEdgeEngine(),
+        TtsEngineKind.doubao => TtsDoubaoEngine(
+          cookieProvider: () => ttsSettings.doubaoCookie,
+        ),
+      },
+    );
 
     // 下载档位跟随默认音质（封顶 192K 由 OfflineCacheService 收口）
     offline.qualityProvider = () => player.quality;
@@ -240,6 +330,11 @@ class AppServices {
             .catchError((Object e) {
           _log('restore entitlement error: $e');
         });
+        // 备份还原后重读本地书元数据与阅读活动（M9.4 正式纳入备份）。
+        await readerBooks.load();
+        await readerActivity.load();
+        await readerTypography.load();
+        await ttsSettings.load();
       },
     );
 
@@ -266,6 +361,15 @@ class AppServices {
       offline: offline,
       account: account,
       backup: backup,
+      readerBooks: readerBooks,
+      readerActivity: readerActivity,
+      readerImport: readerImport,
+      readerTypography: readerTypography,
+      readerProgress: readerProgress,
+      playbackArbiter: arbiter,
+      ttsSettings: ttsSettings,
+      ttsSession: ttsSession,
+      upProfile: upProfile,
     );
   }
 

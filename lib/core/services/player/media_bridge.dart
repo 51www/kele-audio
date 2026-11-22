@@ -22,6 +22,7 @@ class MediaSnapshot {
     this.hasNext = false,
     this.hasPrev = false,
     this.speed = 1.0,
+    this.trackPosition = true,
   });
 
   /// 无播放任务时为 false（此时应把通知收掉）
@@ -39,6 +40,15 @@ class MediaSnapshot {
   /// 写死 1.0 会让 1.25x 播放时锁屏进度条越走越慢。
   final double speed;
 
+  /// 进度是否随播放真实前进。
+  ///
+  /// 有声书（B 站音频）的 position 会随时间增长，桥接层据此按倍速外推进度、
+  /// 判断「只是走表」从而跳过重复推送。TTS 听书没有连续进度（position 恒 0），
+  /// 若也参与该判断，几秒后外推值与恒 0 的偏差就会超过阈值，导致每切一段都
+  /// 重推一次 playbackState、通知栏反复重建（部分机型每次重建「叮」一声）。
+  /// TTS 场景传 false，跳过进度维度、只按播放态/控件/倍速变化去重。
+  final bool trackPosition;
+
   MediaSnapshot copyWith({
     bool? active,
     bool? playing,
@@ -50,6 +60,7 @@ class MediaSnapshot {
     bool? hasNext,
     bool? hasPrev,
     double? speed,
+    bool? trackPosition,
   }) =>
       MediaSnapshot(
         active: active ?? this.active,
@@ -62,6 +73,7 @@ class MediaSnapshot {
         hasNext: hasNext ?? this.hasNext,
         hasPrev: hasPrev ?? this.hasPrev,
         speed: speed ?? this.speed,
+        trackPosition: trackPosition ?? this.trackPosition,
       );
 }
 

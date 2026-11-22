@@ -14,6 +14,7 @@ import '../../core/services/offline/offline_cache_service.dart';
 import '../../core/services/player/player_service.dart';
 import '../../core/services/shelf_controller.dart';
 import '../player/mini_player.dart';
+import '../reader/reader_tts_mini_bar.dart';
 import '../player/player_page.dart';
 import 'album_card.dart';
 
@@ -160,8 +161,15 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
     return Scaffold(
       appBar: AppBar(title: Text(album.title, maxLines: 1)),
-      // 与首页（含底部导航栏）对齐：播放条距屏幕底部高度一致
-      bottomNavigationBar: const MiniPlayerSlot(alignToHomeBar: true),
+      // 与首页（含底部导航栏）对齐：播放条距屏幕底部高度一致；
+      // 本地书朗读时改为显示朗读控制条（两者互斥）。
+      bottomNavigationBar: const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TtsMiniPlayerSlot(alignToHomeBar: true),
+          MiniPlayerSlot(alignToHomeBar: true),
+        ],
+      ),
       body: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
@@ -200,9 +208,40 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                 maxLines: 3,
                                 overflow: TextOverflow.ellipsis),
                             SizedBox(height: tokens.spaceSm),
-                            Text(
-                              album.upName.isEmpty ? 'UP 主未知' : album.upName,
-                              style: tokens.bodyStyle,
+                            // UP 主名可点击 → 主播主页（M11）：仅当持有 mid 时
+                            // 才可点，避免合集 meta 缺 mid 时跳到空页。
+                            InkWell(
+                              onTap: album.upMid > 0
+                                  ? () => context.push('/up/${album.upMid}')
+                                  : null,
+                              borderRadius:
+                                  BorderRadius.circular(tokens.radiusSm),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      album.upName.isEmpty
+                                          ? 'UP 主未知'
+                                          : album.upName,
+                                      style: tokens.bodyStyle.copyWith(
+                                        color: album.upMid > 0
+                                            ? scheme.primary
+                                            : null,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (album.upMid > 0) ...[
+                                    const SizedBox(width: 2),
+                                    Icon(
+                                      Icons.chevron_right_rounded,
+                                      size: 16,
+                                      color: scheme.primary,
+                                    ),
+                                  ],
+                                ],
+                              ),
                             ),
                             SizedBox(height: tokens.spaceSm),
                             Text(
@@ -327,18 +366,21 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                             // M8 离线缓存：整本入队（状态进度见 我的 → 离线缓存）
                             onPressed: _chapters.isEmpty
                                 ? null
-                                : () {
-                                    context
+                                : () async {
+                                    final ok = await context
                                         .read<OfflineCacheService>()
                                         .cacheAlbum(
                                           album,
                                           _chapters,
                                         );
+                                    if (!context.mounted) return;
                                     ScaffoldMessenger.of(context)
                                       ..hideCurrentSnackBar()
                                       ..showSnackBar(SnackBar(
-                                        content: Text(
-                                            '已加入缓存队列：${album.title}（${_chapters.length} 章）'),
+                                        content: Text(ok
+                                            ? '已加入缓存队列：${album.title}（${_chapters.length} 章）'
+                                            : OfflineCacheService
+                                                .wifiOnlyBlockedMessage),
                                         margin: const EdgeInsets.fromLTRB(
                                             16, 0, 16, 96),
                                       ));

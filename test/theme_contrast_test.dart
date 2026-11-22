@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:kele_audio/app/theme/app_palette.dart';
 
-/// 主题可读性守卫：七套皮肤的文字/底色组合按 WCAG AA（≥4.5:1）断言。
+/// 主题可读性守卫：三套皮肤的文字/底色组合按 WCAG AA（≥4.5:1）断言。
 ///
 /// 覆盖：主/次/弱文字 × 页面/卡片底、按钮文字 × 按钮底、
 /// 渐变点缀上的文字 × 渐变两端、主色/警示色作文字 × 页面/卡片底。
@@ -32,7 +32,7 @@ void main() {
     );
   }
 
-  group('六套主题文字对比度（WCAG AA）', () {
+  group('三套主题文字对比度（WCAG AA）', () {
     for (final preset in AppThemePreset.values) {
       test('${preset.title} 文字与底色全部可读', () {
         final p = preset.palette;
@@ -68,7 +68,7 @@ void main() {
   });
 
   group('主题结构不变式', () {
-    test('主题3/6/7 为深色，其余为亮色；深色主题文字为浅色', () {
+    test('主题6 为深色，其余为亮色；深色主题文字为浅色', () {
       for (final preset in AppThemePreset.values) {
         final p = preset.palette;
         expect(p.isDark, preset.isDark);
@@ -80,11 +80,15 @@ void main() {
       }
     });
 
-    test('一般模式默认主题1、儿童模式默认主题4（预设 id 稳定）', () {
+    test('一般模式默认主题1、儿童模式默认主题5（预设 id 稳定；已移除 id 返回 null）', () {
       expect(AppThemePreset.warmPaper.id, 1);
-      expect(AppThemePreset.springPromo.id, 4);
+      expect(AppThemePreset.mintSpring.id, 5);
       expect(AppThemePreset.fromId(1), AppThemePreset.warmPaper);
-      expect(AppThemePreset.fromId(4), AppThemePreset.springPromo);
+      expect(AppThemePreset.fromId(5), AppThemePreset.mintSpring);
+      // 已移除主题 3（暗夜金橙）/ 4（春日活力）/ 7（暖夜摩卡）
+      for (final removedId in [2, 3, 4, 7]) {
+        expect(AppThemePreset.fromId(removedId), isNull);
+      }
     });
   });
 }

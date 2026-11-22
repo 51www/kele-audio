@@ -23,6 +23,7 @@ class UpdateService extends ChangeNotifier {
     UpdateRepository? repository,
     UpdateDownloader? downloader,
     UpdateInstaller? installer,
+    this.notifier,
   })  : _repository = repository ?? UpdateRepository(dio: dio ?? Dio(_dioOptions)),
         _downloader = downloader ?? UpdateDownloader(dio: dio ?? Dio(_dioOptions)),
         _installer = installer ?? UpdateInstaller();
@@ -35,6 +36,7 @@ class UpdateService extends ChangeNotifier {
   final UpdateRepository _repository;
   final UpdateDownloader _downloader;
   final UpdateInstaller _installer;
+  final void Function(String title, String body)? notifier;
 
   UpdatePhase phase = UpdatePhase.idle;
   String? currentVersion;
@@ -189,6 +191,8 @@ class UpdateService extends ChangeNotifier {
     }
     downloading = false;
     notifyListeners();
+    // 更新包下载完成：带声通知提醒用户回来安装（此处仅下载完，尚未安装）。
+    notifier?.call('更新包下载完成', '点击安装新版本');
   }
 
   /// 用户取消下载（提示词 3-5：立即终止，不试下一源）。

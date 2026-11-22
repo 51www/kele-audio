@@ -329,15 +329,17 @@ class _PlayerPageState extends State<PlayerPage> {
             .where((c) => !offline.isDone(c.id))
             .length;
 
-        Future<void> run(Future<void> Function() task, String toast) async {
-          await task();
+        Future<void> run(Future<bool> Function() task, String toast) async {
+          final ok = await task();
           if (sheetContext.mounted) Navigator.of(sheetContext).pop();
           if (!context.mounted) return;
           ScaffoldMessenger.of(context)
             ..hideCurrentSnackBar()
             ..showSnackBar(
               SnackBar(
-                content: Text(toast),
+                content: Text(
+                  ok ? toast : OfflineCacheService.wifiOnlyBlockedMessage,
+                ),
                 margin: const EdgeInsets.fromLTRB(16, 0, 16, 240),
               ),
             );

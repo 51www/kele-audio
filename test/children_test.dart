@@ -189,7 +189,7 @@ void main() {
   });
 
   group('儿童模式状态与主题（PRD §5.5 + 单槽位需求）', () {
-    test('默认关闭；进入儿童模式自动套用主题4，仍可手动切换', () async {
+    test('默认关闭；进入儿童模式自动套用主题5，仍可手动切换', () async {
       final kv = MemoryKeyValueStore();
       final controller = ThemeController(kv);
       await controller.load();
@@ -199,41 +199,53 @@ void main() {
       await controller.setChildren(true);
       expect(controller.children, isTrue);
       expect(kv.getString(ThemeController.childrenKey), '1');
-      // 进入儿童模式自动套用主题4「春日活力」
-      expect(controller.preset, AppThemePreset.springPromo);
+      // 进入儿童模式自动套用主题5「薄荷春芽」
+      expect(controller.preset, AppThemePreset.mintSpring);
 
       // 儿童模式下仍可手动切换任意主题（不锁定）
-      await controller.setPreset(AppThemePreset.mintSpring);
-      expect(controller.preset, AppThemePreset.mintSpring);
+      await controller.setPreset(AppThemePreset.inkNight);
+      expect(controller.preset, AppThemePreset.inkNight);
 
       // 持久化：模拟重启后儿童模式仍在、主题保持用户所选
       final reloaded = ThemeController(kv);
       await reloaded.load();
       expect(reloaded.children, isTrue);
-      expect(reloaded.preset, AppThemePreset.mintSpring);
+      expect(reloaded.preset, AppThemePreset.inkNight);
 
       // 退出儿童模式不强制换肤，保持当前主题
       await reloaded.setChildren(false);
       expect(reloaded.children, isFalse);
-      expect(reloaded.preset, AppThemePreset.mintSpring);
+      expect(reloaded.preset, AppThemePreset.inkNight);
     });
 
-    test('旧「深色」设置迁移为主题3；主题可在各预设间自由切换', () async {
+    test('旧「深色」设置迁移为主题6；主题可在各预设间自由切换', () async {
       final kv = MemoryKeyValueStore();
       await kv.setString(ThemeController.legacyModeKey, 'dark');
       final migrated = ThemeController(kv);
       await migrated.load();
-      expect(migrated.preset, AppThemePreset.darkGold);
+      expect(migrated.preset, AppThemePreset.inkNight);
 
       // 单槽位：各预设自由切换并持久化
-      await migrated.setPreset(AppThemePreset.mochaNight);
+      await migrated.setPreset(AppThemePreset.warmPaper);
       await migrated.setPreset(AppThemePreset.mintSpring);
       final reloaded = ThemeController(kv);
       await reloaded.load();
       expect(reloaded.preset, AppThemePreset.mintSpring);
     });
 
-    test('六个主题预设均可构建；主题3/6/7 为深色，其余为亮色', () {
+    test('旧数据保存已移除主题（3/4/7）时回退默认主题1，不报错', () async {
+      for (final removedId in ['3', '4', '7']) {
+        final kv = MemoryKeyValueStore();
+        await kv.setString(ThemeController.presetKey, removedId);
+        final controller = ThemeController(kv);
+        await controller.load();
+        expect(controller.preset, AppThemePreset.warmPaper);
+        expect(AppThemePreset.fromId(int.parse(removedId)), isNull);
+        expect(() => AppTheme.of(controller.preset), returnsNormally);
+      }
+    });
+
+    test('三个主题预设均可构建；主题6 为深色，其余为亮色', () {
       for (final preset in AppThemePreset.values) {
         final theme = AppTheme.of(preset);
         expect(theme.extension<AppTokens>(), isA<AppTokens>());

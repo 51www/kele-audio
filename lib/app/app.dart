@@ -16,8 +16,15 @@ import '../core/services/backup/backup_service.dart';
 import '../core/services/mini_player_controller.dart';
 import '../core/services/offline/offline_cache_service.dart';
 import '../core/services/player/player_service.dart';
+import '../core/services/reader/book_store.dart';
+import '../core/services/reader/reader_activity_store.dart';
+import '../core/services/reader/reader_import_service.dart';
+import '../core/services/reader/reader_progress_store.dart';
+import '../core/services/reader/reader_typography.dart';
 import '../core/services/settings_store.dart';
 import '../core/services/shelf_controller.dart';
+import '../core/services/tts/tts_session.dart';
+import '../core/services/tts/tts_settings_store.dart';
 import 'di.dart';
 import 'router.dart';
 import 'theme/app_theme.dart';
@@ -46,6 +53,21 @@ class KeleApp extends StatelessWidget {
         ChangeNotifierProvider<BackupService>.value(
           value: services.backup,
         ),
+        ChangeNotifierProvider<ReaderBookStore>.value(
+          value: services.readerBooks,
+        ),
+        ChangeNotifierProvider<ReaderActivityStore>.value(
+          value: services.readerActivity,
+        ),
+        Provider<ReaderImportService>.value(value: services.readerImport),
+        ChangeNotifierProvider<ReaderTypographyStore>.value(
+          value: services.readerTypography,
+        ),
+        Provider<ReaderProgressStore>.value(value: services.readerProgress),
+        ChangeNotifierProvider<TtsSettingsStore>.value(
+          value: services.ttsSettings,
+        ),
+        ChangeNotifierProvider<TtsSession>.value(value: services.ttsSession),
         Provider<AppServices>.value(value: services),
         Provider<BiliClient>.value(value: services.client),
         Provider<ApiConfig>.value(value: services.config),
@@ -64,8 +86,8 @@ class KeleApp extends StatelessWidget {
       child: Consumer<ThemeController>(
         builder: (context, themeController, _) {
           // 单一主题槽位：用户可自由切换任意预设（默认主题1「暖纸书卷」）；
-          // 进入儿童模式时自动套用主题4「春日活力」（见 ThemeController.setChildren）。
-          // 六个预设都是完整皮肤（含深色的主题3/6/7），切换即换肤（无重启）。
+          // 进入儿童模式时自动套用主题5「薄荷春芽」（见 ThemeController.setChildren）。
+          // 三个预设都是完整皮肤（含深色的主题6），切换即换肤（无重启）。
           return MaterialApp.router(
             title: '可乐听书',
             debugShowCheckedModeBanner: false,

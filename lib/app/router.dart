@@ -4,16 +4,19 @@ import 'package:go_router/go_router.dart';
 import '../features/discover/album_detail_page.dart';
 import '../features/discover/discover_page.dart';
 import '../features/discover/search_page.dart';
+import '../features/discover/up_profile_page.dart';
 import '../features/profile/pages/about_page.dart';
 import '../features/profile/pages/bili_account_page.dart';
 import '../features/profile/pages/downloads_page.dart';
-import '../features/profile/pages/history_page.dart';
 import '../features/profile/pages/settings_page.dart';
 import '../features/profile/pages/stats_page.dart';
 import '../features/profile/profile_page.dart';
 import '../features/player/player_page.dart';
+import '../features/reader/reader_page.dart';
+import '../features/reader/reader_tts_page.dart';
 import '../features/shelf/shelf_page.dart';
 import 'home_shell.dart';
+import 'route_observer.dart';
 
 /// 路由表（PRD §4.2 十条路由）。
 ///
@@ -26,6 +29,8 @@ class AppRouter {
   static final GoRouter router = GoRouter(
     initialLocation: '/discover',
     debugLogDiagnostics: false,
+    // 页面用 RouteAware 感知被覆盖/重新露出（阅读计时等），信号统一走路由。
+    observers: [appRouteObserver],
     routes: [
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>
@@ -54,12 +59,6 @@ class AppRouter {
               name: 'profile',
               builder: (context, state) => const ProfilePage(),
               routes: [
-                // 6. 历史收听
-                GoRoute(
-                  path: 'history',
-                  name: 'profile-history',
-                  builder: (context, state) => const HistoryPage(),
-                ),
                 // 7. 离线缓存管理
                 GoRoute(
                   path: 'downloads',
@@ -113,6 +112,14 @@ class AppRouter {
           albumId: state.pathParameters['id'] ?? '',
         ),
       ),
+      // 15. 主播主页（M11）：mid 来自专辑 upMid
+      GoRoute(
+        path: '/up/:mid',
+        name: 'up-profile',
+        builder: (context, state) => UpProfilePage(
+          mid: int.tryParse(state.pathParameters['mid'] ?? '') ?? 0,
+        ),
+      ),
       // 11. 搜索（M8）：`?q=` 支持编辑精选专题卡预置关键词
       GoRoute(
         path: '/search',
@@ -120,6 +127,20 @@ class AppRouter {
         builder: (context, state) => SearchPage(
           initialKeyword: state.uri.queryParameters['q'] ?? '',
         ),
+      ),
+      // 13. 本地书阅读页（M9.1 占位，M9.2 接入 foliate-js）
+      GoRoute(
+        path: '/reader/:id',
+        name: 'reader',
+        builder: (context, state) =>
+            ReaderPage(bookId: state.pathParameters['id'] ?? ''),
+      ),
+      // 14. 本地书听书播放页（M9.4）：播放条点条身进入，状态与阅读页同一会话
+      GoRoute(
+        path: '/listen/:id',
+        name: 'listen',
+        builder: (context, state) =>
+            ReaderTtsPage(bookId: state.pathParameters['id'] ?? ''),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(

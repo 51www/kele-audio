@@ -51,6 +51,11 @@ app.*.map.json
 .opencode/
 .playwright-cli/
 .logs 
+<<<<<<< HEAD
 ios
 android/app/dev-key.properties
 docs/shortscreen
+=======
+pubspec.yaml
+docs/shortscreen 
+>>>>>>> noval

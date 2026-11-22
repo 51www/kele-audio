@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../player/mini_player.dart';
+import '../reader/reader_tts_mini_bar.dart';
 
 import '../../app/di.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../app/widgets/common.dart';
 import '../../core/api/discover_source.dart';
 import '../../core/domain/album.dart';
-import 'album_card.dart';
+import 'album_list_row.dart';
 
 /// 搜索页（M8 / PRD §5.1）：WBI 关键词搜索 + 本地历史 + 分页加载。
 ///
@@ -171,8 +171,15 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ),
       ),
-      // 与首页（含底部导航栏）对齐：播放条距屏幕底部高度一致
-      bottomNavigationBar: const MiniPlayerSlot(alignToHomeBar: true),
+      // 与首页（含底部导航栏）对齐：播放条距屏幕底部高度一致；
+      // 本地书朗读时改为显示朗读控制条（两者互斥）。
+      bottomNavigationBar: const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TtsMiniPlayerSlot(alignToHomeBar: true),
+          MiniPlayerSlot(alignToHomeBar: true),
+        ],
+      ),
       body: _keyword.isEmpty ? _buildIdle(tokens, scheme) : _buildResults(tokens),
     );
   }
@@ -267,67 +274,9 @@ class _SearchPageState extends State<SearchPage> {
         final album = _items[i];
         return Padding(
           padding: EdgeInsets.only(bottom: tokens.spaceSm),
-          child: _SearchResultRow(album: album),
+          child: AlbumListRow(album: album),
         );
       },
-    );
-  }
-}
-
-/// 搜索结果单行：横版封面 + 标题 + UP + 元信息。
-class _SearchResultRow extends StatelessWidget {
-  const _SearchResultRow({required this.album});
-
-  final Album album;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = AppTokens.of(context);
-    return KeleCard(
-      onTap: () => context.push('/album/${album.id}'),
-      padding: EdgeInsets.all(tokens.spaceSm + 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(tokens.radiusSm),
-            child: SizedBox(
-              width: 108,
-              height: 68,
-              child: CoverImage(url: album.coverUrl, title: album.title),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  album.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: tokens.bodyStyle.copyWith(
-                    fontWeight: FontWeight.w700,
-                    height: 1.3,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  [
-                    if (album.upName.isNotEmpty) album.upName,
-                    if (album.totalDurationSec > 0)
-                      '${(album.totalDurationSec / 60).round()} 分钟',
-                    if (album.chapterCount > 0) '${album.chapterCount} 集',
-                  ].join(' · '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: tokens.captionStyle,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

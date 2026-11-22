@@ -14,6 +14,9 @@
 |---|---|---|
 | `docs/theme.md` | 六套 UI 主题的风格提示词与调色参考（含儿童模式选型） | 涉及任何 UI/主题工作时读 |
 | `docs/shortscreen/` | 风格参考截图（theme.md 的源图） | 需要视觉参考时 |
+| `docs/reader-plan.md` | M9 阅读与听书：调研结论、选型决策（D1~D8）、总体架构、依赖与许可证 | 做 M9 任何工作前先读 |
+| `docs/reader-design.md` | M9 技术设计：目录结构、数据模型、导入管线、WebView 桥协议、TTS 引擎 | 实现 M9 各阶段时对照读 |
+| `docs/reader-milestones.md` | M9 里程碑：M9.0~M9.4 任务分解、准出条件、进度表 | M9 开发推进时按阶段更新 |
 
 ## 技术决策（已定，勿改）
 
@@ -46,10 +49,25 @@
 
 ## 项目 Logo
 
-- **存放目录**：`E:\www\kele-audio\docs\images` —— 统一存放项目 logo 图片。
+- **存放目录**：`E:\www\kele-audio\assets\icons` —— 统一存放项目 logo 图片（docs 只放介绍说明文档）。
 - 若当前已有图片尺寸无法满足应用图标、启动页、商店上架等不同使用场景的需求，可基于现有 logo 生成更多尺寸的版本，放入该目录以满足不同用途。
 
 ## 环境
 
-- Flutter 3.38.x（Dart 3.10+）、JDK 17、Android SDK；构建：`flutter build apk --release`
+- Flutter 3.38.x（Dart 3.10+）、JDK 17、Android SDK；构建：`flutter build apk --release`（项目为单包名 `com.kele.audio`，debug/profile 用 dev-key 调试 keystore 签名，release 用正式 key.properties）
 - 平台范围：**仅 Android**（API 26+），iOS/Windows 不做。
+
+## 5. 常用服务与工具路径
+
+环境里**没有把 Android SDK 加入 `PATH`**（也没设 `ANDROID_HOME` / `ANDROID_SDK_ROOT`），所以 `adb` 直接打命令找不到，每次都要手动定位。已确认的固定路径如下：
+
+- **Android SDK 根目录**：`E:\android-sdk`
+- **adb 可执行文件**：`E:\android-sdk\platform-tools\adb.exe`
+  - 调用示例（PowerShell）：`& 'E:\android-sdk\platform-tools\adb.exe' -s <device> <cmd>`
+- **Flutter 会自动识别该 SDK**（无需环境变量），`flutter devices` / `flutter run` / `flutter build` 无需额外配置。
+- 真机走查时优先用 `adb` 驱动（单步 `input tap` / `input swipe` + `screencap` + `pull` 截图对照），比盲猜屏幕坐标更可靠；`uiautomator dump` 在 Flutter 语义树下不稳定，以截图为准。
+
+### 已连接真机
+
+- 设备型号/序列号：`PKC110` / `HMQO4DPJC6MZXOZD`（Android 17，分辨率 1080×2376，密度 480）。
+ 

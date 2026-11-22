@@ -16,6 +16,7 @@ import 'package:kele_audio/core/domain/album.dart';
 import 'package:kele_audio/core/domain/records.dart';
 import 'package:kele_audio/core/services/listen_stats.dart';
 import 'package:kele_audio/core/services/offline/audio_store.dart';
+import 'package:kele_audio/core/services/offline/network_probe.dart';
 import 'package:kele_audio/core/services/offline/offline_cache_service.dart';
 
 /// 内存音频存储替身。
@@ -43,6 +44,53 @@ class MemAudioStore implements AudioStore {
 
   @override
   String get locationLabel => 'mem';
+}
+
+/// 离线缓存测试用专辑 / 章节（cid=0：取址即失败，避免真实网络）。
+Album _album(String id) => Album(
+      id: id,
+      sourceType: SourceType.multiPart,
+      title: '专辑$id',
+      coverUrl: '',
+      upName: '',
+      chapterCount: 2,
+      categoryId: 'rec',
+      bvid: 'BV$id',
+    );
+
+Chapter _chapter(String albumId, String id, {int index = 0}) => Chapter(
+      id: id,
+      albumId: albumId,
+      index: index,
+      title: '第${index + 1}章',
+      durationSec: 100,
+      bvid: 'BV$albumId',
+      cid: 0,
+    );
+
+/// 固定网络类型探测。
+class _FixedProbe implements NetworkProbe {
+  _FixedProbe(this.kind);
+
+  final NetworkKind kind;
+
+  @override
+  Future<NetworkKind> current() async => kind;
+}
+
+/// 按调用顺序返回网络类型（模拟队列中途切网）。
+class _SeqProbe implements NetworkProbe {
+  _SeqProbe(this._kinds);
+
+  final List<NetworkKind> _kinds;
+  int _index = 0;
+
+  @override
+  Future<NetworkKind> current() async {
+    final k = _kinds[_index < _kinds.length ? _index : _kinds.length - 1];
+    if (_index < _kinds.length - 1) _index++;
+    return k;
+  }
 }
 
 /// M8 单元测试：离线缓存队列状态机、听书统计聚合、搜索过滤口径、精选配置。
@@ -83,6 +131,78 @@ void main() {
       await service.setOnlyCached(true);
       expect(service.onlyCached, isTrue);
       expect(kv.getString(OfflineCacheService.keyOnlyCached), '1');
+    });
+
+    test('仅 Wi-Fi 下载：移动网络下新任务被拦截且不入队', () async {
+      service.wifiOnlyProvider = () => true;
+      service.networkProbe = _FixedProbe(NetworkKind.mobile);
+      final album = _album('a4');
+      final chapter = _chapter(album.id, 'a4:c1');
+      await daos.albums.upsert(album);
+      await daos.chapters.upsertAll([chapter]);
+
+      expect(await service.cacheAlbum(album, [chapter]), isFalse);
+      expect(service.wifiOnlyBlocked, isTrue);
+      expect(daos.downloads.get(chapter.id), isNull);
+      expect(await service.cacheChapter(album, chapter), isFalse);
+    });
+
+    test('仅 Wi-Fi 下载关闭：移动网络不限制', () async {
+      service.wifiOnlyProvider = () => false;
+      service.networkProbe = _FixedProbe(NetworkKind.mobile);
+      final album = _album('a5');
+      final chapter = _chapter(album.id, 'a5:c1');
+      await daos.albums.upsert(album);
+      await daos.chapters.upsertAll([chapter]);
+
+      expect(await service.cacheChapter(album, chapter), isTrue);
+      expect(service.wifiOnlyBlocked, isFalse);
+    });
+
+    test('网络类型无法判断时放行（降级策略）', () async {
+      service.wifiOnlyProvider = () => true;
+      service.networkProbe = _FixedProbe(NetworkKind.unknown);
+      final album = _album('a6');
+      final chapter = _chapter(album.id, 'a6:c1');
+      await daos.albums.upsert(album);
+      await daos.chapters.upsertAll([chapter]);
+
+      expect(await service.cacheAlbum(album, [chapter]), isTrue);
+    });
+
+    test('队列逐项判断：中途切到移动网络，后续任务被拦截', () async {
+      service.wifiOnlyProvider = () => true;
+      // 调用顺序：入队检查(wifi) → 第1章(wifi) → 第2章(切到 mobile)
+      service.networkProbe = _SeqProbe([
+        NetworkKind.wifi,
+        NetworkKind.wifi,
+        NetworkKind.mobile,
+      ]);
+      final album = _album('a7');
+      final chapters = [
+        _chapter(album.id, 'a7:c1'),
+        _chapter(album.id, 'a7:c2', index: 1),
+      ];
+      await daos.albums.upsert(album);
+      await daos.chapters.upsertAll(chapters);
+
+      expect(await service.cacheAlbum(album, chapters), isTrue);
+      for (var i = 0; i < 160; i++) {
+        final terminal = service.tasksFor(album.id).every(
+              (t) =>
+                  t.status == DownloadStatus.failed ||
+                  t.status == DownloadStatus.done,
+            );
+        if (terminal) break;
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+
+      final t1 = daos.downloads.get('a7:c1')!;
+      final t2 = daos.downloads.get('a7:c2')!;
+      expect(t1.status, DownloadStatus.failed); // 已放行，因 cid=0 取址失败
+      expect(t1.error, isNot(OfflineCacheService.wifiOnlyBlockedMessage));
+      expect(t2.status, DownloadStatus.failed);
+      expect(t2.error, OfflineCacheService.wifiOnlyBlockedMessage);
     });
 
     test('章节缺 cid → 标记 failed，不崩不阻塞（R8）', () async {

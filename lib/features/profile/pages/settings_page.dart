@@ -12,19 +12,17 @@ import '../../../core/services/backup/backup_delivery.dart';
 import '../../../core/services/backup/backup_pick.dart';
 import '../../../core/services/backup/backup_service.dart';
 import '../../../core/services/bili_account_service.dart';
-import '../../../core/services/image_cache_cleaner.dart';
 import '../../../core/services/player/player_service.dart';
 import '../../../core/services/settings_store.dart';
+import 'tts_settings_section.dart';
 
 /// 设置页（PRD §5.6.4，M5 接线）。
 ///
 /// - 儿童模式：开关入口收拢到这里（原发现页顶部开关已移除），
 ///   开启直接生效（自动套儿童默认主题），关闭走二次确认防误触；
-/// - 主题：一般模式 / 儿童模式各一套皮肤（六个预设，默认主题1 / 主题4，立即生效 + 重启保留）；
-/// - 默认音质 / 默认播放模式 / 后台自动播放下一章：接入 M2 播放参数
-///   （同一套 PlayerPrefs key，播放页临时切换与这里共享持久化）；
-/// - 仅 Wi-Fi 下载：开关先占位持久化（下载能力 M8 实现）；
-/// - 清除图片缓存：内存 + 磁盘（Web 端仅内存）；
+/// - 主题：单一槽位三套皮肤（默认主题1，儿童模式默认主题5，立即生效 + 重启保留）；
+/// - 默认音质 / 默认播放模式：接入 M2 播放参数（同一套 PlayerPrefs key，
+///   播放页临时切换与这里共享持久化）；后台自动播放下一章固定开启，不再暴露开关；
 /// - 高级设置：发现页「编辑精选」行显隐 + 分类显隐（「推荐」固定显示）；
 /// - 账号绑定：B 站扫码登录（绑定/解绑 + 资料展示，绑定后解锁高音质音源）；
 /// - 数据备份：本机数据打包导出（可选密码加密）/ 从备份文件还原，
@@ -60,7 +58,7 @@ class SettingsPage extends StatelessWidget {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('开启儿童模式'),
-                  subtitle: const Text('只展示儿童白名单内容，并自动套用儿童主题'),
+                  subtitle: const Text('展示儿童分类并套用儿童主题'),
                   value: theme.children,
                   onChanged: (v) => _toggleKids(context, theme.children),
                 ),
@@ -119,52 +117,6 @@ class SettingsPage extends StatelessWidget {
                   selected: {player.mode},
                   onSelectionChanged: (s) => player.setMode(s.first),
                 ),
-                const SizedBox(height: 14),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('后台自动播放下一章'),
-                  subtitle: const Text('关闭后本章播完即停（单曲循环不受影响）'),
-                  value: player.autoNext,
-                  onChanged: (v) => player.setAutoNext(v),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(height: tokens.spaceMd),
-          _SectionCard(
-            icon: Icons.download_for_offline_outlined,
-            title: '下载',
-            trailing: const StageTag('M8'),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('仅 Wi-Fi 下载'), 
-                  value: settings.wifiOnlyDownload,
-                  onChanged: (v) => settings.setWifiOnlyDownload(v),
-                ),
-                _kvLine(tokens, '缓存目录', '应用私有目录 audio_cache/'),
-              ],
-            ),
-          ),
-          SizedBox(height: tokens.spaceMd),
-          _SectionCard(
-            icon: Icons.cleaning_services_outlined,
-            title: '缓存',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '封面图缓存会随浏览自动重建；收藏、历史与进度不会被清除。',
-                  style: tokens.captionStyle,
-                ),
-                const SizedBox(height: 12),
-                FilledButton.tonalIcon(
-                  onPressed: () => _confirmClearImages(context),
-                  icon: const Icon(Icons.delete_sweep_outlined),
-                  label: const Text('清除图片缓存'),
-                ),
               ],
             ),
           ),
@@ -218,6 +170,12 @@ class SettingsPage extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          SizedBox(height: tokens.spaceMd),
+          _SectionCard(
+            icon: Icons.headphones_rounded,
+            title: '本地书 · 听书',
+            child: const TtsSettingsSection(),
           ),
           SizedBox(height: tokens.spaceMd),
           _SectionCard(
@@ -553,42 +511,6 @@ class SettingsPage extends StatelessWidget {
     await context.read<ThemeController>().setChildren(!current);
   }
 
-  Future<void> _confirmClearImages(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('清除图片缓存？'),
-        content: const Text('将清空已缓存的封面图，下次浏览时重新下载。\n收藏、历史与进度不受影响。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('清除'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    await ImageCacheCleaner.clearAll();
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('图片缓存已清除')));
-  }
-
-  Widget _kvLine(AppTokens tokens, String k, String v) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(width: 72, child: Text(k, style: tokens.captionStyle)),
-            Expanded(child: Text(v, style: tokens.captionStyle)),
-          ],
-        ),
-      );
 }
 
 /// 音质档位选择（Q1 锁态控件）：
@@ -802,13 +724,11 @@ class _SectionCard extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.child,
-    this.trailing,
   });
 
   final IconData icon;
   final String title;
   final Widget child;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -823,7 +743,6 @@ class _SectionCard extends StatelessWidget {
               Icon(icon, size: 18, color: scheme.primary),
               const SizedBox(width: 8),
               Expanded(child: Text(title, style: tokens.sectionStyle)),
-              ?trailing,
             ],
           ),
           const SizedBox(height: 12),

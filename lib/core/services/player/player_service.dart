@@ -13,6 +13,7 @@ import '../mini_player_controller.dart';
 import '../offline/offline_cache_service.dart';
 import '../shelf_controller.dart';
 import 'audio_focus.dart';
+import 'playback_arbiter.dart';
 import 'media_bridge.dart';
 import 'media_kit_engine.dart';
 import 'player_engine.dart';
@@ -54,6 +55,7 @@ class PlayerService extends ChangeNotifier
     this.log,
     this.shelf,
     this.offline,
+    this.arbiter,
   })  : _focus = focus ?? AudioFocus.instance,
         _media = media ?? NoopMediaBridge(),
         _engineFactory = engineFactory ?? createPlayerEngine {
@@ -61,7 +63,6 @@ class PlayerService extends ChangeNotifier
     _mode = prefs.mode;
     _quality = prefs.quality;
     _stopAtChapterEnd = prefs.stopAtChapterEnd;
-    _autoNext = prefs.autoNext;
   }
 
   final PlayUrlService playUrl;
@@ -82,6 +83,9 @@ class PlayerService extends ChangeNotifier
   /// M8：离线缓存服务（可选）。已缓存章节优先用本地音频，
   /// `onlyCached` 开启时未缓存章节拒绝联网播放。
   final OfflineCacheService? offline;
+
+  /// M9.3：与本地书 TTS 的播放互斥收敛点。可选（单测可省略）。
+  final PlaybackArbiter? arbiter;
 
   /// M4：进度落盘后通知书架页刷新「在听置顶区 / 已听 x/y」。可选（单测可省略）。
   final ShelfController? shelf;
@@ -136,7 +140,6 @@ class PlayerService extends ChangeNotifier
   bool _bound = false;
   bool _isVip = false;
   bool _stopAtChapterEnd = false;
-  bool _autoNext = true;
 
   Duration _sleepRemaining = Duration.zero;
   Timer? _sleepTimer;
@@ -183,7 +186,6 @@ class PlayerService extends ChangeNotifier
   bool get bound => _bound;
   bool get isVip => _isVip;
   bool get stopAtChapterEnd => _stopAtChapterEnd;
-  bool get autoNext => _autoNext;
   Duration get sleepRemaining => _sleepRemaining;
   bool get hasSleepTimer => _sleepTimer != null;
 
@@ -207,6 +209,12 @@ class PlayerService extends ChangeNotifier
   Future<void> init() async {
     if (_started) return;
     _started = true;
+    arbiter?.registerBili(
+      bind: _bindMedia,
+      bindFocus: _bindFocus,
+      stop: stop,
+      publish: () => _pushBridge(force: true),
+    );
     _bindMedia();
     _bindFocus();
     _focus.start();
@@ -399,6 +407,9 @@ class PlayerService extends ChangeNotifier
       return false;
     }
 
+    // M9.3：任何入口的自动播放都先收回播放权（TTS 在播时先停）。
+    if (autoPlay) await arbiter?.claimBili();
+
     final mySession = ++_session;
     _loading = true;
     _error = null;
@@ -519,6 +530,8 @@ class PlayerService extends ChangeNotifier
   void toggle() => _playing ? unawaited(pause()) : unawaited(play());
 
   Future<void> play() async {
+    // M9.3：B 站开始播放前先收回播放权（若 TTS 在播则先停）。
+    await arbiter?.claimBili();
     if (!hasSession) {
       final ok = await restoreLastSession(autoPlay: true);
       if (!ok) {
@@ -699,14 +712,6 @@ class PlayerService extends ChangeNotifier
     notifyListeners();
   }
 
-  /// M5 设置页「后台自动播放下一章」（PRD §5.6.4）：关闭后本章播完即停。
-  Future<void> setAutoNext(bool v) async {
-    if (v == _autoNext) return;
-    _autoNext = v;
-    await prefs.saveAutoNext(v);
-    notifyListeners();
-  }
-
   /// 本地备份还原后重读持久化参数（只更新默认值，不打断当前播放）。
   void reloadPrefs() {
     _rate = prefs.rate;
@@ -718,7 +723,6 @@ class PlayerService extends ChangeNotifier
       _quality = AudioQuality.highestUnlocked(bound: _bound, isVip: _isVip);
     }
     _stopAtChapterEnd = prefs.stopAtChapterEnd;
-    _autoNext = prefs.autoNext;
     notifyListeners();
   }
 
@@ -986,17 +990,6 @@ class PlayerService extends ChangeNotifier
       return;
     }
 
-    // M5 设置「后台自动播放下一章」关闭：只门控跨章推进，
-    // 单曲循环（重播本章）不受影响（PRD §5.6.4 字面语义）。
-    if (!_autoNext) {
-      await _rewindTail();
-      await pause();
-      unawaited(_advanceProgressToNext());
-      _log('[completed] 自动连播关闭，本章播完已暂停');
-      notifyListeners();
-      return;
-    }
-
     if (hasNext) {
       await playChapterAt(_index + 1, autoPlay: true);
       return;
@@ -1184,6 +1177,8 @@ class PlayerService extends ChangeNotifier
 
   void _pushBridge({bool force = false}) {
     if (_disposed) return;
+    // 播放权在 TTS 时不动系统媒体会话，避免覆盖听书通知。
+    if (arbiter?.owner == PlaybackOwner.tts) return;
     final now = DateTime.now();
     if (!force && now.difference(_lastBridgePush) < const Duration(milliseconds: 500)) {
       return;
