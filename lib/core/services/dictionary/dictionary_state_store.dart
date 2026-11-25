@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../../api/key_value_store.dart';
+import 'dictionary_pack_config.dart';
 
 class DictionaryInstallState {
   const DictionaryInstallState({
@@ -35,58 +36,93 @@ class DictionaryInstallState {
       );
 }
 
+/// 所选词库类型 + 每种词库各自的安装状态。
+///
+/// 旧版本 `dictionary_state` 是单个安装状态 JSON，按精简词库迁移。
 class DictionaryStateStore extends ChangeNotifier {
   DictionaryStateStore(this._kv);
 
   final KeyValueStore _kv;
   static const String key = 'dictionary_state';
-  static const String customUrlKey = 'dictionary_custom_url';
 
-  DictionaryInstallState? _state;
-  DictionaryInstallState? get state => _state;
-  bool get isInstalled => _state != null;
+  DictionaryMode _mode = DictionaryMode.simple;
+  DictionaryMode get mode => _mode;
 
-  String? _customUrl;
-  String? get customUrl => _customUrl;
+  final Map<DictionaryMode, DictionaryInstallState> _states = {};
+
+  DictionaryInstallState? get state => _states[_mode];
+  bool get isInstalled => state != null;
+
+  DictionaryInstallState? stateFor(DictionaryMode mode) => _states[mode];
+  bool isInstalledFor(DictionaryMode mode) => _states[mode] != null;
 
   void load() {
-    _customUrl = _kv.getString(customUrlKey);
+    _mode = DictionaryMode.simple;
+    _states.clear();
     final raw = _kv.getString(key);
-    if (raw == null || raw.isEmpty) {
-      _state = null;
-    } else {
+    if (raw != null && raw.isNotEmpty) {
       try {
-        _state = DictionaryInstallState.fromJson(
-          Map<String, dynamic>.from(jsonDecode(raw) as Map),
-        );
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          final savedMode = decoded['mode']?.toString();
+          _mode = DictionaryMode.values.firstWhere(
+            (mode) => mode.name == savedMode,
+            orElse: () => DictionaryMode.simple,
+          );
+          final states = decoded['states'];
+          if (states is Map) {
+            states.forEach((key, value) {
+              final mode = DictionaryMode.values.firstWhere(
+                (mode) => mode.name == key?.toString(),
+                orElse: () => DictionaryMode.simple,
+              );
+              if (value is Map) {
+                _states[mode] =
+                    DictionaryInstallState.fromJson(Map<String, dynamic>.from(value));
+              }
+            });
+          } else {
+            _states[DictionaryMode.simple] =
+                DictionaryInstallState.fromJson(Map<String, dynamic>.from(decoded));
+          }
+        }
       } catch (e) {
         debugPrint('[dictionary] 读取状态失败：$e');
-        _state = null;
+        _mode = DictionaryMode.simple;
+        _states.clear();
       }
     }
     notifyListeners();
   }
 
+  Future<void> setMode(DictionaryMode mode) async {
+    if (_mode == mode) return;
+    _mode = mode;
+    await _persist();
+    notifyListeners();
+  }
+
   Future<void> save(DictionaryInstallState state) async {
-    _state = state;
-    await _kv.setString(key, jsonEncode(state.toJson()));
+    _states[_mode] = state;
+    await _persist();
     notifyListeners();
   }
 
   Future<void> clear() async {
-    _state = null;
-    await _kv.remove(key);
+    _states.remove(_mode);
+    await _persist();
     notifyListeners();
   }
 
-  Future<void> setCustomUrl(String? url) async {
-    final trimmed = url?.trim() ?? '';
-    _customUrl = trimmed.isEmpty ? null : trimmed;
-    if (_customUrl == null) {
-      await _kv.remove(customUrlKey);
-    } else {
-      await _kv.setString(customUrlKey, _customUrl!);
-    }
-    notifyListeners();
+  Future<void> _persist() async {
+    await _kv.setString(
+      key,
+      jsonEncode(<String, dynamic>{
+        'mode': _mode.name,
+        'states': _states.map(
+          (mode, state) => MapEntry<String, dynamic>(mode.name, state.toJson()),
+        ),
+      }),
+    );
   }
 }

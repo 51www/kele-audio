@@ -281,7 +281,8 @@ flowchart LR
 
 ### 10.2 离线词库
 
-- 数据源：从 ECDICT（MIT）裁剪的精简英汉词库（约 3.9MB / 2.7 万词条 + 词形），默认下载 `dict.json` 并在端上转换为本地 `dict.json`（entries + aliases）；也兼容 ECDICT CSV 与 `tool/build_dictionary_pack.py` 生成的 zip。
-- 默认源顺序：多个 jsDelivr / ghproxy CDN 镜像自动回退；「离线词库」页可填自定义直链（JSON/CSV/zip），也可用 `DICTIONARY_URL` dart-define 追加。可选 `DICTIONARY_SHA256` 做下载校验。
-- 状态存 `dictionary_state`，自定义地址存 `dictionary_custom_url`（纳入备份）；卸载即删目录，不影响自定义地址。
+- 两种词库：精简版为 ECDICT 裁剪 JSON（约 3.9MB / 2.7 万词条 + 词形），完整版为 ECDICT 全量 CSV（约 66MB / 77 万词条）。页面同时展示大小、词条量、占用与速度差异，用户明确选择后再下载；两者各自下载、各自保存，可随时切回。
+- 下载源固定内置：精简版走多个 jsDelivr / ghproxy 镜像回退，完整版走 gh-proxy / raw.githubusercontent / GitHub raw 镜像回退；不再提供自定义下载地址或 `DICTIONARY_URL`。可选 `DICTIONARY_SHA256` 校验精简词库。
+- 下载说明示例（页面文案参考）：「下载完成后，在阅读页选中英文单词或短语即可查看释义。例如选中 “fox”，会显示音标 /fɒks/ 与释义「n. 狐狸」；选中整句只给逐词释义，不提供整句翻译。」
+- 状态存 `dictionary_state`：记录当前 `mode` 与每种词库各自的 `states`（旧的单状态 JSON 按精简版迁移）；安装目录按版本隔离（`dictionaries/ecdict-compact-v1`、`dictionaries/ecdict-full-v1`），卸载只删当前类型的目录。
 - 查询在 Isolate 解析后用内存 Map 完成；选中内容不联网、不上传。单词/短语给释义，整句退化为逐词释义并明确提示“不是整句翻译”。

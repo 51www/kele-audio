@@ -3,6 +3,13 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../core/domain/reader_annotation.dart';
 
+/// 编辑面板只提供黄/绿/蓝三色（粉色仅为兼容历史划线数据保留在枚举中）。
+const _editorColors = <ReaderAnnotationColor>[
+  ReaderAnnotationColor.yellow,
+  ReaderAnnotationColor.green,
+  ReaderAnnotationColor.blue,
+];
+
 /// 本书划线列表：只看划线文本，右侧编辑/删除。
 Future<void> showReaderAnnotationSheet(
   BuildContext context, {
@@ -161,11 +168,10 @@ class _AnnotationEditorState extends State<_AnnotationEditor> {
           children: [
             Text('下划线颜色', style: tokens.sectionStyle),
             SizedBox(height: tokens.spaceMd),
-            Wrap(
-              spacing: tokens.spaceSm,
-              runSpacing: tokens.spaceSm,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                for (final color in ReaderAnnotationColor.values)
+                for (final color in _editorColors)
                   _ColorCard(
                     color: color,
                     selected: _color == color,
@@ -223,7 +229,7 @@ class _ColorCard extends StatelessWidget {
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          constraints: const BoxConstraints(minWidth: 104),
+          constraints: const BoxConstraints(minWidth: 88, maxWidth: 112),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             color: selected

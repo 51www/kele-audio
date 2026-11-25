@@ -45,6 +45,15 @@ class DictionaryService extends ChangeNotifier {
 
   bool get isInstalled => state.isInstalled;
 
+  /// 切换词库类型；切换后查询走另一套本地文件，需分别下载。
+  Future<void> switchMode(DictionaryMode mode) async {
+    if (state.mode == mode || downloading) return;
+    _entries = null;
+    _aliases = null;
+    await state.setMode(mode);
+    notifyListeners();
+  }
+
   Future<void> download() async {
     if (downloading) return;
     downloading = true;
@@ -54,11 +63,13 @@ class DictionaryService extends ChangeNotifier {
     _cancel = CancelToken();
     notifyListeners();
 
-    final sources = DictionaryPackConfig.sourcesWith(state.customUrl);
+    final mode = state.mode;
+    final version = DictionaryPackConfig.versionFor(mode);
+    final sources = DictionaryPackConfig.sourcesFor(mode);
     DioException? lastError;
     final attempts = <String>[];
     try {
-      final dir = await dictionaryDirectoryPath();
+      final dir = await dictionaryDirectoryPath(version);
       final tempName = DictionaryPackConfig.tempFileName;
       final temp = '$dir/$tempName';
       for (final url in sources) {
@@ -74,11 +85,11 @@ class DictionaryService extends ChangeNotifier {
               notifyListeners();
             },
           );
-          final bytes = await readDictionaryBytes(tempName);
-          _verify(bytes);
-          await _install(bytes);
+          final bytes = await readDictionaryBytes(version, tempName);
+          _verify(bytes, mode);
+          await _install(bytes, mode);
           await state.save(DictionaryInstallState(
-            version: DictionaryPackConfig.version,
+            version: version,
             installedAt: DateTime.now(),
             size: bytes.length,
             sha256: sha256.convert(bytes).toString(),
@@ -128,8 +139,8 @@ class DictionaryService extends ChangeNotifier {
 
   void cancelDownload() => _cancel?.cancel('user_cancel');
 
-  void _verify(Uint8List bytes) {
-    final expected = DictionaryPackConfig.expectedSha256;
+  void _verify(Uint8List bytes, DictionaryMode mode) {
+    final expected = DictionaryPackConfig.expectedSha256For(mode);
     if (expected == null) return;
     final actual = sha256.convert(bytes).toString();
     if (actual != expected) {
@@ -137,7 +148,7 @@ class DictionaryService extends ChangeNotifier {
     }
   }
 
-  Future<void> _install(Uint8List bytes) async {
+  Future<void> _install(Uint8List bytes, DictionaryMode mode) async {
     final isZip = bytes.length > 2 && bytes[0] == 0x50 && bytes[1] == 0x4b;
     final Map<String, dynamic> payload;
     if (isZip) {
@@ -145,10 +156,11 @@ class DictionaryService extends ChangeNotifier {
     } else {
       final raw = utf8.decode(bytes, allowMalformed: true).trimLeft();
       payload = raw.startsWith('{')
-          ? _parseJsonPack(raw)
-          : _parseCsvPack(raw);
+          ? parseJsonPack(raw, mode)
+          : parseCsvPack(raw, mode);
     }
     await writeDictionaryBytes(
+      DictionaryPackConfig.versionFor(mode),
       DictionaryPackConfig.innerFileName,
       utf8.encode(jsonEncode(payload)),
     );
@@ -171,7 +183,7 @@ class DictionaryService extends ChangeNotifier {
 
   /// 兼容两种 JSON：我们生成的 `entries/aliases`，以及 ECDICT 裁剪版
   /// `words/lemmas`（word -> {ph, tr}，lemmas 为「变形 -> 原型」）。
-  static Map<String, dynamic> _parseJsonPack(String raw) {
+  static Map<String, dynamic> parseJsonPack(String raw, DictionaryMode mode) {
     final decoded = jsonDecode(raw);
     if (decoded is! Map) throw StateError('词库 JSON 格式不正确');
 
@@ -208,13 +220,13 @@ class DictionaryService extends ChangeNotifier {
       });
     }
     return <String, dynamic>{
-      'version': DictionaryPackConfig.version,
+      'version': DictionaryPackConfig.versionFor(mode),
       'entries': entries,
       'aliases': aliases,
     };
   }
 
-  static Map<String, dynamic> _parseCsvPack(String raw) {
+  static Map<String, dynamic> parseCsvPack(String raw, DictionaryMode mode) {
     final lines = raw.split('\n');
     if (lines.isEmpty) throw StateError('词库文件为空');
     final header = _parseCsvLine(lines.first.replaceAll('\r', ''));
@@ -247,7 +259,7 @@ class DictionaryService extends ChangeNotifier {
     }
     if (entries.isEmpty) throw StateError('词库 CSV 没有解析出词条');
     return <String, dynamic>{
-      'version': DictionaryPackConfig.version,
+      'version': DictionaryPackConfig.versionFor(mode),
       'entries': entries,
       'aliases': <String, String>{},
     };
@@ -285,7 +297,8 @@ class DictionaryService extends ChangeNotifier {
 
   Future<void> ensureLoaded() async {
     if (_entries != null || !isInstalled) return;
-    final raw = await readDictionaryString(DictionaryPackConfig.innerFileName);
+    final version = DictionaryPackConfig.versionFor(state.mode);
+    final raw = await readDictionaryString(version, DictionaryPackConfig.innerFileName);
     if (raw == null) {
       throw StateError('词库文件缺失，请重新下载');
     }
@@ -351,8 +364,9 @@ class DictionaryService extends ChangeNotifier {
     await cancelDownloadAndWait();
     _entries = null;
     _aliases = null;
-    await deleteDictionaryAll();
+    await deleteDictionaryAll(DictionaryPackConfig.versionFor(state.mode));
     await state.clear();
+    notifyListeners();
   }
 
   Future<void> cancelDownloadAndWait() async {

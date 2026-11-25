@@ -32,7 +32,6 @@ class BackupWhitelist {
     // M9.4：本地书 / 阅读 / 听书数据纳入迁移（进度细粒度键按 bookId 动态收集）
     (key: 'reader_books', label: '本地书库'),
     (key: 'reader_annotation_books', label: '划线书索引'),
-    (key: 'dictionary_custom_url', label: '词库下载地址'),
     (key: 'reader_history', label: '阅读历史'),
     (key: 'reader_log', label: '阅读时长统计'),
     (key: 'reader_typography', label: '阅读排版设置'),

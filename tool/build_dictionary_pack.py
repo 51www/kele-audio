@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""把 ECDICT 精简词库转换为 App 可下载的 dict.json.zip。
+"""把 ECDICT 精简词库转换为 App 的精简词库 dict.json.zip。
 
 用法：
   python3 tool/build_dictionary_pack.py \
       --csv /path/to/ecdict.mini.csv \
       --lemma /path/to/lemma.en.txt \
-      --out ecdict-mini-v1.zip \
-      --version ecdict-mini-v1
+      --out ecdict-compact-v1.zip \
+      --version ecdict-compact-v1
 
+完整词库无需打包：App 直接下载 ECDICT 全量 CSV（ecdict.csv）。
 数据来源：ECDICT（MIT）https://github.com/skywind3000/ECDICT
 打包后请把 zip 作为 GitHub Release asset 发布，并把 sha256 写入发布说明。
 """
@@ -64,7 +65,7 @@ def main() -> None:
     parser.add_argument("--csv", required=True, type=Path, help="ecdict.mini.csv 路径")
     parser.add_argument("--lemma", type=Path, help="lemma.en.txt 路径（可选）")
     parser.add_argument("--out", required=True, type=Path, help="输出 zip 路径")
-    parser.add_argument("--version", default="ecdict-mini-v1")
+    parser.add_argument("--version", default="ecdict-compact-v1")
     args = parser.parse_args()
     build(args.csv, args.lemma, args.out, args.version)
 
