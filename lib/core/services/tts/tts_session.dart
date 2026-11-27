@@ -60,6 +60,53 @@ class TtsReaderUnavailableException implements Exception {
   String toString() => 'TtsReaderUnavailableException: $message';
 }
 
+/// 句间静默计算器：按片段末尾标点给出停顿，[paragraphEnd] 表示该片段是段落末句。
+typedef TtsSegmentGap = Duration Function(
+  String segmentText, {
+  required bool paragraphEnd,
+});
+
+/// 句末强停顿（句号/问号/叹号/省略号）。
+const Duration ttsGapStrong = Duration(milliseconds: 340);
+
+/// 分号级停顿。
+const Duration ttsGapMedium = Duration(milliseconds: 220);
+
+/// 逗号级停顿（超长句在逗号处硬切时的补偿）。
+const Duration ttsGapWeak = Duration(milliseconds: 120);
+
+/// 段落之间的额外留白。
+const Duration ttsGapParagraphExtra = Duration(milliseconds: 160);
+
+/// 收尾引号/括号等「跟随在句末标点之后」的字符。
+const String _ttsClosingMarks = '”’"》）)]】』」》';
+
+/// 逐句合成时，上一句播完会立刻 open 下一段音频，两次合成请求的接缝
+/// 是硬接的，听感上常出现「上一句尾音还没落，下一句就起来了」。
+///
+/// 这里按片段末尾标点补一小段静默，让句子之间、段落之间都有自然的落点：
+/// 只在有句读标点时才停，超长句在逗号处硬切的片段给一个小停顿，
+/// 无标点的续接片段保持连续（否则会把一句话切碎）。
+Duration defaultTtsSegmentGap(
+  String segmentText, {
+  required bool paragraphEnd,
+}) {
+  final tail = segmentText.trimRight();
+  var i = tail.length - 1;
+  while (i >= 0 && _ttsClosingMarks.contains(tail[i])) {
+    i--;
+  }
+  if (i < 0) return Duration.zero;
+  final base = switch (tail[i]) {
+    '。' || '！' || '？' || '!' || '?' || '…' => ttsGapStrong,
+    '；' || ';' => ttsGapMedium,
+    '，' || ',' || '、' || '：' || ':' => ttsGapWeak,
+    _ => Duration.zero,
+  };
+  if (base == Duration.zero || !paragraphEnd) return base;
+  return base + ttsGapParagraphExtra;
+}
+
 /// 听书会话（docs/reader-design.md §5.2）：
 /// 段落队列 → 逐段朗读 → 高亮跟随 → 跨章续读 → 断点落盘 → 后台媒体会话。
 class TtsSession extends ChangeNotifier {
@@ -73,6 +120,7 @@ class TtsSession extends ChangeNotifier {
     this.fallbackText,
     this.portFetchTimeout = const Duration(seconds: 5),
     this.portCallTimeout = const Duration(seconds: 3),
+    this.segmentGap = defaultTtsSegmentGap,
   }) {
     arbiter.registerTts(
       bind: _bindMediaControls,
@@ -99,6 +147,9 @@ class TtsSession extends ChangeNotifier {
 
   /// 阅读页高亮/清高亮调用超时（测试可注入缩短）：冻结时跳过高亮，不拖住朗读。
   final Duration portCallTimeout;
+
+  /// 句间静默（测试可注入零延迟）：补齐逐句合成时两次音频请求之间的硬接缝。
+  final TtsSegmentGap segmentGap;
 
   TtsReaderPort? _port;
   ReaderBook? _book;
@@ -471,8 +522,16 @@ class TtsSession extends ChangeNotifier {
     if (sameSpot && (charIndex == null || charIndex == _startChar)) return;
     _chapterIndex = chapterIndex;
     _paraIndex = paragraphIndex;
-    // 同一段落只改句锚点；换段无锚点时从头读。
-    _startChar = sameSpot && charIndex == null ? _startChar : (charIndex ?? 0);
+    if (sameSpot) {
+      // 同一段落内只做「向前对齐」：暂停时阅读页上报的可见句几乎总是本段
+      // 第一句（charIndex=0），若直接采用会把已经读到一半的句锚点覆盖成段首，
+      // 表现为「暂停后再点播放从整段开头重念」。只有锚点确实在当前句之后
+      // （用户往下翻到了同段后面的句子）才前移。
+      if (charIndex != null && charIndex > _startChar) _startChar = charIndex;
+    } else {
+      // 换段：没有句锚点则从段首读。
+      _startChar = charIndex ?? 0;
+    }
     _pendingChapter = null;
     notifyListeners();
     if (_paused) {
@@ -937,6 +996,20 @@ class TtsSession extends ChangeNotifier {
               _abortedByPause = false;
               s--;
               continue;
+            }
+            // 句间喘息：上一句音频播完会立即 open 下一句，两次合成请求的接缝
+            // 是硬接的，常出现「上一句尾音还没落，下一句就起来了」。按句末
+            // 标点补一小段静默；豆包已在音频尾部垫过静音，不重复叠加。
+            final gap = _engine is BatchingTtsEngine
+                ? Duration.zero
+                : segmentGap(
+                    segment.text,
+                    paragraphEnd:
+                        i == list.length - 1 && s == segments.length - 1,
+                  );
+            if (gap > Duration.zero) {
+              await Future<void>.delayed(gap);
+              if (!_active || runId != _runId) return;
             }
           }
           // 本段读完，下一段从头开始；句锚点只作用于起播段。

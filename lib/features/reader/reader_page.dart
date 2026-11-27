@@ -565,7 +565,8 @@ class _ReaderPageState extends State<ReaderPage>
         await _tts.pause();
         return;
       }
-      // 暂停中：先把断点对齐到当前页首句，再从这里恢复。
+      // 暂停中：把断点对齐到当前页首句后恢复。同一段内不回退句锚点，
+      // 否则页首句（段首）会覆盖已读到一半的位置，听起来像「从整段重念」。
       await _tts.repositionTo(
         chapter,
         anchor.paragraph,

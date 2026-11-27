@@ -228,6 +228,10 @@ ReaderBook _book({int chapterCount = 2}) => ReaderBook(
       addedAt: DateTime(2026, 1, 1),
     );
 
+/// 单测里关掉句间静默：假引擎瞬时返回，否则每句都要多等 0.1~0.5 秒。
+Duration _noSegmentGap(String text, {required bool paragraphEnd}) =>
+    Duration.zero;
+
 /// 离线正文兜底假件：模拟 EpubChapterText（可切换「书文件不可读」）。
 class _FakeChapterText implements TtsChapterTextSource {
   _FakeChapterText(this.chapters);
@@ -1100,6 +1104,7 @@ void main() {
       activity: activity,
       arbiter: PlaybackArbiter(media: NoopMediaBridge()),
       engineFactory: (_) => engine,
+      segmentGap: _noSegmentGap,
     );
     session.bindReader(
       book: books.byId('b1')!,
@@ -1147,6 +1152,7 @@ void main() {
       activity: activity,
       arbiter: PlaybackArbiter(media: NoopMediaBridge()),
       engineFactory: (_) => engine,
+      segmentGap: _noSegmentGap,
     );
     session.bindReader(
       book: books.byId('b1')!,
@@ -1187,6 +1193,7 @@ void main() {
       activity: activity,
       arbiter: PlaybackArbiter(media: NoopMediaBridge()),
       engineFactory: (_) => engine,
+      segmentGap: _noSegmentGap,
     );
     session.bindReader(
       book: books.byId('b1')!,
@@ -1235,6 +1242,7 @@ void main() {
       activity: activity,
       arbiter: PlaybackArbiter(media: NoopMediaBridge()),
       engineFactory: (_) => engine,
+      segmentGap: _noSegmentGap,
     );
     session.bindReader(
       book: books.byId('b1')!,
@@ -1257,6 +1265,118 @@ void main() {
     expect(engine.spoken.length, greaterThan(before.length));
     // 重开一轮朗读的第一句仍是「丙。」而非段落首句「甲。」。
     expect(engine.spoken[before.length], '丙。');
+    await session.stop();
+  });
+
+  test('暂停后按播放：同段内沿用当前句锚点，不退回整段开头', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    await settings.setEngine(TtsEngineKind.system);
+    final books = ReaderBookStore(kv);
+    await books.add(_book());
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final port = _FakePort([
+      ['甲。乙。丙。丁。'],
+      ['下一章。'],
+    ]);
+    // 暂停时阅读页上报的可见句是「本段第一句」（段首）。
+    port.anchor = const ReaderSentenceAnchor(paragraph: 0, charIndex: 0);
+    final engine = _BlockOnTextEngine('丙。');
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+      segmentGap: _noSegmentGap,
+    );
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+    for (var i = 0; i < 40 && !engine.spoken.contains('丙。'); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(engine.spoken, contains('丙。'));
+
+    await session.pause();
+    expect(session.paused, isTrue);
+    final before = engine.spoken.length;
+
+    // 控制条/顶栏播放键都走 resumeFromView：先按可见句对齐，再恢复。
+    await session.resumeFromView();
+    for (var i = 0; i < 40 && engine.spoken.length <= before; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    // 从「丙。」这句续读，而不是段落开头「甲。」重念。
+    expect(engine.spoken[before], '丙。');
+    await session.stop();
+  });
+
+  test('句间静默：按标点停顿，下一句不抢上一句尾音', () async {
+    // 纯函数部分：标点决定停顿长度，收尾引号不影响判定。
+    expect(
+      defaultTtsSegmentGap('他走了。', paragraphEnd: false),
+      ttsGapStrong,
+    );
+    expect(
+      defaultTtsSegmentGap('他说：走了。”', paragraphEnd: false),
+      ttsGapStrong,
+    );
+    expect(
+      defaultTtsSegmentGap('他走了；', paragraphEnd: false),
+      ttsGapMedium,
+    );
+    expect(
+      defaultTtsSegmentGap('他走了，', paragraphEnd: false),
+      ttsGapWeak,
+    );
+    // 超长句在逗号处硬切之后若没有标点，必须连读，不能被切碎。
+    expect(
+      defaultTtsSegmentGap('他走进巷子没有标点', paragraphEnd: false),
+      Duration.zero,
+    );
+    expect(
+      defaultTtsSegmentGap('他走了。', paragraphEnd: true),
+      ttsGapStrong + ttsGapParagraphExtra,
+    );
+
+    // 会话行为：瞬时引擎下第二句仍要等上一句的停顿结束才开口。
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    await settings.setEngine(TtsEngineKind.system);
+    final books = ReaderBookStore(kv);
+    await books.add(_book(chapterCount: 1));
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final port = _FakePort([
+      ['甲。乙。'],
+    ]);
+    final engine = _SegmentRecordingEngine();
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+    );
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(engine.spoken, ['甲。']);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    expect(engine.spoken, contains('乙。'));
     await session.stop();
   });
 
