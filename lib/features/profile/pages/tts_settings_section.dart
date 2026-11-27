@@ -3,9 +3,11 @@ import 'package:provider/provider.dart';
 
 import '../../../app/theme/app_tokens.dart';
 import '../../../core/services/tts/doubao_cookie_pool.dart';
+import '../../../core/services/tts/mimo_tts_client.dart';
 import '../../../core/services/tts/tts_engine.dart';
 import '../../../core/services/tts/tts_engine_doubao.dart';
 import '../../../core/services/tts/tts_engine_edge.dart';
+import '../../../core/services/tts/tts_engine_mimo.dart';
 import '../../../core/services/tts/tts_engine_system.dart';
 import '../../../core/services/tts/tts_session.dart';
 import '../../../core/services/tts/tts_settings_store.dart';
@@ -173,6 +175,118 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
       return;
     }
     await _audition(_doubaoEngine(settings), settings, voice: voice);
+  }
+
+  TtsMimoEngine _mimoEngine(TtsSettingsStore settings, {String? voice}) =>
+      TtsMimoEngine(
+        apiKeyProvider: () => settings.mimoApiKey,
+        paramsProvider: () => _params(settings, voice: voice ?? settings.mimoVoice),
+      );
+
+  Future<void> _editMimoKey(TtsSettingsStore settings) async {
+    final controller = TextEditingController();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('MiMo 朗读 API Key'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              settings.hasMimoApiKey
+                  ? '当前：${settings.maskedMimoKey}（粘贴新 Key 可覆盖）'
+                  : '当前未配置 Key',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'API Key',
+                hintText: '粘贴 MiMo API Key',
+                helperText: '仅保存在本机，不上传；日志中不会回显完整 Key',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    final key = controller.text.trim();
+    if (key.isEmpty) {
+      if (mounted) setState(() => _status = 'Key 为空，未保存');
+      return;
+    }
+    await settings.setMimoApiKey(key);
+    if (mounted) setState(() => _status = 'MiMo Key 已保存');
+  }
+
+  Future<void> _clearMimoKey(TtsSettingsStore settings) async {
+    await settings.clearMimoApiKey();
+    if (mounted) setState(() => _status = '已清除本机 MiMo Key');
+  }
+
+  Future<void> _testMimo(TtsSettingsStore settings) async {
+    if (!settings.hasMimoApiKey) {
+      setState(() => _status = '请先填写 MiMo API Key 再自检');
+      return;
+    }
+    final engine = _mimoEngine(settings);
+    await _runBusy(() async {
+      try {
+        await engine.start(_params(settings, voice: settings.mimoVoice));
+        await engine.testConnection();
+        if (mounted) setState(() => _status = 'MiMo 连通性正常');
+      } catch (e) {
+        if (mounted) {
+          setState(() => _status = 'MiMo 连通性失败：${_cleanError(e)}；'
+              '请确认 API Key 有效，或改用 Edge 朗读');
+        }
+      }
+    });
+    await engine.dispose();
+  }
+
+  Future<void> _auditionMimo(TtsSettingsStore settings, {String? voice}) async {
+    if (!settings.hasMimoApiKey) {
+      setState(() => _status = '请先填写 MiMo API Key 再试听');
+      return;
+    }
+    await _audition(_mimoEngine(settings, voice: voice), settings, voice: voice);
+  }
+
+  /// 探测可用音色：故意传非法音色触发 400，从报错原文解析清单后缓存。
+  Future<void> _probeMimoVoices(TtsSettingsStore settings) async {
+    if (!settings.hasMimoApiKey) {
+      setState(() => _status = '请先填写 MiMo API Key 再探测音色');
+      return;
+    }
+    await _runBusy(() async {
+      try {
+        final voices = await MimoTtsClient().probeVoices(
+          apiKey: settings.mimoApiKey,
+        );
+        await settings.setMimoVoices(voices);
+        if (mounted) setState(() => _status = '已探测到 ${voices.length} 个可用音色');
+      } catch (e) {
+        if (mounted) {
+          setState(() => _status = '音色探测失败：${_cleanError(e)}；沿用内置清单');
+        }
+      }
+    });
   }
 
   @override
@@ -403,6 +517,97 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
                 onPressed: _busy
                     ? null
                     : () => _auditionDoubao(settings),
+                icon: const Icon(Icons.volume_up_outlined, size: 18),
+                label: const Text('试听当前音色'),
+              ),
+            ],
+          ),
+        ],
+        if (settings.engine == TtsEngineKind.mimo) ...[
+          Text('MiMo 朗读 API Key', style: tokens.captionStyle),
+          const SizedBox(height: 6),
+          Text(
+            '小米 MiMo 语音合成（OpenAI 兼容接口），内置多种中英文音色。'
+            'Key 仅保存在本机，也可在构建时用 --dart-define=MIMO_API_KEY=... 注入；'
+            '接口没有 speed 参数，语速用播放器倍速近似。',
+            style: tokens.captionStyle.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('API Key', style: tokens.bodyStyle),
+            subtitle: Text(
+              settings.hasMimoApiKey
+                  ? '已配置 ${settings.maskedMimoKey}'
+                  : '未配置，MiMo 朗读不可用',
+              style: tokens.captionStyle,
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  onPressed: () => _editMimoKey(settings),
+                  child: Text(settings.hasMimoApiKey ? '更换' : '粘贴'),
+                ),
+                if (settings.hasMimoApiKey)
+                  TextButton(
+                    onPressed: () => _clearMimoKey(settings),
+                    child: const Text('清除'),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Text('MiMo 音色', style: tokens.captionStyle),
+              const Spacer(),
+              TextButton(
+                onPressed: _busy ? null : () => _probeMimoVoices(settings),
+                child: const Text('探测可用音色'),
+              ),
+            ],
+          ),
+          for (final voice in settings.mimoVoiceOptions)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: Icon(
+                settings.mimoVoice == voice.id
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                color: settings.mimoVoice == voice.id
+                    ? scheme.primary
+                    : scheme.outline,
+              ),
+              title: Text(voice.name, style: tokens.bodyStyle),
+              subtitle: Text(voice.id, style: tokens.captionStyle),
+              onTap: () async {
+                await settings.setMimoVoice(voice.id);
+                _reloadActiveSession();
+              },
+              trailing: IconButton(
+                tooltip: '试听该音色',
+                onPressed: _busy
+                    ? null
+                    : () => _auditionMimo(settings, voice: voice.id),
+                icon: const Icon(Icons.play_circle_outline_rounded),
+              ),
+            ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: _busy ? null : () => _testMimo(settings),
+                icon: const Icon(Icons.wifi_tethering_rounded, size: 18),
+                label: const Text('连通性自检'),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: _busy ? null : () => _auditionMimo(settings),
                 icon: const Icon(Icons.volume_up_outlined, size: 18),
                 label: const Text('试听当前音色'),
               ),

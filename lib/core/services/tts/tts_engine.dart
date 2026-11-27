@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 /// 听书引擎类型（docs/reader-design.md §5.1）。
-enum TtsEngineKind { system, edge, doubao }
+enum TtsEngineKind { system, edge, doubao, mimo }
 
 extension TtsEngineKindX on TtsEngineKind {
   String get storageValue => name;
@@ -10,6 +10,7 @@ extension TtsEngineKindX on TtsEngineKind {
     TtsEngineKind.system => '系统',
     TtsEngineKind.edge => 'Edge',
     TtsEngineKind.doubao => '豆包',
+    TtsEngineKind.mimo => 'MiMo',
   };
 
   static TtsEngineKind fromStorage(String? value) {

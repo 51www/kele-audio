@@ -71,5 +71,6 @@ class BackupWhitelist {
   static const List<({String key, String label})> secureItems = [
     (key: BiliClient.prefCookie, label: 'B 站登录态'),
     (key: TtsSettingsStore.doubaoCookieStorageKey, label: '豆包登录态'),
+    (key: TtsSettingsStore.mimoKeyStorageKey, label: 'MiMo 朗读 API Key'),
   ];
 }

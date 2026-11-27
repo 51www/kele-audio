@@ -9,6 +9,7 @@ import '../../app/theme/app_tokens.dart';
 import '../../app/widgets/local_cover_image.dart';
 import '../../core/services/reader/book_store.dart';
 import '../../core/services/reader/reader_bridge.dart';
+import '../../core/services/tts/mimo_tts_client.dart';
 import '../../core/services/tts/tts_engine.dart';
 import '../../core/services/tts/tts_engine_system.dart';
 import '../../core/services/tts/tts_session.dart';
@@ -312,6 +313,20 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
     await _setRate(rate);
   }
 
+  /// 音色清单优先用接口 400 探测结果（缓存到本地）；失败保持内置兜底。
+  Future<void> _probeMimoVoices() async {
+    final settings = _tts.settings;
+    if (!settings.hasMimoApiKey) return;
+    try {
+      final voices = await MimoTtsClient().probeVoices(
+        apiKey: settings.mimoApiKey,
+      );
+      await settings.setMimoVoices(voices);
+    } catch (e) {
+      debugPrint('[tts:mimo] 音色探测失败，沿用内置清单：$e');
+    }
+  }
+
   /// 引擎与音色一体设置：选引擎不关闭弹窗，可接着挑音色。
   Future<void> _openEngineSheet() async {
     // 只读探测，不触碰正在朗读的系统引擎。
@@ -321,6 +336,8 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
       title: '朗读引擎与音色',
       scrollable: true,
       builder: (sheetContext, tokens) {
+        // 每次弹窗只探测一次 MiMo 音色（打开时或切到 MiMo 时）。
+        var mimoProbeStarted = false;
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             final scheme = Theme.of(ctx).colorScheme;
@@ -338,6 +355,8 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
                 await settings.setSystemVoice(id);
               } else if (kind == TtsEngineKind.doubao) {
                 await settings.setDoubaoVoice(id);
+              } else if (kind == TtsEngineKind.mimo) {
+                await settings.setMimoVoice(id);
               } else {
                 await settings.setEdgeVoice(id);
               }
@@ -392,9 +411,21 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
                   ...systemVoices,
                 ],
               TtsEngineKind.doubao => doubaoZhVoices,
+              TtsEngineKind.mimo => settings.mimoVoiceOptions,
               _ => edgeZhVoices,
             };
             final activeVoice = settings.activeVoice;
+
+            // 切到 MiMo 且尚无探测缓存时，后台探测一次可用音色并刷新列表。
+            if (!mimoProbeStarted &&
+                kind == TtsEngineKind.mimo &&
+                settings.hasMimoApiKey &&
+                !settings.hasCachedMimoVoices) {
+              mimoProbeStarted = true;
+              unawaited(_probeMimoVoices().whenComplete(() {
+                if (ctx.mounted) setSheetState(() {});
+              }));
+            }
 
             return Column(
               mainAxisSize: MainAxisSize.min,
@@ -416,6 +447,11 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
                   TtsEngineKind.doubao,
                   Icons.auto_awesome_outlined,
                   '需登录 Cookie，实验性引擎',
+                ),
+                engineItem(
+                  TtsEngineKind.mimo,
+                  Icons.record_voice_over_outlined,
+                  '小米 MiMo，内置多种音色',
                 ),
                 SizedBox(height: tokens.spaceSm),
                 Text(
@@ -439,6 +475,16 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
                     padding: EdgeInsets.only(bottom: tokens.spaceXs),
                     child: Text(
                       '尚未设置豆包 Cookie，请到「设置 → 听书」粘贴登录 Cookie 后再使用。',
+                      style: tokens.captionStyle.copyWith(
+                        color: scheme.error,
+                      ),
+                    ),
+                  ),
+                if (kind == TtsEngineKind.mimo && !settings.hasMimoApiKey)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: tokens.spaceXs),
+                    child: Text(
+                      '尚未配置 MiMo API Key，请到「设置 → 听书」填写后再使用。',
                       style: tokens.captionStyle.copyWith(
                         color: scheme.error,
                       ),

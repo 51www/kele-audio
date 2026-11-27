@@ -285,7 +285,7 @@ void main() {
     expect(store.pitch, closeTo(1.1, 1e-9));
   });
 
-  test('旧版 mimo/http 引擎回落 Edge 并清除残留 Key', () async {
+  test('mimo 引擎与 Key 正常保留，旧版 http 引擎回落 Edge', () async {
     final kv = MemoryKeyValueStore();
     await kv.setString(
       'tts_settings',
@@ -300,8 +300,35 @@ void main() {
 
     final store = TtsSettingsStore(kv);
     await store.load();
-    expect(store.engine, TtsEngineKind.edge);
-    expect(store.edgeVoice, 'zh-CN-YunxiNeural');
+    expect(store.engine, TtsEngineKind.mimo);
+    expect(store.mimoVoice, 'mimo_default');
+    expect(store.mimoApiKey, 'secret');
+    expect(kv.getString('mimo_api_key'), 'secret');
+
+    await kv.setString(
+      'tts_settings',
+      jsonEncode({'engine': 'http', 'edgeVoice': 'zh-CN-YunxiNeural'}),
+    );
+    final restored = TtsSettingsStore(kv);
+    await restored.load();
+    expect(restored.engine, TtsEngineKind.edge);
+  });
+
+  test('MiMo API Key 独立凭据 key 存取与掩码', () async {
+    final kv = MemoryKeyValueStore();
+    final store = TtsSettingsStore(kv);
+    await store.load();
+    expect(store.hasMimoApiKey, isFalse);
+
+    await store.setMimoApiKey('sk-1234567890abcd');
+    expect(store.hasMimoApiKey, isTrue);
+    expect(store.mimoApiKey, 'sk-1234567890abcd');
+    expect(kv.getString('mimo_api_key'), 'sk-1234567890abcd');
+    expect(store.maskedMimoKey, 'sk-1…abcd');
+    expect(store.maskedMimoKey.contains('1234567890'), isFalse);
+
+    await store.clearMimoApiKey();
+    expect(store.hasMimoApiKey, isFalse);
     expect(kv.getString('mimo_api_key'), isNull);
   });
 

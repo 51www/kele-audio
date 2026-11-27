@@ -41,6 +41,7 @@ import '../core/services/system/download_notification.dart';
 import '../core/services/tts/tts_engine.dart';
 import '../core/services/tts/tts_engine_doubao.dart';
 import '../core/services/tts/tts_engine_edge.dart';
+import '../core/services/tts/tts_engine_mimo.dart';
 import '../core/services/tts/tts_engine_system.dart';
 import '../core/services/tts/tts_session.dart';
 import '../core/services/tts/tts_settings_store.dart';
@@ -307,6 +308,10 @@ class AppServices {
         TtsEngineKind.edge => TtsEdgeEngine(),
         TtsEngineKind.doubao => TtsDoubaoEngine(
           cookieProvider: () => ttsSettings.doubaoCookie,
+        ),
+        TtsEngineKind.mimo => TtsMimoEngine(
+          apiKeyProvider: () => ttsSettings.mimoApiKey,
+          paramsProvider: () => ttsSettings.params,
         ),
       },
       // 息屏跨章续读兜底：WebView 冻结时直接解 book.epub 抽取新章段落。
