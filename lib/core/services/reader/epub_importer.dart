@@ -135,7 +135,7 @@ class EpubImporter {
   ) {
     final href = _coverHref(xml);
     if (href == null || href.isEmpty) return null;
-    final entry = _findEntry(archive, _resolveHref(opfPath, href));
+    final entry = findEntry(archive, resolveHref(opfPath, href));
     if (entry == null) return null;
     if (_imageExts.any(entry.name.toLowerCase().endsWith)) {
       return entry.content;
@@ -145,9 +145,9 @@ class EpubImporter {
       utf8.decode(entry.content, allowMalformed: true),
     );
     if (imageHref == null) return null;
-    final imageEntry = _findEntry(
+    final imageEntry = findEntry(
       archive,
-      _resolveHref(entry.name, imageHref),
+      resolveHref(entry.name, imageHref),
     );
     return imageEntry?.content;
   }
@@ -166,7 +166,7 @@ class EpubImporter {
     String? propertyCover;
     for (final match
         in RegExp(r'<item\b[^>]*>', caseSensitive: false).allMatches(xml)) {
-      final attrs = _attrs(match.group(0)!);
+      final attrs = parseAttrs(match.group(0)!);
       final id = attrs['id'];
       final href = attrs['href'];
       if (href == null) continue;
@@ -181,7 +181,7 @@ class EpubImporter {
     String? metaCover;
     for (final match
         in RegExp(r'<meta\b[^>]*>', caseSensitive: false).allMatches(xml)) {
-      final attrs = _attrs(match.group(0)!);
+      final attrs = parseAttrs(match.group(0)!);
       if ((attrs['name'] ?? '').toLowerCase() == 'cover') {
         metaCover = attrs['content'];
         break;
@@ -190,7 +190,7 @@ class EpubImporter {
     return propertyCover ?? hrefById[metaCover];
   }
 
-  static Map<String, String> _attrs(String tag) {
+  static Map<String, String> parseAttrs(String tag) {
     final result = <String, String>{};
     for (final match in RegExp(
       r'''([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')''',
@@ -202,7 +202,7 @@ class EpubImporter {
   }
 
   /// 把 OPF 内相对路径（含 `../`、百分号编码）解析成 ZIP 内的完整路径。
-  static String _resolveHref(String basePath, String href) {
+  static String resolveHref(String basePath, String href) {
     var ref = href.split('#').first.split('?').first;
     ref = ref.replaceAll('\\', '/');
     try {
@@ -226,7 +226,7 @@ class EpubImporter {
   }
 
   /// ZIP 条目查找：先精确匹配，再按文件名兜底（部分 EPUB 目录层级不规范）。
-  static ArchiveFile? _findEntry(Archive archive, String path) {
+  static ArchiveFile? findEntry(Archive archive, String path) {
     final wanted = path.toLowerCase();
     for (final file in archive.files) {
       if (file.isFile && file.name.toLowerCase() == wanted) return file;

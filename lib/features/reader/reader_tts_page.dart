@@ -122,7 +122,7 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
         final before = _tts.chapterIndex;
         await _tts.jumpChapter(item.index);
         if (!mounted || _tts.chapterIndex == before) return;
-        if (!_tts.readerBound) _showReaderHint();
+        if (!_tts.readerBound && !_tts.offlineTextAvailable) _showReaderHint();
       },
     );
   }
@@ -734,7 +734,9 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
                             color: scheme.onSurfaceVariant,
                           ),
                         ),
-                        if (count == 0 && !session.readerBound)
+                        if (count == 0 &&
+                            !session.readerBound &&
+                            !session.offlineTextAvailable)
                           Padding(
                             padding: EdgeInsets.only(top: tokens.spaceXs),
                             child: Text(
@@ -824,6 +826,7 @@ class _ReaderTtsPageState extends State<ReaderTtsPage> {
           playing: session.playing,
           onTap: () {
             if (!session.readerBound &&
+                !session.offlineTextAvailable &&
                 !session.playing &&
                 session.paragraphCount == 0) {
               // 没有阅读页就抽不出新章正文，直接引导回阅读页续读。

@@ -27,7 +27,9 @@ import '../core/services/player/media_bridge.dart';
 import '../core/services/player/playback_arbiter.dart';
 import '../core/services/player/player_service.dart';
 import '../core/services/player/progress_store.dart';
+import '../core/services/reader/book_file_store.dart';
 import '../core/services/reader/book_store.dart';
+import '../core/services/reader/epub_chapter_text.dart';
 import '../core/services/reader/reader_activity_store.dart';
 import '../core/services/reader/reader_annotation_store.dart';
 import '../core/services/reader/reader_import_service.dart';
@@ -307,6 +309,11 @@ class AppServices {
           cookieProvider: () => ttsSettings.doubaoCookie,
         ),
       },
+      // 息屏跨章续读兜底：WebView 冻结时直接解 book.epub 抽取新章段落。
+      fallbackText: EpubChapterText(
+        loadBytes: (bookId) =>
+            readReaderBookFile(bookId, ReaderImportService.bookFileName),
+      ),
     );
 
     // 下载档位跟随默认音质（封顶 192K 由 OfflineCacheService 收口）

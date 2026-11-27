@@ -9,6 +9,7 @@ import 'package:kele_audio/core/domain/reader_book.dart';
 import 'package:kele_audio/core/services/player/media_bridge.dart';
 import 'package:kele_audio/core/services/player/playback_arbiter.dart';
 import 'package:kele_audio/core/services/reader/book_store.dart';
+import 'package:kele_audio/core/services/reader/epub_chapter_text.dart';
 import 'package:kele_audio/core/services/reader/reader_activity_store.dart';
 import 'package:kele_audio/core/services/reader/reader_bridge.dart';
 import 'package:kele_audio/core/services/tts/doubao_cookie_pool.dart';
@@ -32,12 +33,18 @@ class _FakePort implements TtsReaderPort {
   /// 这些章的段落抽取模拟 WebView 不可用（锁屏冻结 / 渲染进程被杀）。
   Set<int> unavailableChapters = const {};
 
+  /// 这些章的段落抽取永不返回（模拟息屏期间 WebView eval 挂死）。
+  Set<int> hangChapters = const {};
+
   @override
   Future<int> currentChapter() async => chapter;
 
   @override
   Future<List<String>> paragraphsOf(int chapterIndex) async {
     chapter = chapterIndex;
+    if (hangChapters.contains(chapterIndex)) {
+      return Completer<List<String>>().future;
+    }
     if (unavailableChapters.contains(chapterIndex)) {
       throw const TtsReaderUnavailableException('WebView 不可用');
     }
@@ -212,14 +219,31 @@ class _BlockOnTextEngine implements TtsEngine {
   Future<void> dispose() async {}
 }
 
-ReaderBook _book() => ReaderBook(
+ReaderBook _book({int chapterCount = 2}) => ReaderBook(
       id: 'b1',
       title: '测试书',
       source: ReaderBookSource.localEpub,
       fileName: 'book.epub',
-      chapterCount: 2,
+      chapterCount: chapterCount,
       addedAt: DateTime(2026, 1, 1),
     );
+
+/// 离线正文兜底假件：模拟 EpubChapterText（可切换「书文件不可读」）。
+class _FakeChapterText implements TtsChapterTextSource {
+  _FakeChapterText(this.chapters);
+
+  final List<List<String>> chapters;
+  final List<int> requested = [];
+  bool broken = false;
+
+  @override
+  Future<List<String>> paragraphsOf(String bookId, int chapterIndex) async {
+    requested.add(chapterIndex);
+    if (broken) throw StateError('书籍文件不可读');
+    if (chapterIndex < 0 || chapterIndex >= chapters.length) return const [];
+    return chapters[chapterIndex];
+  }
+}
 
 void main() {
   test('TtsSettingsStore 持久化引擎/音色/语速', () async {
@@ -762,6 +786,261 @@ void main() {
     expect(engine.spoken, ['第一段', '第二段', '第二章甲', '第二章乙']);
     expect(session.chapterIndex, 1);
     await session.stop();
+    expect(session.active, isFalse);
+  });
+
+  test('息屏跨章：WebView 冻结时离线兜底续读，不再停在章边界', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    await settings.setEngine(TtsEngineKind.system);
+    final books = ReaderBookStore(kv);
+    await books.add(_book(chapterCount: 3));
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final engine = FakeTtsEngine();
+    final fallback = _FakeChapterText([
+      ['第一段', '第二段'],
+      ['第二章甲', '第二章乙'],
+      ['第三章甲', '第三章乙'],
+    ]);
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+      fallbackText: fallback,
+      portFetchTimeout: const Duration(milliseconds: 100),
+    );
+    final port = _FakePort([
+      ['第一段', '第二段'],
+      ['第二章甲', '第二章乙'],
+      ['第三章甲', '第三章乙'],
+    ]);
+    // 第 2 章起 WebView 冻结（锁屏），逐章抽取都不可用。
+    port.unavailableChapters = {1, 2};
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+    for (var i = 0; i < 60 && session.active; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    // 息屏后跨章不再停住：第 2/3 章直接从离线正文续读，整轮读完。
+    expect(session.error, isNull);
+    expect(engine.spoken, [
+      '第一段',
+      '第二段',
+      '第二章甲',
+      '第二章乙',
+      '第三章甲',
+      '第三章乙',
+    ]);
+    expect(fallback.requested, [1, 2]);
+    expect(session.active, isFalse);
+    expect(books.byId('b1')!.lastChapterIndex, 2);
+    expect(books.byId('b1')!.lastTtsParaIndex, 1);
+  });
+
+  test('息屏 WebView eval 挂死时取段超时转离线兜底续读', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    await settings.setEngine(TtsEngineKind.system);
+    final books = ReaderBookStore(kv);
+    await books.add(_book());
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final engine = FakeTtsEngine();
+    final fallback = _FakeChapterText([
+      ['第一段', '第二段'],
+      ['第二章甲', '第二章乙'],
+    ]);
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+      fallbackText: fallback,
+      portFetchTimeout: const Duration(milliseconds: 100),
+    );
+    final port = _FakePort([
+      ['第一段', '第二段'],
+      ['第二章甲', '第二章乙'],
+    ]);
+    // 第 2 章抽取永不返回：模拟息屏期间 WebView eval 挂死（旧实现会永远停住）。
+    port.hangChapters = {1};
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+    for (var i = 0; i < 80 && session.active; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    expect(session.error, isNull);
+    expect(engine.spoken, ['第一段', '第二段', '第二章甲', '第二章乙']);
+    expect(fallback.requested, [1]);
+    expect(session.active, isFalse);
+  });
+
+  test('离线兜底也不可用时仍暂停在当前章等待恢复', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    await settings.setEngine(TtsEngineKind.system);
+    final books = ReaderBookStore(kv);
+    await books.add(_book());
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final engine = FakeTtsEngine();
+    final fallback = _FakeChapterText([
+      ['第二章甲', '第二章乙'],
+    ])
+      ..broken = true;
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+      fallbackText: fallback,
+    );
+    final port = _FakePort([
+      ['第一段', '第二段'],
+      ['第二章甲', '第二章乙'],
+    ]);
+    port.unavailableChapters = {1};
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+    for (var i = 0; i < 60 && !session.paused; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    // 兜底源损坏（书文件缺失等）时退回旧语义：暂停在第 2 章等恢复，不误跳。
+    expect(engine.spoken, ['第一段', '第二段']);
+    expect(session.error, isNull);
+    expect(session.paused, isTrue);
+    expect(session.chapterIndex, 1);
+    expect(books.byId('b1')!.lastChapterIndex, 1);
+  });
+
+  test('关闭阅读页后离线兜底继续跨章续读（含跨章边界）', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    await settings.setEngine(TtsEngineKind.system);
+    final books = ReaderBookStore(kv);
+    await books.add(_book(chapterCount: 3));
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final engine = FakeTtsEngine();
+    final fallback = _FakeChapterText([
+      ['第一段', '第二段'],
+      ['第二章甲', '第二章乙'],
+      ['第三章甲', '第三章乙'],
+    ])
+      ..broken = true;
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+      fallbackText: fallback,
+      portFetchTimeout: const Duration(milliseconds: 100),
+    );
+    final port = _FakePort([
+      ['第一段', '第二段'],
+      ['第二章甲', '第二章乙'],
+      ['第三章甲', '第三章乙'],
+    ]);
+    port.unavailableChapters = {1, 2};
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+    for (var i = 0; i < 60 && !session.paused; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(engine.spoken, ['第一段', '第二段']);
+    expect(session.paused, isTrue);
+
+    // 关闭阅读页后恢复播放：新章正文走离线兜底，跨章边界也不再要求回阅读页。
+    fallback.broken = false;
+    session.unbindReader();
+    await session.resume();
+    for (var i = 0; i < 80 && session.active; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(session.error, isNull);
+    expect(engine.spoken, [
+      '第一段',
+      '第二段',
+      '第二章甲',
+      '第二章乙',
+      '第三章甲',
+      '第三章乙',
+    ]);
+    expect(session.active, isFalse);
+  });
+
+  test('WebView 误判空章时以离线正文为准，不跳过真章', () async {
+    final kv = MemoryKeyValueStore();
+    final settings = TtsSettingsStore(kv);
+    await settings.load();
+    await settings.setEngine(TtsEngineKind.system);
+    final books = ReaderBookStore(kv);
+    await books.add(_book());
+    final activity = ReaderActivityStore(kv);
+    await activity.load();
+    final engine = FakeTtsEngine();
+    final fallback = _FakeChapterText([
+      ['第一章甲', '第一章乙'],
+      ['第二章正文'],
+    ]);
+    final session = TtsSession(
+      settings: settings,
+      books: books,
+      activity: activity,
+      arbiter: PlaybackArbiter(media: NoopMediaBridge()),
+      engineFactory: (_) => engine,
+      fallbackText: fallback,
+    );
+    final port = _FakePort([
+      const [], // 换章过渡期误判空章
+      ['第二章正文'],
+    ]);
+    session.bindReader(
+      book: books.byId('b1')!,
+      port: port,
+      chapterTitleOf: (i) => '第${i + 1}章',
+    );
+
+    await session.start(chapterIndex: 0, paraIndex: 0, fromBookmark: false);
+    for (var i = 0; i < 60 && session.active; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    expect(engine.spoken, ['第一章甲', '第一章乙', '第二章正文']);
+    expect(fallback.requested, [0]);
     expect(session.active, isFalse);
   });
 

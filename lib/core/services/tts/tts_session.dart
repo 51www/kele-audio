@@ -7,6 +7,7 @@ import '../player/audio_focus.dart';
 import '../player/media_bridge.dart';
 import '../player/playback_arbiter.dart';
 import '../reader/book_store.dart';
+import '../reader/epub_chapter_text.dart';
 import '../reader/reader_activity_store.dart';
 import '../reader/reader_bridge.dart';
 import 'tts_engine.dart';
@@ -69,6 +70,9 @@ class TtsSession extends ChangeNotifier {
     required this.arbiter,
     required this.engineFactory,
     this.focus,
+    this.fallbackText,
+    this.portFetchTimeout = const Duration(seconds: 5),
+    this.portCallTimeout = const Duration(seconds: 3),
   }) {
     arbiter.registerTts(
       bind: _bindMediaControls,
@@ -85,6 +89,16 @@ class TtsSession extends ChangeNotifier {
 
   /// 可注入用于单测；默认使用全局原生焦点通道。
   final AudioFocus? focus;
+
+  /// 离线章节正文兜底：WebView 冻结/关闭时跨章续读的关键（缺省 null = 无兜底）。
+  final TtsChapterTextSource? fallbackText;
+
+  /// 阅读页取段超时（测试可注入缩短）：超时即转离线兜底，
+  /// 不再空等 WebView 内部 10s 抽取 deadline（息屏冻结时 eval 可能永不返回）。
+  final Duration portFetchTimeout;
+
+  /// 阅读页高亮/清高亮调用超时（测试可注入缩短）：冻结时跳过高亮，不拖住朗读。
+  final Duration portCallTimeout;
 
   TtsReaderPort? _port;
   ReaderBook? _book;
@@ -170,6 +184,9 @@ class TtsSession extends ChangeNotifier {
 
   /// 阅读页是否仍挂载（关闭阅读页后无法抽取新章节正文）。
   bool get readerBound => _port != null;
+
+  /// 是否有离线正文兜底：有则息屏冻结/关闭阅读页时也能跨章续读。
+  bool get offlineTextAvailable => fallbackText != null && _bookId != null;
 
   /// 章节目录文案（缺省时调用方回退「第 N 章」）。
   List<String> get chapterLabels => _chapterLabels;
@@ -314,8 +331,9 @@ class TtsSession extends ChangeNotifier {
     if (!_active) return;
     if (!_paused && _playing) return;
     if (_port == null &&
+        !offlineTextAvailable &&
         (_paragraphsChapter != _chapterIndex || _paragraphs.isEmpty)) {
-      // 没有阅读页、也没有本章正文缓存：无法抽取新章，保持暂停，
+      // 没有阅读页、没有离线兜底、也没有本章正文缓存：无法抽取新章，保持暂停，
       // 由播放页提示「回到阅读页继续」（bindReader 会从 pendingChapter 续读）。
       _pendingChapter = _chapterIndex;
       _paused = true;
@@ -422,7 +440,7 @@ class TtsSession extends ChangeNotifier {
     _paragraphs = const [];
     _paragraphsChapter = -1;
     _engine?.resetCache();
-    if (_port == null) {
+    if (_port == null && !offlineTextAvailable) {
       _pendingChapter = index;
       if (!_paused) await pause();
       await _saveBookmark(book: book, chapter: index, para: 0, chapterCount: 0);
@@ -663,8 +681,8 @@ class TtsSession extends ChangeNotifier {
     _paraIndex = 0;
     _startChar = 0;
     _engine?.resetCache();
-    if (_port == null) {
-      // 阅读页已关闭：无法抽取新章正文，等回到阅读页再续读。
+    if (_port == null && !offlineTextAvailable) {
+      // 阅读页已关闭且无离线兜底：无法抽取新章正文，等回到阅读页再续读。
       _pendingChapter = next;
       _paused = true;
       _playing = false;
@@ -725,6 +743,49 @@ class TtsSession extends ChangeNotifier {
 
   // ---------------------------------------------------------------- 朗读主循环
 
+  /// 取章节段落：阅读页 WebView 优先；冻结/挂死/超时/抽取失败时转离线 EPUB 兜底。
+  ///
+  /// 这是息屏跨章续读的关键路径：锁屏期间 WebView 渲染被冻结，章节抽取会
+  /// 超时甚至挂死（eval 永不返回），只依赖 WebView 就会在章边界停住。
+  /// 两者都拿不到时抛 [TtsReaderUnavailableException]，由 [_run] 暂停等待恢复，
+  /// 绝不能返回空列表冒充「真空章」导致逐章连跳写坏断点。
+  Future<List<String>> _fetchChapterParagraphs(int chapter) async {
+    final port = _port;
+    final fallback = fallbackText;
+    final bookId = _bookId;
+    var portEmpty = false;
+    Object? portError;
+    if (port != null) {
+      try {
+        final list =
+            await port.paragraphsOf(chapter).timeout(portFetchTimeout);
+        if (list.isNotEmpty) return list;
+        // WebView 判定空章：再让离线抽取核对一次，防止换章过渡期误判
+        // 空章把真章跳过；离线也为空才按真空章处理。
+        portEmpty = true;
+      } catch (e) {
+        // WebView 冻结/挂死/抽取异常：落到离线兜底（息屏跨章续读）。
+        portError = e;
+      }
+    }
+    if (fallback != null && bookId != null) {
+      try {
+        return await fallback.paragraphsOf(bookId, chapter);
+      } catch (e) {
+        if (portEmpty) return const [];
+        throw TtsReaderUnavailableException('离线章节正文不可用：$e');
+      }
+    }
+    if (portEmpty) return const [];
+    if (portError is TtsReaderUnavailableException) {
+      throw portError;
+    }
+    if (portError != null) {
+      throw TtsReaderUnavailableException('章节正文抽取失败：$portError');
+    }
+    throw const TtsReaderUnavailableException('无法获取章节正文');
+  }
+
   Future<void> _run(int runId, int chapter, int para, int startChar) async {
     final book = _book;
     if (book == null) return;
@@ -736,26 +797,29 @@ class TtsSession extends ChangeNotifier {
         // 每章重新读取：朗读过程中阅读页可能挂载/关闭。
         final port = _port;
         List<String> list;
-        if (port != null) {
+        if (port == null &&
+            _paragraphsChapter == chapter &&
+            _paragraphs.isNotEmpty) {
+          // 阅读页关闭后优先沿用已缓存的当前章。
+          list = _paragraphs;
+        } else {
           _beginNavigate();
           try {
-            try {
-              list = await port.paragraphsOf(chapter);
-            } on TtsReaderUnavailableException {
-              // 阅读页 WebView 暂时不可用（锁屏冻结 / 渲染进程被杀）：
-              // 留在当前章暂停等待恢复，等 bindReader/播放键回来续读。
-              // 绝不能当「空章」往下跳，否则无朗读也连跳几十章并写坏断点。
-              if (!_active || runId != _runId) return;
-              _chapterIndex = chapter;
-              _pendingChapter = chapter;
-              _playing = false;
-              _paused = true;
-              await _accumulate();
-              _playStartedAt = null;
-              _publishMedia();
-              notifyListeners();
-              return;
-            }
+            list = await _fetchChapterParagraphs(chapter);
+          } on TtsReaderUnavailableException {
+            // WebView 与离线兜底都取不到正文（锁屏冻结且书文件缺失等）：
+            // 留在当前章暂停等待恢复，等 bindReader/播放键回来续读。
+            // 绝不能当「空章」往下跳，否则无朗读也连跳几十章并写坏断点。
+            if (!_active || runId != _runId) return;
+            _chapterIndex = chapter;
+            _pendingChapter = chapter;
+            _playing = false;
+            _paused = true;
+            await _accumulate();
+            _playStartedAt = null;
+            _publishMedia();
+            notifyListeners();
+            return;
           } finally {
             _endNavigate();
           }
@@ -785,21 +849,6 @@ class TtsSession extends ChangeNotifier {
           emptySkips = 0;
           _paragraphs = list;
           _paragraphsChapter = chapter;
-        } else {
-          // 阅读页关闭后无法抽取段落：仅能续读已缓存的当前章，
-          // 跨章需回阅读页载入正文（由 bindReader 的 pendingChapter 续读）。
-          if (_paragraphsChapter != chapter || _paragraphs.isEmpty) {
-            _chapterIndex = chapter;
-            _pendingChapter = chapter;
-            _playing = false;
-            _paused = true;
-            await _accumulate();
-            _playStartedAt = null;
-            _publishMedia();
-            notifyListeners();
-            return;
-          }
-          list = _paragraphs;
         }
         var index = para;
         if (index == 9999) index = list.length - 1;
@@ -1062,12 +1111,14 @@ class TtsSession extends ChangeNotifier {
     if (port == null) return;
     _beginNavigate();
     try {
-      await port.highlight(
-        index,
-        scroll: scroll,
-        startChar: startChar,
-        endChar: endChar,
-      );
+      await port
+          .highlight(
+            index,
+            scroll: scroll,
+            startChar: startChar,
+            endChar: endChar,
+          )
+          .timeout(portCallTimeout);
     } catch (e) {
       debugPrint('[tts] 高亮失败：$e');
     } finally {
@@ -1077,7 +1128,7 @@ class TtsSession extends ChangeNotifier {
 
   Future<void> _clearHighlight() async {
     try {
-      await _port?.clearHighlight();
+      await _port?.clearHighlight().timeout(portCallTimeout);
     } catch (_) {}
   }
 
